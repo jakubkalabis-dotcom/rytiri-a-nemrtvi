@@ -151,12 +151,12 @@ function netDispatch(m) {
 }
 function netHandleCmd(m) {
   switch (m.act) {
-    case 'buyweapon': buyWeapon(m.id); break;
-    case 'buyammo': buyAmmo(m.id); break;
-    case 'buybuild': buyBuild(m.id); break;
-    case 'upstat': buyUpgrade(m.id); break;
-    case 'upweapon': buyWeaponUp(m.id); break;
-    case 'buylife': if (run.gems >= 40) { run.gems -= 40; run.lives += 5; sfx.buy(); renderShop(); } break;
+    case 'buyweapon': buyWeapon(m.id, players[1]); break;
+    case 'buyammo': buyAmmo(m.id, players[1]); break;
+    case 'buybuild': buyBuild(m.id, players[1]); break;
+    case 'upstat': buyUpgrade(m.id, players[1]); break;
+    case 'upweapon': buyWeaponUp(m.id, players[1]); break;
+    case 'buylife': buyLife(players[1]); break;
     case 'tobuild': startBuildPhase(); break;
     case 'toshop': setState('shop'); break;
     case 'cycle': cycleWeapon(players[1]); break;
@@ -164,7 +164,7 @@ function netHandleCmd(m) {
     case 'ready': readyGuest = true; if (readyHost) { startWave(); } break;
     case 'unready': readyGuest = false; break;
     case 'place': { const prev = buildSel; buildSel = m.sel; placeAt(m.tx, m.ty); buildSel = prev; break; }
-    case 'sell': sellAt(m.tx, m.ty); break;
+    case 'sell': sellAt(m.tx, m.ty, players[1]); break;
   }
   netPush(); // po změně stavu okamžitě sesynchronizuj guesta
 }
@@ -175,11 +175,11 @@ function netHandleCmd(m) {
 function serializeState() {
   const snap = {
     st: state, map: currentMap,
-    run: run && { gems: run.gems, lives: run.lives, wave: run.wave, score: run.score || 0, ownedWeapons: run.ownedWeapons, ammo: run.ammo, owned: run.owned, upgrades: run.upgrades, wUpgrades: run.wUpgrades, combo: run.combo || 0, comboT: run.comboT || 0 },
+    run: run && { lives: run.lives, wave: run.wave, score: run.score || 0, ownedWeapons: run.ownedWeapons, ammo: run.ammo, owned: run.owned, upgrades: run.upgrades, wUpgrades: run.wUpgrades, combo: run.combo || 0, comboT: run.comboT || 0 },
     wave: wave && { boss: wave.boss, spawned: wave.spawned, total: wave.total, reward: wave.reward },
     banner: banner && { text: banner.text, t: banner.t, warn: banner.warn },
     readyHost, readyGuest, freezeTimer,
-    players: players.map(p => ({ x: p.x, y: p.y, r: p.r, hp: p.hp, hpMax: p.hpMax, aimAngle: p.aimAngle, inv: p.inv, downed: p.downed, classId: p.classId, color: p.color, weaponId: p.weaponId, mana: p.mana, manaMax: p.manaMax, walk: p.walk || 0, buffRapid: p.buffRapid || 0, buffPower: p.buffPower || 0, shieldT: p.shieldT || 0, rageT: p.rageT || 0, abilityCd: p.abilityCd || 0 })),
+    players: players.map(p => ({ x: p.x, y: p.y, r: p.r, hp: p.hp, hpMax: p.hpMax, gems: p.gems || 0, aimAngle: p.aimAngle, inv: p.inv, downed: p.downed, classId: p.classId, color: p.color, weaponId: p.weaponId, mana: p.mana, manaMax: p.manaMax, walk: p.walk || 0, buffRapid: p.buffRapid || 0, buffPower: p.buffPower || 0, shieldT: p.shieldT || 0, rageT: p.rageT || 0, abilityCd: p.abilityCd || 0 })),
     enemies: enemies.map(e => ({ x: e.x, y: e.y, r: e.r, hp: e.hp, hpMax: e.hpMax, flash: e.flash, arch: e.arch, color: e.color, typeId: e.typeId, elite: e.elite, spawnT: e.spawnT })),
     bullets: bullets.map(b => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, r: b.r, color: b.color, thrown: b.thrown, magic: b.magic, ang: b.ang, crit: b.crit })),
     eBullets: eBullets.map(b => ({ x: b.x, y: b.y, r: b.r, color: b.color })),
@@ -197,7 +197,7 @@ function serializeState() {
 }
 
 // Podpis ekonomiky pro rozhodnutí, kdy překreslit obchod na guestovi.
-function shopSig(r) { return r ? r.gems + '|' + r.lives + '|' + (r.ownedWeapons ? r.ownedWeapons.length : 0) + '|' + JSON.stringify(r.owned) + '|' + JSON.stringify(r.ammo) + '|' + JSON.stringify(r.upgrades) + '|' + JSON.stringify(r.wUpgrades) : ''; }
+function shopSig(r) { return r ? meGems() + '|' + r.lives + '|' + (r.ownedWeapons ? r.ownedWeapons.length : 0) + '|' + JSON.stringify(r.owned) + '|' + JSON.stringify(r.ammo) + '|' + JSON.stringify(r.upgrades) + '|' + JSON.stringify(r.wUpgrades) : ''; }
 let lastShopSig = '';
 
 function applyState(s) {
@@ -237,7 +237,7 @@ function applyState(s) {
 // Guest vytvoří lokální efekt/zvuk podle události od hostitele.
 function guestEvent(ev) {
   if (ev.k === 'hit') { spawnFloater(ev.x, ev.y, ev.d, !!ev.c); burst(ev.x, ev.y, '#ffd0d0', ev.c ? 6 : 3); sfx.hitFlesh(); }
-  else if (ev.k === 'die') { explode(ev.x, ev.y, ev.color, ev.big ? 28 : 12); spawnDecal(ev.x, ev.y, ev.big ? 24 : 12); sfx.enemyDie(); shake = Math.min(9, shake + (ev.big ? 5 : 1.2)); }
+  else if (ev.k === 'die') { zombieDeath(ev.x, ev.y, ev.color, ev.big, ev.s || 0); shake = Math.min(9, shake + (ev.big ? 5 : 1.2)); }
   else if (ev.k === 'freeze') { flash = 0.2; sfx.magic(); }
   else if (ev.k === 'pick') { burst(ev.x, ev.y, ev.color, 14); sfx.heal(); }
   else if (ev.k === 'ability') { sfx.buy(); }

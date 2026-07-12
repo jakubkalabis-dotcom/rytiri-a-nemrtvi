@@ -19,6 +19,9 @@ let readyHost = false, readyGuest = false;
 const myInput = { mx: 0, my: 0, aiming: false, aimAngle: -Math.PI / 2 };
 function localPlayer() { return net.role === 'guest' ? players[1] : players[0]; }
 function isCoop() { return net.role === 'host' || net.role === 'guest'; }
+// Gemy jsou per-hráč: kill/odměna dostanou VŠICHNI, každý utrácí své.
+function meGems() { const p = localPlayer(); return p ? (p.gems || 0) : 0; }
+function creditAll(n) { for (const q of players) q.gems = (q.gems || 0) + n; }
 // Nejlepší pasiva napříč týmem (vyšší = lepší, např. warriorBuff)
 function teamMax(key) { let m = 0; for (const p of players) { const v = (p.passive && p.passive[key]) || 0; if (v > m) m = v; } return m; }
 // Nejlepší „rate" pasiva (nižší = rychlejší, např. emitterRate)
@@ -61,8 +64,7 @@ function newRun(classIds) {
   const first = CLASSES[classIds[0]];
   run = {
     classId: classIds[0], class: first,
-    gems: classIds.reduce((s, cid) => s + CLASSES[cid].startGems, 0), // sdílený rozpočet
-    lives: 20,
+    lives: 20,   // gemy jsou nově per-hráč (viz makePlayer)
     wave: 0,
     ownedWeapons: [],
     ammo: {},
@@ -95,7 +97,7 @@ function makePlayer(cls, classId) {
   const baseHp = Math.round(120 * cls.hpMod);
   const hpMax = Math.round(baseHp * (1 + 0.12 * ((run.upgrades && run.upgrades.hp) || 0)));
   return {
-    classId, class: cls, color: cls.color,
+    classId, class: cls, color: cls.color, gems: cls.startGems,   // vlastní peněženka
     x: (CORE.tx + CORE.w / 2) * TILE, y: (CORE.ty - 1) * TILE, r: 12,
     baseHp, hpMax, hp: hpMax,
     baseSpeed: 2.6 * cls.spdMod * (pas.moveSpeed || 1),
@@ -185,7 +187,7 @@ let shopTab = 'shop';
 function refreshShop() { if (state === 'shop') renderShop(); lastShopSig = typeof shopSig === 'function' ? shopSig(run) : ''; }
 function shopHeader() {
   return `<h2>${shopTab === 'char' ? 'Postava' : 'Obchod'} · vlna ${run.wave + 1}</h2>
-    <div class="wallet">💎 ${run.gems} &nbsp; ❤ ${run.lives} &nbsp; 🏰 ${players.map(p => p.class.name).join(' + ')}</div>
+    <div class="wallet">💎 ${meGems()} &nbsp; ❤ ${run.lives} &nbsp; 🏰 ${players.map(p => p.class.name).join(' + ')}</div>
     <div class="tabs">
       <button data-act="tab" data-id="shop" class="tab ${shopTab === 'shop' ? 'on' : ''}">🛒 Obchod</button>
       <button data-act="tab" data-id="char" class="tab ${shopTab === 'char' ? 'on' : ''}">🧙 Postava</button>
@@ -202,7 +204,7 @@ function renderShopTab() {
     const w = WEAPONS[id];
     const locked = lvl < w.unlock;
     const cost = costOf(w.cost, w.cat === 'melee' ? 'melee' : 'ranged');
-    const cant = locked ? `🔒 úroveň ${w.unlock}` : (run.gems < cost ? 'málo 💎' : null);
+    const cant = locked ? `🔒 úroveň ${w.unlock}` : (meGems() < cost ? 'málo 💎' : null);
     return shopCard(id, `${ico('weapon', id)} ${w.name}`, cost, null, `dmg ${w.dmg} · ${w.cat === 'melee' ? 'zblízka' : 'dálka'}`, 'buyweapon', cant);
   }).join('');
   // Vlastněné zbraně + vylepšení
@@ -210,14 +212,14 @@ function renderShopTab() {
     const w = WEAPONS[id]; const wl = run.wUpgrades[id] || 0;
     const maxed = wl >= WEAPON_UP_MAX; const cost = weaponUpCost(w, wl);
     const extra = `Lv.${wl} · dmg ${Math.round(w.dmg * (1 + 0.1 * wl))}`;
-    return shopCard(id, `${ico('weapon', id)} ${w.name}`, cost, null, extra, 'upweapon', maxed ? 'MAX' : (run.gems < cost ? 'málo 💎' : '⬆ ' + cost));
+    return shopCard(id, `${ico('weapon', id)} ${w.name}`, cost, null, extra, 'upweapon', maxed ? 'MAX' : (meGems() < cost ? 'málo 💎' : '⬆ ' + cost));
   }).join('');
-  const ammoCards = Object.keys(AMMO).map(id => { const a = AMMO[id], cost = costOf(a.cost, 'ammo'); return shopCard(id, `🎯 ${a.name}`, cost, 'ammo', `+${a.bundle} · máš ${run.ammo[id] || 0}`, 'buyammo', run.gems < cost ? 'málo 💎' : null); }).join('');
+  const ammoCards = Object.keys(AMMO).map(id => { const a = AMMO[id], cost = costOf(a.cost, 'ammo'); return shopCard(id, `🎯 ${a.name}`, cost, 'ammo', `+${a.bundle} · máš ${run.ammo[id] || 0}`, 'buyammo', meGems() < cost ? 'málo 💎' : null); }).join('');
   const lifeCost = 40;
-  const lifeCard = shopCard('life', '❤ Život brány (+5)', lifeCost, 'ammo', `jádro: ${run.lives}`, 'buylife', run.gems < lifeCost ? 'málo 💎' : null);
-  const trapCards = Object.keys(TRAPS).map(id => { const t = TRAPS[id], cost = costOf(t.cost, 'trap'); return shopCard(id, `${ico('trap', id)} ${t.name}`, cost, 'trap', `máš ${run.owned[id] || 0}`, 'buybuild', run.gems < cost ? 'málo 💎' : null); }).join('');
-  const wallCards = Object.keys(STRUCTURES).map(id => { const s = STRUCTURES[id], cost = costOf(s.cost, 'wall'); return shopCard(id, `${ico('wall', id)} ${s.name}`, cost, 'wall', `HP ${Math.round(s.hp * (teamMax('wallHp') || 1))} · máš ${run.owned[id] || 0}`, 'buybuild', run.gems < cost ? 'málo 💎' : null); }).join('');
-  const warCards = Object.keys(WARRIORS).map(id => { const w = WARRIORS[id], cost = costOf(w.cost, 'warrior'); return shopCard(id, `${ico('warrior', id)} ${w.name}`, cost, 'warrior', `HP ${w.hp} · máš ${run.owned[id] || 0}`, 'buybuild', run.gems < cost ? 'málo 💎' : null); }).join('');
+  const lifeCard = shopCard('life', '❤ Život brány (+5)', lifeCost, 'ammo', `jádro: ${run.lives}`, 'buylife', meGems() < lifeCost ? 'málo 💎' : null);
+  const trapCards = Object.keys(TRAPS).map(id => { const t = TRAPS[id], cost = costOf(t.cost, 'trap'); return shopCard(id, `${ico('trap', id)} ${t.name}`, cost, 'trap', `máš ${run.owned[id] || 0}`, 'buybuild', meGems() < cost ? 'málo 💎' : null); }).join('');
+  const wallCards = Object.keys(STRUCTURES).map(id => { const s = STRUCTURES[id], cost = costOf(s.cost, 'wall'); return shopCard(id, `${ico('wall', id)} ${s.name}`, cost, 'wall', `HP ${Math.round(s.hp * (teamMax('wallHp') || 1))} · máš ${run.owned[id] || 0}`, 'buybuild', meGems() < cost ? 'málo 💎' : null); }).join('');
+  const warCards = Object.keys(WARRIORS).map(id => { const w = WARRIORS[id], cost = costOf(w.cost, 'warrior'); return shopCard(id, `${ico('warrior', id)} ${w.name}`, cost, 'warrior', `HP ${w.hp} · máš ${run.owned[id] || 0}`, 'buybuild', meGems() < cost ? 'málo 💎' : null); }).join('');
   return `<div class="shop">
       ${ownedCards ? `<h3>Vylepšit zbraně</h3><div class="grid">${ownedCards}</div>` : ''}
       <h3>Nové zbraně</h3><div class="grid">${weaponCards || '<div class="empty">Vše koupeno</div>'}</div>
@@ -246,7 +248,7 @@ function renderCharTab() {
   const upCards = Object.keys(UPGRADES).map(k => {
     const def = UPGRADES[k]; const lv = up[k] || 0; const maxed = lv >= UPGRADE_MAX; const cost = upgradeCost(def, lv);
     const bars = '▮'.repeat(lv) + '▯'.repeat(UPGRADE_MAX - lv);
-    return `<div class="card up-card ${maxed || run.gems < cost ? 'dis' : ''}" ${maxed ? '' : `data-act="upstat" data-id="${k}"`}>
+    return `<div class="card up-card ${maxed || meGems() < cost ? 'dis' : ''}" ${maxed ? '' : `data-act="upstat" data-id="${k}"`}>
       <div class="scn" style="color:${def.color}">${def.icon} ${def.name}</div>
       <div class="scd">${def.unit}</div>
       <div class="upbar">${bars}</div>
@@ -255,19 +257,19 @@ function renderCharTab() {
   }).join('');
   return `${statBlock}<h3>Vylepšit staty (Lv. max ${UPGRADE_MAX})</h3><div class="grid">${upCards}</div>`;
 }
-function buyUpgrade(stat) {
-  const def = UPGRADES[stat]; if (!def) return;
+function buyUpgrade(stat, p) {
+  p = p || localPlayer(); const def = UPGRADES[stat]; if (!def) return;
   const lvl = run.upgrades[stat] || 0; if (lvl >= UPGRADE_MAX) return;
-  const cost = upgradeCost(def, lvl); if (run.gems < cost) return;
-  run.gems -= cost; run.upgrades[stat] = lvl + 1;
+  const cost = upgradeCost(def, lvl); if (p.gems < cost) return;
+  p.gems -= cost; run.upgrades[stat] = lvl + 1;
   if (stat === 'hp') for (const q of players) { const nm = Math.round(q.baseHp * (1 + 0.12 * run.upgrades.hp)); q.hp += nm - q.hpMax; q.hpMax = nm; }
   sfx.buy(); refreshShop();
 }
-function buyWeaponUp(id) {
-  const w = WEAPONS[id]; if (!w || !run.ownedWeapons.includes(id)) return;
+function buyWeaponUp(id, p) {
+  p = p || localPlayer(); const w = WEAPONS[id]; if (!w || !run.ownedWeapons.includes(id)) return;
   const lvl = run.wUpgrades[id] || 0; if (lvl >= WEAPON_UP_MAX) return;
-  const cost = weaponUpCost(w, lvl); if (run.gems < cost) return;
-  run.gems -= cost; run.wUpgrades[id] = lvl + 1; sfx.buy(); refreshShop();
+  const cost = weaponUpCost(w, lvl); if (p.gems < cost) return;
+  p.gems -= cost; run.wUpgrades[id] = lvl + 1; sfx.buy(); refreshShop();
 }
 
 function renderRoundEnd() {
@@ -327,15 +329,17 @@ overlay.addEventListener('click', e => {
     return;
   }
   // --- host / solo ---
-  if (act === 'buyweapon') buyWeapon(id);
-  else if (act === 'buyammo') buyAmmo(id);
-  else if (act === 'buybuild') buyBuild(id);
-  else if (act === 'upstat') buyUpgrade(id);
-  else if (act === 'upweapon') buyWeaponUp(id);
-  else if (act === 'buylife') { if (run.gems >= 40) { run.gems -= 40; run.lives += 5; sfx.buy(); refreshShop(); } }
+  const me = localPlayer();
+  if (act === 'buyweapon') buyWeapon(id, me);
+  else if (act === 'buyammo') buyAmmo(id, me);
+  else if (act === 'buybuild') buyBuild(id, me);
+  else if (act === 'upstat') buyUpgrade(id, me);
+  else if (act === 'upweapon') buyWeaponUp(id, me);
+  else if (act === 'buylife') buyLife(me);
   else if (act === 'tobuild') { startBuildPhase(); }
   else if (act === 'toshop') { setState('shop'); }
 });
+function buyLife(p) { p = p || localPlayer(); if (p.gems >= 40) { p.gems -= 40; run.lives += 5; sfx.buy(); refreshShop(); } }
 
 // Výběr třídy (solo i co-op)
 function pickClass(id) {
@@ -357,24 +361,24 @@ function startCoop() {
   if (typeof netPush === 'function') netPush();
 }
 
-function buyWeapon(id) {
-  const w = WEAPONS[id];
+function buyWeapon(id, p) {
+  p = p || localPlayer(); const w = WEAPONS[id];
   if (profile.playerLevel < w.unlock) return;
   const cost = costOf(w.cost, w.cat === 'melee' ? 'melee' : 'ranged');
-  if (run.gems < cost) return;
-  run.gems -= cost; run.ownedWeapons.push(id); grantAmmoFor(id, 2);
-  sfx.buy(); renderShop();
+  if (p.gems < cost || run.ownedWeapons.includes(id)) return;
+  p.gems -= cost; run.ownedWeapons.push(id); grantAmmoFor(id, 2);
+  sfx.buy(); refreshShop();
 }
-function buyAmmo(id) {
-  const cost = costOf(AMMO[id].cost, 'ammo');
-  if (run.gems < cost) return;
-  run.gems -= cost; run.ammo[id] += AMMO[id].bundle; sfx.buy(); renderShop();
+function buyAmmo(id, p) {
+  p = p || localPlayer(); const cost = costOf(AMMO[id].cost, 'ammo');
+  if (p.gems < cost) return;
+  p.gems -= cost; run.ammo[id] += AMMO[id].bundle; sfx.buy(); refreshShop();
 }
-function buyBuild(id) {
-  const def = TRAPS[id] || STRUCTURES[id] || WARRIORS[id];
+function buyBuild(id, p) {
+  p = p || localPlayer(); const def = TRAPS[id] || STRUCTURES[id] || WARRIORS[id];
   const cost = costOf(def.cost, def.cat);
-  if (run.gems < cost) return;
-  run.gems -= cost; run.owned[id] = (run.owned[id] || 0) + 1; sfx.buy(); renderShop();
+  if (p.gems < cost) return;
+  p.gems -= cost; run.owned[id] = (run.owned[id] || 0) + 1; sfx.buy(); refreshShop();
 }
 
 /* ============================================================================
@@ -434,24 +438,25 @@ function placeAt(tx, ty) {
   sfx.place();
   if (navigator.vibrate && profile.settings.haptics) navigator.vibrate(15);
 }
-function sellAt(tx, ty) {
+function sellAt(tx, ty, seller) {
+  seller = seller || localPlayer();
   const i = tileIndex(tx, ty);
   // struktura/věž
   const s = grid.structures[i];
   if (s) {
     grid.structures[i] = null;
     walls = walls.filter(w => w !== s); turrets = turrets.filter(w => w !== s);
-    refund(s.defId); flowDirty = true; return true;
+    refund(s.defId, seller); flowDirty = true; return true;
   }
   const ti = traps.findIndex(t => t.tx === tx && t.ty === ty);
-  if (ti >= 0) { refund(traps[ti].defId); traps.splice(ti, 1); return true; }
+  if (ti >= 0) { refund(traps[ti].defId, seller); traps.splice(ti, 1); return true; }
   const wi = warriors.findIndex(w => Math.floor(w.x / TILE) === tx && Math.floor(w.y / TILE) === ty);
-  if (wi >= 0) { refund(warriors[wi].defId); warriors.splice(wi, 1); return true; }
+  if (wi >= 0) { refund(warriors[wi].defId, seller); warriors.splice(wi, 1); return true; }
   return false;
 }
-function refund(id) {
+function refund(id, seller) {
   const def = defOf(id);
-  run.gems += Math.round(costOf(def.cost, def.cat) * 0.5);
+  (seller || localPlayer()).gems += Math.round(costOf(def.cost, def.cat) * 0.5);
   sfx.buy();
 }
 
@@ -462,25 +467,25 @@ function startWave() {
   run.wave++;
   const wv = run.wave;
   const boss = isBossWave(wv);
+  const horde = !boss && isHordeWave(wv);
   const queue = [];
   let bossId = null;
   if (boss) {
     bossId = bossForWave(wv);
     queue.push(bossId);
-    const minions = 6 + wv;
     const comp = waveComposition(wv);
-    for (let k = 0; k < minions; k++) queue.push(pickWeighted(comp));
+    for (let k = 0; k < 6 + wv; k++) queue.push(pickWeighted(comp));
   } else {
-    const comp = waveComposition(wv);
-    const n = waveCount(wv);
-    for (let k = 0; k < n; k++) queue.push(pickWeighted(comp));
+    const comp = horde ? hordeComposition(wv) : waveComposition(wv);
+    for (let k = 0, n = waveCount(wv); k < n; k++) queue.push(pickWeighted(comp));
   }
-  wave = { queue, spawned: 0, total: queue.length, spawnCool: 20, boss,
-           kills: 0, reward: { gems: 0, kills: 0, xp: 0 } };
+  wave = { queue, spawned: 0, total: queue.length, spawnCool: 20, boss, horde,
+           interval: horde ? 8 : null, kills: 0, reward: { gems: 0, kills: 0, xp: 0 } };
   flowDirty = true;
   setState('combat');
-  banner = { text: boss ? '⚠ BOSS: ' + ENEMIES[bossId].name.toUpperCase() + ' ⚠' : 'VLNA ' + wv, t: 110, warn: boss };
-  if (boss) sfx.boss(); else sfx.waveStart();
+  banner = boss ? { text: '⚠ BOSS: ' + ENEMIES[bossId].name.toUpperCase() + ' ⚠', t: 110, warn: true }
+    : (horde ? { text: '🧟 HORDA! VLNA ' + wv, t: 120, warn: true } : { text: 'VLNA ' + wv, t: 110 });
+  if (boss) sfx.boss(); else if (horde) { sfx.groan(); sfx.waveStart(); } else sfx.waveStart();
 }
 function pickWeighted(weights) {
   let total = 0; for (const k in weights) total += weights[k];
@@ -685,14 +690,13 @@ function killEnemy(e) {
   run.combo = (run.combo || 0) + 1; run.comboT = 180;
   const mult = comboMult();
   const gems = Math.max(1, Math.round((e.def.bounty || 4) * GEMS_PER_KILL_MUL * mult * (e.elite ? 3 : 1)));
-  run.gems += gems; run.score = (run.score || 0) + Math.round((e.def.score || 10) * mult * (e.elite ? 3 : 1));
+  creditAll(gems); run.score = (run.score || 0) + Math.round((e.def.score || 10) * mult * (e.elite ? 3 : 1));
   if (wave) { wave.kills++; wave.reward.kills++; }
   addXp(xpForKill(e.def) * (e.elite ? 3 : 1));
   const big = e.arch === 'TANK' || e.arch === 'BOSS';
-  explode(e.x, e.y, e.color, big ? 28 : 12);
-  spawnDecal(e.x, e.y, e.arch === 'BOSS' ? 26 : e.r);
-  emitEv({ k: 'die', x: e.x, y: e.y, color: e.color, big: big ? 1 : 0 });
-  sfx.enemyDie();
+  const style = e.arch === 'BOSS' ? 2 : (Math.random() * 5) | 0;
+  zombieDeath(e.x, e.y, e.color, big, style);
+  emitEv({ k: 'die', x: e.x, y: e.y, color: e.color, big: big ? 1 : 0, s: style });
   shake = Math.min(9, shake + (e.arch === 'BOSS' ? 9 : e.arch === 'TANK' ? 3 : 1.2));
   if (e.arch === 'BOSS') hitStop = 6;
   // elita „zhoubný" vybuchne, elita jindy → zaručený drop
@@ -736,6 +740,30 @@ function nearestPlayer(x, y) {
 /* ============================================================================
    EFEKTY / ČÁSTICE
    ========================================================================== */
+// 5 stylů smrti zombie: krev / rozseknutí / výbuch vnitřností / kosti / rozklad
+function zombieDeath(x, y, color, big, style) {
+  const n = big ? 1.9 : 1;
+  spawnDecal(x, y, big ? 22 : 12);
+  const P = (vx, vy, life, decay, size, col, grav) => particles.push({ x, y, vx, vy, life, decay, size, color: col, grav });
+  if (style === 0) {           // KREV
+    for (let i = 0; i < 18 * n; i++) { const a = Math.random() * Math.PI * 2, s = Math.random() * 4 + 1; P(Math.cos(a) * s, Math.sin(a) * s, 1, 0.03 + Math.random() * 0.03, 2 + Math.random() * 3, '#a01818', 0.06); }
+    particles.push({ x, y, ring: true, r: 3, rMax: big ? 40 : 24, life: 1, decay: 0.07, color: '#c02424' });
+  } else if (style === 1) {    // ROZSEKNUTÍ — kusy těla létají a padají
+    for (let i = 0; i < 7 * n; i++) { const a = Math.random() * Math.PI * 2, s = Math.random() * 3 + 1.5; P(Math.cos(a) * s, Math.sin(a) * s - 1.5, 1, 0.012, 4 + Math.random() * 4, i % 2 ? color : '#7a1818', 0.16); }
+    for (let i = 0; i < 10; i++) { const a = Math.random() * Math.PI * 2, s = Math.random() * 3; P(Math.cos(a) * s, Math.sin(a) * s, 1, 0.045, 2, '#a01818', 0.05); }
+  } else if (style === 2) {    // VÝBUCH vnitřností
+    for (let i = 0; i < 12 * n; i++) { const a = Math.random() * Math.PI * 2, s = Math.random() * 5 + 2; P(Math.cos(a) * s, Math.sin(a) * s, 1, 0.02, 3 + Math.random() * 3, i % 3 ? color : '#b02424', 0.1); }
+    particles.push({ x, y, ring: true, r: 4, rMax: big ? 55 : 34, life: 1, decay: 0.05, color: '#ff6a4a' });
+    particles.push({ x, y, ring: true, r: 3, rMax: big ? 34 : 22, life: 1, decay: 0.07, color: '#c02424' });
+  } else if (style === 3) {    // KOSTI
+    for (let i = 0; i < 9 * n; i++) { const a = Math.random() * Math.PI * 2, s = Math.random() * 3 + 1; P(Math.cos(a) * s, Math.sin(a) * s - 1, 1, 0.014, 2 + Math.random() * 3, '#e8e4d0', 0.13); }
+    for (let i = 0; i < 6; i++) { const a = Math.random() * Math.PI * 2, s = Math.random() * 3; P(Math.cos(a) * s, Math.sin(a) * s, 1, 0.04, 2, '#901818', 0.05); }
+  } else {                     // ROZKLAD (zelený sliz)
+    for (let i = 0; i < 16 * n; i++) { const a = Math.random() * Math.PI * 2, s = Math.random() * 3; P(Math.cos(a) * s, Math.sin(a) * s, 1, 0.02 + Math.random() * 0.02, 3 + Math.random() * 3, i % 2 ? '#5fbf47' : '#7ad06a', 0.03); }
+    particles.push({ x, y, ring: true, r: 3, rMax: big ? 42 : 26, life: 1, decay: 0.05, color: '#8fe060' });
+  }
+  sfx.enemyDie();
+}
 function burst(x, y, color, n = 10) {
   for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2, s = Math.random() * 3 + 0.5;
@@ -825,7 +853,7 @@ function updateCombat(dt) {
     wave.spawnCool -= dt;
     if (wave.spawnCool <= 0) {
       spawnEnemy(wave.queue[wave.spawned++]);
-      wave.spawnCool = Math.max(10, 40 - run.wave * 1.2);
+      wave.spawnCool = wave.interval || Math.max(10, 40 - run.wave * 1.2);
     }
   }
   // konec vlny
@@ -837,7 +865,7 @@ function updateCombat(dt) {
 
 function endWave() {
   wave.reward.gems = waveReward(run.wave);
-  run.gems += wave.reward.gems;
+  creditAll(wave.reward.gems);
   wave.reward.xp = wave.kills * 3;
   if (isFinalWave(run.wave)) return doVictory();   // poražen Pekelný pán → vítězství
   setState('roundEnd');
@@ -1264,6 +1292,7 @@ function updateParticles(dt) {
   for (const p of particles) {
     if (p.ring) { p.r += (p.rMax - p.r) * 0.2 * dt; p.life -= p.decay * dt; continue; }
     p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.92; p.vy *= 0.92; p.life -= p.decay * dt;
+    if (p.grav) p.vy += p.grav * dt;
     if (p.smoke) p.size += 0.3 * dt;
   }
   particles = particles.filter(p => p.life > 0);
@@ -1284,10 +1313,11 @@ function updatePickups(dt) {
 }
 function applyPickup(pu, p) {
   const d = DROPS[pu.id];
-  if (d.kind === 'buff') { if (pu.id === 'rapid') p.buffRapid = d.dur; else p.buffPower = d.dur; }
+  // drop platí VŠEM hráčům najednou (buff/léčení/gemy/mráz)
+  if (d.kind === 'buff') { for (const q of players) { if (pu.id === 'rapid') q.buffRapid = d.dur; else q.buffPower = d.dur; } }
   else if (d.kind === 'freeze') { freezeTimer = 150; emitEv({ k: 'freeze' }); }
   else if (d.kind === 'heal') { for (const q of players) if (!q.downed) q.hp = Math.min(q.hpMax, q.hp + 45); }
-  else if (d.kind === 'gems') { run.gems += d.gems; }
+  else if (d.kind === 'gems') { creditAll(d.gems); }
   burst(pu.x, pu.y, d.color, 14);
   spawnFloater(pu.x, pu.y - 8, 0, false); floaters[floaters.length - 1].txt = d.icon + ' ' + d.name; floaters[floaters.length - 1].pickup = d.color;
   sfx.heal();
@@ -1508,20 +1538,21 @@ function drawTraps() {
       ctx.fillStyle = `rgba(120,100,50,${0.4 + bub * 0.3})`; ctx.fillRect(t.x - 3, t.y - 3, 3, 3); ctx.fillRect(t.x + 3, t.y + 1, 2, 2);
       ctx.fillStyle = 'rgba(200,180,120,0.25)'; ctx.fillRect(x + 6, y + 6, 5, 2);
     } else if (d.arch === 'DOT_AOE') {
-      // OHNIŠTĚ — kameny + polena + blikající pixelové plameny
-      ctx.fillStyle = 'rgba(255,110,40,.10)'; ctx.beginPath(); ctx.arc(t.x, t.y, d.radius, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#5a5f66'; for (let k = 0; k < 6; k++) { const a = k / 6 * Math.PI * 2; ctx.fillRect(t.x + Math.cos(a) * 9 - 2, t.y + Math.sin(a) * 9 - 2, 4, 4); } // kruh kamenů
-      ctx.fillStyle = '#4a3018'; ctx.fillRect(t.x - 7, t.y + 2, 14, 3); ctx.fillRect(t.x - 2, t.y - 6, 3, 12);   // polena
-      ctx.fillStyle = '#7a2010'; ctx.fillRect(t.x - 5, t.y - 3, 10, 6);                                          // žhavé uhlíky
-      // plameny (pixelové, blikají)
+      const isFire = d.color === '#ff7b3a';
+      const rgb = hexRGB(d.color), lite = shade(d.color, 0.35);
+      ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.10)`; ctx.beginPath(); ctx.arc(t.x, t.y, d.radius, 0, Math.PI * 2); ctx.fill();
+      if (isFire) { // ohniště: kameny + polena
+        ctx.fillStyle = '#5a5f66'; for (let k = 0; k < 6; k++) { const a = k / 6 * Math.PI * 2; ctx.fillRect(t.x + Math.cos(a) * 9 - 2, t.y + Math.sin(a) * 9 - 2, 4, 4); }
+        ctx.fillStyle = '#4a3018'; ctx.fillRect(t.x - 7, t.y + 2, 14, 3); ctx.fillRect(t.x - 2, t.y - 6, 3, 12);
+      } else { ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.5)`; ctx.beginPath(); ctx.arc(t.x, t.y, 9, 0, Math.PI * 2); ctx.fill(); } // louže/kruh
+      // plápolání/bublání v barvě pasti (kruh, jed, oheň, kyselina, světlo)
       const fr = mulberry32((animClock * 0.25 | 0) ^ (t.tx * 31 + t.ty * 17));
       for (let k = 0; k < 7; k++) {
-        const fx = t.x - 6 + (fr() * 12 | 0), h = 5 + (fr() * 8 | 0);
-        ctx.fillStyle = '#ff5a10'; ctx.fillRect(fx, t.y - h, 3, h);
-        ctx.fillStyle = '#ffb020'; ctx.fillRect(fx, t.y - h + 2, 3, Math.max(2, h - 4));
-        ctx.fillStyle = '#ffe860'; ctx.fillRect(fx, t.y - h + 4, 3, 2);
+        const fx = t.x - 6 + (fr() * 12 | 0), h = (isFire ? 5 : 3) + (fr() * 7 | 0);
+        ctx.fillStyle = d.color; ctx.fillRect(fx, t.y - h, 3, h);
+        ctx.fillStyle = lite; ctx.fillRect(fx, t.y - h + 2, 3, Math.max(2, h - 4));
       }
-      if (fr() < 0.5) particles.push({ x: t.x + (Math.random() - 0.5) * 8, y: t.y - 6, vx: 0, vy: -0.5, life: 0.6, decay: 0.05, size: 2, color: '#ffb020', smoke: true });
+      if (fr() < 0.5) particles.push({ x: t.x + (Math.random() - 0.5) * 8, y: t.y - 6, vx: 0, vy: -0.5, life: 0.6, decay: 0.05, size: 2, color: lite, smoke: true });
     }
   }
 }
@@ -1892,21 +1923,23 @@ function drawWallIcon(g, id, S) {
   }
 }
 function drawTrapIcon(g, id, S) {
-  const c = S / 2;
-  if (id === 'bodce') {
+  const c = S / 2, d = TRAPS[id] || {}, arch = d.arch, col = d.color || '#ff7b3a';
+  if (arch === 'ONESHOT') {
     g.fillStyle = '#2a2018'; g.fillRect(S * 0.15, S * 0.15, S * 0.7, S * 0.7);
-    g.fillStyle = '#c8ccd4'; for (let k = 0; k < 3; k++) { const x = S * 0.24 + k * S * 0.22; g.beginPath(); g.moveTo(x, S * 0.75); g.lineTo(x + S * 0.08, S * 0.22); g.lineTo(x + S * 0.16, S * 0.75); g.fill(); }
-  } else if (id === 'smola') {
-    g.fillStyle = '#1a160c'; g.beginPath(); g.ellipse(c, c, S * 0.36, S * 0.3, 0, 0, Math.PI * 2); g.fill();
-    g.fillStyle = 'rgba(180,150,90,0.5)'; g.beginPath(); g.arc(c - 4, c - 3, 3, 0, Math.PI * 2); g.arc(c + 4, c + 2, 2, 0, Math.PI * 2); g.fill();
-  } else if (id === 'ohniste') {
-    g.fillStyle = '#5a5f66'; for (let k = 0; k < 6; k++) { const a = k / 6 * Math.PI * 2; g.fillRect(c + Math.cos(a) * S * 0.3 - 2, c + Math.sin(a) * S * 0.3 - 2, 4, 4); }
-    g.fillStyle = '#ff5a10'; g.beginPath(); g.moveTo(c - 7, c + 6); g.lineTo(c, c - 10); g.lineTo(c + 7, c + 6); g.fill();
-    g.fillStyle = '#ffc030'; g.beginPath(); g.moveTo(c - 4, c + 6); g.lineTo(c, c - 4); g.lineTo(c + 4, c + 6); g.fill();
-  } else { // samostril / balista_v (věž)
+    g.fillStyle = col; for (let k = 0; k < 3; k++) { const x = S * 0.24 + k * S * 0.22; g.beginPath(); g.moveTo(x, S * 0.75); g.lineTo(x + S * 0.08, S * 0.2); g.lineTo(x + S * 0.16, S * 0.75); g.fill(); }
+    if (id === 'medvedka' || id === 'cakan') { g.strokeStyle = '#888e96'; g.lineWidth = 2; g.beginPath(); g.arc(c, c, S * 0.3, 0.2, Math.PI - 0.2); g.stroke(); }
+  } else if (arch === 'SLOW') {
+    g.fillStyle = shade(col, -0.5); g.beginPath(); g.ellipse(c, c, S * 0.36, S * 0.3, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = col; g.globalAlpha = 0.6; g.beginPath(); g.arc(c - 4, c - 3, 3, 0, Math.PI * 2); g.arc(c + 4, c + 2, 2.5, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
+  } else if (arch === 'DOT_AOE') {
+    g.fillStyle = col; g.globalAlpha = 0.2; g.beginPath(); g.arc(c, c, S * 0.4, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
+    if (id === 'ohniste') { g.fillStyle = '#5a5f66'; for (let k = 0; k < 5; k++) { const a = k / 5 * Math.PI * 2; g.fillRect(c + Math.cos(a) * S * 0.28 - 2, c + Math.sin(a) * S * 0.28 - 2, 4, 4); } }
+    g.fillStyle = col; g.beginPath(); g.moveTo(c - 7, c + 7); g.lineTo(c, c - 10); g.lineTo(c + 7, c + 7); g.fill();
+    g.fillStyle = shade(col, 0.4); g.beginPath(); g.moveTo(c - 4, c + 7); g.lineTo(c, c - 3); g.lineTo(c + 4, c + 7); g.fill();
+  } else { // EMITTER (věž)
     g.fillStyle = '#5a4326'; g.fillRect(S * 0.2, S * 0.2, S * 0.6, S * 0.6);
     g.fillStyle = '#6e5230'; g.fillRect(S * 0.28, S * 0.28, S * 0.44, S * 0.44);
-    g.fillStyle = '#8a6a3a'; g.fillRect(c - 2, c - 8, 4, 16); g.fillStyle = '#c8ccd4'; g.fillRect(c - 8, c - 1, 16, 3);
+    g.fillStyle = '#3a2c18'; g.fillRect(c - 2, c - 8, 4, 16); g.fillStyle = col; g.fillRect(c - 8, c - 1.5, 16, 3);
   }
 }
 function drawWarriorIcon(g, color, ranged, S) {
@@ -1966,7 +1999,7 @@ function drawHud() {
   const me = localPlayer() || players[0];
   // horní info
   ctx.fillStyle = '#e8ecd8'; ctx.font = 'bold 15px system-ui'; ctx.textAlign = 'left';
-  ctx.fillText('💎 ' + run.gems, 8, 22);
+  ctx.fillText('💎 ' + meGems(), 8, 22);
   ctx.fillText('❤ ' + run.lives, 8, 42);
   ctx.textAlign = 'center'; ctx.fillStyle = '#f0e0a0';
   ctx.fillText((wave && wave.boss ? 'BOSS ' : 'VLNA ') + run.wave, W / 2, 20);
@@ -2042,7 +2075,7 @@ function drawStick(s, color) {
 function drawBuildBar() {
   const items = paletteItems();
   ctx.fillStyle = '#e8ecd8'; ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'left';
-  ctx.fillText('💎 ' + run.gems + '  ·  Klepni na položku, pak na mapu. (Klepni na hotovou stavbu = prodej)', 8, VIEWH + 20);
+  ctx.fillText('💎 ' + meGems() + '  ·  Klepni na položku, pak na mapu. (Klepni na hotovou stavbu = prodej)', 8, VIEWH + 20);
   const size = 40, gap = 6; let x = 8, y = VIEWH + 28;
   paletteRects = [];
   for (const id of items) {
