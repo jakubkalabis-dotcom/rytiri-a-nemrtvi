@@ -110,6 +110,18 @@ const WEAPONS = {
   mraziva_hul:   { name:'Mrazivá hůl',   arch:'PROJECTILE', dmg:12, range:300, rate:30, projSpeed:10, pierce:1, slow:{mul:0.45,dur:120}, ammo:'mana', ammoPerShot:6, tier:3, unlock:5, cost:240, cat:'ranged', color:'#8fe0ff' },
 };
 
+// Vizuální tvar každé zbraně (kreslí se blokově, viz drawWeaponBlocky).
+const WEAPON_SHAPE = {
+  rezavy_mec: 'sword', dyka: 'dagger', sekera: 'axe', kopi: 'spear', kosa: 'scythe',
+  palcat: 'mace', remdih: 'flail', kyj: 'club', halapartna: 'halberd',
+  valecne_kladivo: 'hammer', obour_mec: 'greatsword',
+  kratky_luk: 'bow', dlouhy_luk: 'bow', ohnivy_sip: 'bow',
+  kuse: 'crossbow', tezka_kuse: 'crossbow', jedovata_kuse: 'crossbow', opakovaci_kuse: 'crossbow', balista: 'crossbow',
+  prak: 'sling', ostep: 'spear', vrhaci_nuz: 'dagger', vrhaci_sekera: 'axe',
+  musketa: 'musket', bomba: 'bomb', recky_ohen: 'bomb',
+  blesk_hul: 'staff', ohniva_hul: 'staff', mraziva_hul: 'staff',
+};
+
 /* ---------- Nepřátelé (nemrtví) ---------- */
 /* Archetypy: WALKER | RUNNER | TANK | RANGED | EXPLODER | BOSS
    Runtime staty = base × škálování(wave). */

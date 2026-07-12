@@ -1440,45 +1440,101 @@ function drawBlockTile(x, y, hex, flash, wood) {
 function drawStructures() {
   for (const s of [...walls, ...turrets]) {
     if (!onScreen(s.x, s.y, TILE)) continue;
-    const x = s.tx * TILE, y = s.ty * TILE;
-    ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fillRect(x + 2, y + TILE - 4, TILE - 4, 5);
-    const wood = s.defId === 'drevena_barikada' || s.def.arch === 'EMITTER';
-    drawBlockTile(x, y, s.def.color, s.flash, wood);
-    if (s.defId === 'bodcova_zed') { ctx.fillStyle = '#c8ccd4'; for (let k = 0; k < 4; k++) { ctx.fillRect(x + 4 + k * 7, y + 2, 3, 6); ctx.fillRect(x + 4 + k * 7, y + TILE - 8, 3, 6); } }
-    if (s.temp != null) { ctx.strokeStyle = `rgba(140,220,255,${0.4 + Math.sin(animClock * 0.3) * 0.3})`; ctx.lineWidth = 1.5; ctx.strokeRect(x + 1, y + 1, TILE - 2, TILE - 2); }
+    const x = s.tx * TILE, y = s.ty * TILE, T = TILE, fl = s.flash > 0;
+    ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(x + 2, y + T - 4, T - 4, 5);
     if (s.def.arch === 'EMITTER') {
-      // bloková věž s otáčecí kuší
-      ctx.fillStyle = '#2a2018'; ctx.fillRect(s.x - 6, s.y - 6, 12, 12);
+      // dřevěná věž + otáčecí kuše
+      ctx.fillStyle = fl ? '#fff' : '#5a4326'; ctx.fillRect(x + 3, y + 3, T - 6, T - 6);
+      ctx.fillStyle = fl ? '#fff' : '#6e5230'; ctx.fillRect(x + 5, y + 5, T - 10, T - 10);
+      ctx.fillStyle = '#3a2c18'; ctx.fillRect(x + 5, y + T * 0.45, T - 10, 3);
       const tgt = nearestEnemy(s.x, s.y, s.def.range);
       const a = tgt ? Math.atan2(tgt.y - s.y, tgt.x - s.x) : -Math.PI / 2;
       ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(a);
-      ctx.fillStyle = '#6a4a2a'; ctx.fillRect(-2, -6, 4, 12); ctx.fillStyle = '#c8a45c'; ctx.fillRect(2, -1.5, 12, 3); ctx.restore();
+      ctx.fillStyle = '#3a2a18'; ctx.fillRect(-3, -7, 6, 14);                 // příčník
+      ctx.fillStyle = '#8a6a3a'; ctx.fillRect(0, -2, 13, 4);                  // lůžko
+      ctx.fillStyle = '#c8ccd4'; ctx.fillRect(6, -1, 9, 2);                   // šipka
+      ctx.restore();
+    } else if (s.defId === 'drevena_barikada') {
+      ctx.fillStyle = fl ? '#fff' : '#7a4f28'; ctx.fillRect(x + 2, y + 2, T - 4, T - 4);
+      ctx.fillStyle = fl ? '#fff' : '#8a5c30'; for (let p = 0; p < 3; p++) ctx.fillRect(x + 3, y + 4 + p * 9, T - 6, 7);  // prkna
+      ctx.fillStyle = '#3a2410'; for (let p = 0; p < 3; p++) ctx.fillRect(x + 3, y + 3 + p * 9, T - 6, 1);
+      ctx.fillStyle = '#2a1c0e'; [[6, 6], [T - 8, 6], [6, T - 8], [T - 8, T - 8]].forEach(n => ctx.fillRect(x + n[0], y + n[1], 2, 2)); // hřebíky
+      ctx.fillStyle = 'rgba(60,40,20,0.8)'; ctx.save(); ctx.beginPath(); ctx.rect(x + 2, y + 2, T - 4, T - 4); ctx.clip(); ctx.fillRect(x + 2, y + T - 6, T, 4); ctx.restore();
+    } else if (s.defId === 'kamenna_zed') {
+      ctx.fillStyle = fl ? '#fff' : '#4a4f56'; ctx.fillRect(x + 2, y + 2, T - 4, T - 4);   // malta
+      const cob = fl ? '#fff' : '#8a9098'; const c2 = fl ? '#fff' : '#767c84';
+      // nepravidelné kameny
+      ctx.fillStyle = cob; ctx.fillRect(x + 3, y + 3, 12, 9); ctx.fillRect(x + 17, y + 4, 11, 7);
+      ctx.fillStyle = c2; ctx.fillRect(x + 3, y + 14, 9, 8); ctx.fillRect(x + 14, y + 13, 14, 9);
+      ctx.fillStyle = cob; ctx.fillRect(x + 4, y + 24, 13, 5); ctx.fillRect(x + 19, y + 24, 9, 5);
+      ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(x + 4, y + 4, 5, 2);
+    } else if (s.defId === 'zelezna_brana') {
+      ctx.fillStyle = fl ? '#fff' : '#2f343a'; ctx.fillRect(x + 2, y + 2, T - 4, T - 4);
+      ctx.fillStyle = fl ? '#fff' : '#6a7078'; for (let b = 0; b < 3; b++) ctx.fillRect(x + 5 + b * 8, y + 3, 4, T - 6);  // svislé mříže
+      ctx.fillStyle = '#565b62'; ctx.fillRect(x + 3, y + 7, T - 6, 3); ctx.fillRect(x + 3, y + T - 10, T - 6, 3);          // příčky
+      ctx.fillStyle = '#c8ccd4'; [[6, 8], [22, 8], [6, T - 9], [22, T - 9]].forEach(n => ctx.fillRect(x + n[0], y + n[1], 2, 2)); // nýty
+    } else { // bodcova_zed
+      ctx.fillStyle = fl ? '#fff' : '#6a4530'; ctx.fillRect(x + 5, y + 5, T - 10, T - 10);
+      ctx.fillStyle = fl ? '#fff' : '#c0c6ce';
+      const spike = (cx, cy, dx, dy) => { ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + dx, cy + dy); ctx.lineTo(cx + (dy ? 4 : 0), cy + (dx ? 4 : 0)); ctx.closePath(); ctx.fill(); };
+      for (let k = 0; k < 3; k++) { spike(x + 8 + k * 8, y + 5, 0, -5); spike(x + 8 + k * 8, y + T - 5, 0, 5); spike(x + 5, y + 8 + k * 8, -5, 0); spike(x + T - 5, y + 8 + k * 8, 5, 0); }
     }
+    if (s.temp != null) { ctx.strokeStyle = `rgba(140,220,255,${0.4 + Math.sin(animClock * 0.3) * 0.3})`; ctx.lineWidth = 1.5; ctx.strokeRect(x + 1, y + 1, T - 2, T - 2); }
     if (s.hp < s.hpMax) {
-      ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(x + 3, y - 3, TILE - 6, 3);
-      ctx.fillStyle = '#5cff8a'; ctx.fillRect(x + 3, y - 3, (TILE - 6) * (s.hp / s.hpMax), 3);
+      ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(x + 3, y - 3, T - 6, 3);
+      ctx.fillStyle = '#5cff8a'; ctx.fillRect(x + 3, y - 3, (T - 6) * (s.hp / s.hpMax), 3);
     }
   }
 }
 function drawTraps() {
   for (const t of traps) {
-    const d = t.def;
+    if (!onScreen(t.x, t.y, TILE)) continue;
+    const d = t.def, x = t.tx * TILE, y = t.ty * TILE, T = TILE;
     if (d.arch === 'ONESHOT') {
-      ctx.fillStyle = '#3a3a42'; roundRect(t.tx * TILE + 4, t.ty * TILE + 4, TILE - 8, TILE - 8, 3); ctx.fill();
-      ctx.fillStyle = '#c8ccd4';
-      for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.moveTo(t.tx * TILE + 8 + k * 8, t.ty * TILE + TILE - 6); ctx.lineTo(t.tx * TILE + 11 + k * 8, t.ty * TILE + 8); ctx.lineTo(t.tx * TILE + 14 + k * 8, t.ty * TILE + TILE - 6); ctx.fill(); }
+      // dřevěná deska s ocelovými bodci
+      ctx.fillStyle = '#2a2018'; ctx.fillRect(x + 4, y + 4, T - 8, T - 8);
+      ctx.fillStyle = '#3a2c1c'; ctx.fillRect(x + 5, y + 5, T - 10, T - 10);
+      for (let k = 0; k < 3; k++) for (let r = 0; r < 2; r++) {
+        const sx = x + 8 + k * 8, sy = y + 9 + r * 10;
+        ctx.fillStyle = '#c8ccd4'; ctx.beginPath(); ctx.moveTo(sx, sy + 5); ctx.lineTo(sx + 2.5, sy - 5); ctx.lineTo(sx + 5, sy + 5); ctx.fill();
+        ctx.fillStyle = '#eef0f4'; ctx.fillRect(sx + 1.5, sy - 5, 1, 6);
+      }
     } else if (d.arch === 'SLOW') {
-      ctx.fillStyle = '#241f14'; roundRect(t.tx * TILE + 2, t.ty * TILE + 2, TILE - 4, TILE - 4, 6); ctx.fill();
-      ctx.fillStyle = 'rgba(60,50,30,.8)'; ctx.beginPath(); ctx.arc(t.x, t.y, 8, 0, Math.PI * 2); ctx.fill();
+      // lepkavá smůla — lesklá tmavá louže
+      ctx.fillStyle = '#1a160c'; ctx.fillRect(x + 2, y + 2, T - 4, T - 4);
+      ctx.fillStyle = '#2a2410'; ctx.fillRect(x + 4, y + 5, T - 8, T - 9);
+      const bub = Math.sin(animClock * 0.15 + t.x) * 0.5 + 0.5;
+      ctx.fillStyle = `rgba(120,100,50,${0.4 + bub * 0.3})`; ctx.fillRect(t.x - 3, t.y - 3, 3, 3); ctx.fillRect(t.x + 3, t.y + 1, 2, 2);
+      ctx.fillStyle = 'rgba(200,180,120,0.25)'; ctx.fillRect(x + 6, y + 6, 5, 2);
     } else if (d.arch === 'DOT_AOE') {
-      ctx.fillStyle = 'rgba(255,120,40,.15)'; ctx.beginPath(); ctx.arc(t.x, t.y, d.radius, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#ff7b3a'; ctx.beginPath(); ctx.arc(t.x, t.y, 7, 0, Math.PI * 2); ctx.fill();
+      // OHNIŠTĚ — kameny + polena + blikající pixelové plameny
+      ctx.fillStyle = 'rgba(255,110,40,.10)'; ctx.beginPath(); ctx.arc(t.x, t.y, d.radius, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#5a5f66'; for (let k = 0; k < 6; k++) { const a = k / 6 * Math.PI * 2; ctx.fillRect(t.x + Math.cos(a) * 9 - 2, t.y + Math.sin(a) * 9 - 2, 4, 4); } // kruh kamenů
+      ctx.fillStyle = '#4a3018'; ctx.fillRect(t.x - 7, t.y + 2, 14, 3); ctx.fillRect(t.x - 2, t.y - 6, 3, 12);   // polena
+      ctx.fillStyle = '#7a2010'; ctx.fillRect(t.x - 5, t.y - 3, 10, 6);                                          // žhavé uhlíky
+      // plameny (pixelové, blikají)
+      const fr = mulberry32((animClock * 0.25 | 0) ^ (t.tx * 31 + t.ty * 17));
+      for (let k = 0; k < 7; k++) {
+        const fx = t.x - 6 + (fr() * 12 | 0), h = 5 + (fr() * 8 | 0);
+        ctx.fillStyle = '#ff5a10'; ctx.fillRect(fx, t.y - h, 3, h);
+        ctx.fillStyle = '#ffb020'; ctx.fillRect(fx, t.y - h + 2, 3, Math.max(2, h - 4));
+        ctx.fillStyle = '#ffe860'; ctx.fillRect(fx, t.y - h + 4, 3, 2);
+      }
+      if (fr() < 0.5) particles.push({ x: t.x + (Math.random() - 0.5) * 8, y: t.y - 6, vx: 0, vy: -0.5, life: 0.6, decay: 0.05, size: 2, color: '#ffb020', smoke: true });
     }
   }
 }
 function drawGroundFx() {
   for (const g of groundFx) {
-    ctx.fillStyle = 'rgba(255,110,40,.12)'; ctx.beginPath(); ctx.arc(g.x, g.y, g.radius, 0, Math.PI * 2); ctx.fill();
+    if (!onScreen(g.x, g.y, g.radius)) continue;
+    ctx.fillStyle = 'rgba(255,90,20,.10)'; ctx.beginPath(); ctx.arc(g.x, g.y, g.radius, 0, Math.PI * 2); ctx.fill();
+    // hořící zem — rozházené pixelové plamínky
+    const fr = mulberry32((animClock * 0.3 | 0) ^ ((g.x | 0) * 13 + (g.y | 0) * 7));
+    for (let k = 0; k < 10; k++) {
+      const a = fr() * Math.PI * 2, rr = fr() * g.radius, fx = g.x + Math.cos(a) * rr, fy = g.y + Math.sin(a) * rr, h = 4 + (fr() * 6 | 0);
+      ctx.fillStyle = '#ff5a10'; ctx.fillRect(fx | 0, (fy - h) | 0, 3, h);
+      ctx.fillStyle = '#ffc030'; ctx.fillRect(fx | 0, (fy - h + 2) | 0, 3, Math.max(1, h - 3));
+    }
   }
 }
 function drawWarriors() {
@@ -1489,7 +1545,7 @@ function drawWarriors() {
     const ranged = wr.def.arch === 'RANGED';
     drawBlockyHumanoid(wr.x, wr.y, wr.r, wr.aim || -Math.PI / 2, animClock * 0.2, clamp((wr.atkAnim || 0) / 8, 0, 1), {
       skin: '#d8a878', shirt: col, dark: shade(wr.def.color, -0.4), hat: '#c8ccd4', pants: '#3a3444',
-      weapon: ranged ? { cat: 'ranged', ammo: 'sip' } : { cat: 'melee' },
+      weaponShape: ranged ? 'bow' : (wr.defId === 'rytir_np' ? 'greatsword' : 'sword'),
     });
     ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(wr.x - 12, wr.y - wr.r - 9, 24, 3);
     ctx.fillStyle = '#5cff8a'; ctx.fillRect(wr.x - 12, wr.y - wr.r - 9, 24 * (wr.hp / wr.hpMax), 3);
@@ -1687,57 +1743,130 @@ function drawPlayers() {
     const w0 = WEAPONS[p.weaponId] || {};
     const atk = clamp(p.atkAnim / 10, 0, 1);
     drawBlockyHumanoid(p.x, p.y + bob, p.r, p.aimAngle, p.walk, atk, {
-      skin: '#d8a878', shirt: p.color, dark: shade(p.color, -0.4), hat: shade(p.color, 0.22), pants: '#39344f', weapon: w0,
+      skin: '#d8a878', shirt: p.color, dark: shade(p.color, -0.4), hat: shade(p.color, 0.22), pants: '#39344f',
+      weaponShape: WEAPON_SHAPE[p.weaponId] || (w0.cat === 'melee' ? 'sword' : 'bow'), weaponColor: w0.color,
     });
   }
 }
-// Hranatá „Minecraft" postava viděná shora, natočená ve směru míření (ang).
+// Hranatá „Minecraft" postava shora, natočená ve směru míření (ang).
+// Rozvržení: trup uprostřed, hlava nahoře (menší), 2 ruce po stranách, 2 nohy vzadu.
 function drawBlockyHumanoid(x, y, r, ang, walk, atk, pal) {
-  const R = r; const lp = Math.sin(walk || 0); const sw = atk ? Math.sin(atk * Math.PI) : 0;
+  const R = r * 1.15; const lp = Math.sin(walk || 0); const sw = atk ? Math.sin(atk * Math.PI) : 0;
   ctx.save(); ctx.translate(Math.round(x), Math.round(y)); ctx.rotate(ang);
-  // nohy (za tělem, animované)
-  ctx.fillStyle = pal.pants;
-  ctx.fillRect(-R * 0.72 + lp * R * 0.35, -R * 0.52, R * 0.5, R * 0.42);
-  ctx.fillRect(-R * 0.72 - lp * R * 0.35, R * 0.1, R * 0.5, R * 0.42);
-  // trup
-  ctx.fillStyle = pal.dark; ctx.fillRect(-R * 0.56, -R * 0.64, R * 1.06, R * 1.28);
-  ctx.fillStyle = pal.shirt; ctx.fillRect(-R * 0.47, -R * 0.54, R * 0.9, R * 1.08);
-  // ruce (pravá se rozmáchne s útokem)
-  const armF = sw * R * 0.5;
-  ctx.fillStyle = pal.shirt; ctx.fillRect(-R * 0.05, -R * 0.98, R * 0.4, R * 0.34);
-  ctx.fillStyle = pal.skin; ctx.fillRect(R * 0.33, -R * 0.98, R * 0.24, R * 0.34);
-  ctx.fillStyle = pal.shirt; ctx.fillRect(-R * 0.05 + armF, R * 0.64, R * 0.4, R * 0.34);
-  ctx.fillStyle = pal.skin; ctx.fillRect(R * 0.33 + armF, R * 0.64, R * 0.24, R * 0.34);
-  // hlava (nahoře) + helma + obličej
-  ctx.fillStyle = pal.dark; ctx.fillRect(-R * 0.5, -R * 0.5, R, R);
+  const outline = 'rgba(0,0,0,0.35)';
+  // NOHY (za tělem = směr -x), střídavě dopředu/dozadu
+  for (const s of [-1, 1]) {
+    const ly = s * R * 0.28, lx = -R * 0.55 + lp * s * R * 0.32;
+    ctx.fillStyle = outline; ctx.fillRect(lx - 1, ly - R * 0.2 - 1, R * 0.42 + 2, R * 0.4 + 2);
+    ctx.fillStyle = pal.pants; ctx.fillRect(lx, ly - R * 0.2, R * 0.42, R * 0.4);
+    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(lx, ly - R * 0.2, R * 0.14, R * 0.4);  // bota
+  }
+  // TRUP
+  ctx.fillStyle = outline; ctx.fillRect(-R * 0.4 - 1, -R * 0.5 - 1, R * 0.8 + 2, R + 2);
+  ctx.fillStyle = pal.dark; ctx.fillRect(-R * 0.4, -R * 0.5, R * 0.8, R);
+  ctx.fillStyle = pal.shirt; ctx.fillRect(-R * 0.32, -R * 0.42, R * 0.64, R * 0.84);
+  // RUCE po stranách (pravá = spodní, s útokem se napřáhne dopředu)
+  const armF = sw * R * 0.55;
+  // levá ruka (horní strana)
+  ctx.fillStyle = outline; ctx.fillRect(-R * 0.15 - 1, -R * 0.86 - 1, R * 0.34 + 2, R * 0.34 + 2);
+  ctx.fillStyle = pal.shirt; ctx.fillRect(-R * 0.15, -R * 0.86, R * 0.34, R * 0.34);
+  ctx.fillStyle = pal.skin; ctx.fillRect(R * 0.05, -R * 0.86, R * 0.14, R * 0.34);
+  // pravá ruka (dolní strana)
+  ctx.fillStyle = outline; ctx.fillRect(-R * 0.15 + armF - 1, R * 0.52 - 1, R * 0.34 + 2, R * 0.34 + 2);
+  ctx.fillStyle = pal.shirt; ctx.fillRect(-R * 0.15 + armF, R * 0.52, R * 0.34, R * 0.34);
+  ctx.fillStyle = pal.skin; ctx.fillRect(R * 0.05 + armF, R * 0.52, R * 0.14, R * 0.34);
+  // HLAVA (nahoře, menší, s helmou a obličejem)
+  ctx.fillStyle = outline; ctx.fillRect(-R * 0.44 - 1, -R * 0.44 - 1, R * 0.88 + 2, R * 0.88 + 2);
   ctx.fillStyle = pal.skin; ctx.fillRect(-R * 0.42, -R * 0.42, R * 0.84, R * 0.84);
-  ctx.fillStyle = pal.hat; ctx.fillRect(-R * 0.5, -R * 0.5, R, R * 0.42);
-  ctx.fillStyle = '#20242c';
-  ctx.fillRect(R * 0.24, -R * 0.3, R * 0.15, R * 0.2);
-  ctx.fillRect(R * 0.24, R * 0.1, R * 0.15, R * 0.2);
-  // zbraň v pravé ruce (dopředu = +x)
-  drawWeaponBlocky(pal.weapon, R, atk, armF);
+  ctx.fillStyle = pal.hat; ctx.fillRect(-R * 0.44, -R * 0.44, R * 0.88, R * 0.4);           // helma horní pruh
+  ctx.fillStyle = pal.hat; ctx.fillRect(-R * 0.44, -R * 0.44, R * 0.18, R * 0.88);          // helma boční
+  ctx.fillStyle = '#1c1f26';
+  ctx.fillRect(R * 0.22, -R * 0.28, R * 0.16, R * 0.2); ctx.fillRect(R * 0.22, R * 0.08, R * 0.16, R * 0.2);
+  // ZBRAŇ v pravé ruce (dopředu = +x)
+  drawWeaponBlocky(pal.weaponShape, R, atk, armF, pal.weaponColor);
   ctx.restore();
 }
-function drawWeaponBlocky(w, R, atk, armF) {
-  if (!w) return;
-  const thrust = (w.cat === 'melee') ? sinP(atk) * R * 0.6 : 0;
-  ctx.save(); ctx.translate(R * 0.5 + armF + thrust, R * 0.8);
-  if (w.cat === 'melee' || !w.cat) {
-    ctx.fillStyle = '#6a4a2a'; ctx.fillRect(-R * 0.18, -R * 0.13, R * 0.28, R * 0.26);
-    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(R * 0.05, -R * 0.2, R * 0.1, R * 0.4);
-    ctx.fillStyle = '#c8ccd4'; ctx.fillRect(R * 0.12, -R * 0.1, R * 0.95, R * 0.2);
-    ctx.fillStyle = '#eef0f4'; ctx.fillRect(R * 0.12, -R * 0.1, R * 0.95, R * 0.08);
-  } else if (w.ammo === 'mana') {
-    ctx.fillStyle = '#6a4a2a'; ctx.fillRect(-R * 0.1, -R * 0.08, R * 0.85, R * 0.16);
-    const c = w.color || '#9ad0ff'; ctx.fillStyle = c; ctx.fillRect(R * 0.62, -R * 0.24, R * 0.42, R * 0.48);
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(R * 0.72, -R * 0.12, R * 0.16, R * 0.16);
-  } else if (w.ammo === 'prach') {
-    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(-R * 0.18, -R * 0.16, R * 0.42, R * 0.32);
-    ctx.fillStyle = '#565b62'; ctx.fillRect(R * 0.2, -R * 0.1, R * 0.95, R * 0.2);
-  } else {
-    ctx.fillStyle = '#8a6a3a'; ctx.fillRect(R * 0.2, -R * 0.55, R * 0.16, R * 1.1);
-    ctx.fillStyle = 'rgba(235,235,235,0.85)'; ctx.fillRect(R * 0.28, -R * 0.55, R * 0.04, R * 1.1);
+// Blokový design zbraně podle tvaru (kreslí se od ruky dopředu = +x).
+function drawWeaponBlocky(shape, R, atk, armF, wcol) {
+  const thrust = sinP(atk) * R * 0.55;
+  ctx.save(); ctx.translate(R * 0.35 + armF, R * 0.68);
+  const wood = '#6a4a2a', dark = '#3a2a1a', steel = '#c8ccd4', steelL = '#eef0f4', gold = '#c8a45c';
+  const F = (x) => x + thrust;   // melee zbraně se napřahují dopředu
+  if (shape === 'sword' || shape === 'greatsword') {
+    const len = shape === 'greatsword' ? 1.5 : 1.05, wid = shape === 'greatsword' ? 0.26 : 0.18;
+    ctx.fillStyle = wood; ctx.fillRect(F(-0.15) * R, -R * 0.09, R * 0.28, R * 0.18);
+    ctx.fillStyle = gold; ctx.fillRect(F(0.08) * R, -R * 0.24, R * 0.1, R * 0.48);            // záštita
+    ctx.fillStyle = steel; ctx.fillRect(F(0.16) * R, -R * wid / 2, R * len, R * wid);
+    ctx.fillStyle = steelL; ctx.fillRect(F(0.16) * R, -R * wid / 2, R * len, R * wid * 0.4);
+    ctx.fillStyle = steel; ctx.beginPath(); ctx.moveTo(F(0.16 + len) * R, -R * wid / 2); ctx.lineTo(F(0.16 + len + 0.18) * R, 0); ctx.lineTo(F(0.16 + len) * R, R * wid / 2); ctx.fill();
+  } else if (shape === 'dagger') {
+    ctx.fillStyle = wood; ctx.fillRect(F(-0.12) * R, -R * 0.08, R * 0.22, R * 0.16);
+    ctx.fillStyle = gold; ctx.fillRect(F(0.08) * R, -R * 0.16, R * 0.08, R * 0.32);
+    ctx.fillStyle = steelL; ctx.fillRect(F(0.14) * R, -R * 0.07, R * 0.5, R * 0.14);
+    ctx.fillStyle = steel; ctx.beginPath(); ctx.moveTo(F(0.64) * R, -R * 0.07); ctx.lineTo(F(0.82) * R, 0); ctx.lineTo(F(0.64) * R, R * 0.07); ctx.fill();
+  } else if (shape === 'axe') {
+    ctx.fillStyle = wood; ctx.fillRect(F(-0.1) * R, -R * 0.08, R * 1.0, R * 0.16);            // topůrko
+    ctx.fillStyle = steel; ctx.fillRect(F(0.62) * R, -R * 0.42, R * 0.34, R * 0.84);          // hlava
+    ctx.fillStyle = steelL; ctx.fillRect(F(0.62) * R, -R * 0.42, R * 0.12, R * 0.84);
+    ctx.fillStyle = dark; ctx.fillRect(F(0.9) * R, -R * 0.2, R * 0.08, R * 0.4);
+  } else if (shape === 'spear') {
+    ctx.fillStyle = wood; ctx.fillRect(F(-0.2) * R, -R * 0.06, R * 1.5, R * 0.12);            // dlouhé ratiště
+    ctx.fillStyle = steel; ctx.beginPath(); ctx.moveTo(F(1.3) * R, -R * 0.16); ctx.lineTo(F(1.7) * R, 0); ctx.lineTo(F(1.3) * R, R * 0.16); ctx.fill();
+    ctx.fillStyle = steelL; ctx.fillRect(F(1.3) * R, -R * 0.05, R * 0.3, R * 0.05);
+  } else if (shape === 'halberd') {
+    ctx.fillStyle = wood; ctx.fillRect(F(-0.2) * R, -R * 0.06, R * 1.5, R * 0.12);
+    ctx.fillStyle = steel; ctx.beginPath(); ctx.moveTo(F(1.3) * R, -R * 0.14); ctx.lineTo(F(1.66) * R, 0); ctx.lineTo(F(1.3) * R, R * 0.14); ctx.fill();
+    ctx.fillStyle = steel; ctx.fillRect(F(1.0) * R, -R * 0.5, R * 0.32, R * 0.42);            // sekera na boku
+    ctx.fillStyle = steelL; ctx.fillRect(F(1.0) * R, -R * 0.5, R * 0.1, R * 0.42);
+  } else if (shape === 'scythe') {
+    ctx.fillStyle = wood; ctx.fillRect(F(-0.15) * R, -R * 0.07, R * 1.25, R * 0.14);          // násada
+    ctx.fillStyle = steel; ctx.fillRect(F(1.0) * R, -R * 0.7, R * 0.14, R * 0.7);             // svislá čepel
+    ctx.fillStyle = steelL; ctx.fillRect(F(0.55) * R, -R * 0.7, R * 0.6, R * 0.14);           // vodorovné ostří
+  } else if (shape === 'mace') {
+    ctx.fillStyle = wood; ctx.fillRect(F(-0.1) * R, -R * 0.08, R * 0.85, R * 0.16);
+    ctx.fillStyle = steel; ctx.fillRect(F(0.66) * R, -R * 0.3, R * 0.44, R * 0.6);            // hlavice
+    ctx.fillStyle = dark; ctx.fillRect(F(0.6) * R, -R * 0.12, R * 0.12, R * 0.24);            // hroty
+    ctx.fillRect(F(1.06) * R, -R * 0.12, R * 0.12, R * 0.24); ctx.fillRect(F(0.82) * R, -R * 0.42, R * 0.14, R * 0.12); ctx.fillRect(F(0.82) * R, R * 0.3, R * 0.14, R * 0.12);
+  } else if (shape === 'hammer') {
+    ctx.fillStyle = wood; ctx.fillRect(F(-0.1) * R, -R * 0.08, R * 0.9, R * 0.16);
+    ctx.fillStyle = steel; ctx.fillRect(F(0.68) * R, -R * 0.44, R * 0.5, R * 0.88);           // velká hlava
+    ctx.fillStyle = steelL; ctx.fillRect(F(0.68) * R, -R * 0.44, R * 0.16, R * 0.88);
+  } else if (shape === 'flail') {
+    ctx.fillStyle = wood; ctx.fillRect(F(-0.1) * R, -R * 0.08, R * 0.6, R * 0.16);
+    ctx.fillStyle = '#8a8f96'; for (let k = 0; k < 3; k++) ctx.fillRect(F(0.5 + k * 0.12) * R, -R * 0.05, R * 0.08, R * 0.1);  // řetěz
+    ctx.fillStyle = steel; ctx.fillRect(F(0.86) * R, -R * 0.26, R * 0.42, R * 0.52);          // ostnatá koule
+    ctx.fillStyle = dark; ctx.fillRect(F(0.8) * R, -R * 0.08, R * 0.1, R * 0.16); ctx.fillRect(F(1.24) * R, -R * 0.08, R * 0.1, R * 0.16);
+  } else if (shape === 'club') {
+    ctx.fillStyle = dark; ctx.fillRect(F(-0.15) * R, -R * 0.12, R * 0.5, R * 0.24);
+    ctx.fillStyle = wood; ctx.fillRect(F(0.35) * R, -R * 0.26, R * 0.7, R * 0.52);            // kyj se rozšiřuje
+    ctx.fillStyle = '#5a3a20'; ctx.fillRect(F(0.6) * R, -R * 0.2, R * 0.1, R * 0.1); ctx.fillRect(F(0.85) * R, R * 0.05, R * 0.1, R * 0.1);
+  } else if (shape === 'bow') {
+    ctx.fillStyle = wood; ctx.fillRect(R * 0.25, -R * 0.6, R * 0.14, R * 1.2);                // oblouk (svislý)
+    ctx.fillStyle = wood; ctx.fillRect(R * 0.15, -R * 0.6, R * 0.14, R * 0.2); ctx.fillRect(R * 0.15, R * 0.4, R * 0.14, R * 0.2);
+    ctx.strokeStyle = 'rgba(235,235,235,0.85)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(R * 0.2, -R * 0.55); ctx.lineTo(R * 0.32, 0); ctx.lineTo(R * 0.2, R * 0.55); ctx.stroke();
+    ctx.fillStyle = steel; ctx.fillRect(R * 0.32, -R * 0.03, R * 0.5, R * 0.06);              // šíp
+  } else if (shape === 'crossbow') {
+    ctx.fillStyle = wood; ctx.fillRect(-R * 0.05, -R * 0.1, R * 1.0, R * 0.2);                // lůžko
+    ctx.fillStyle = dark; ctx.fillRect(R * 0.5, -R * 0.5, R * 0.12, R * 1.0);                 // příčné rameno
+    ctx.fillStyle = steel; ctx.fillRect(R * 0.6, -R * 0.03, R * 0.5, R * 0.06);               // šipka
+  } else if (shape === 'sling') {
+    ctx.fillStyle = dark; ctx.fillRect(R * 0.1, -R * 0.4, R * 0.05, R * 0.35); ctx.fillRect(R * 0.1, R * 0.05, R * 0.05, R * 0.35);
+    ctx.fillStyle = wood; ctx.fillRect(R * 0.05, -R * 0.12, R * 0.22, R * 0.24);              // kapsa
+    ctx.fillStyle = '#9a9a9a'; ctx.fillRect(R * 0.1, -R * 0.06, R * 0.12, R * 0.12);          // kámen
+  } else if (shape === 'musket') {
+    ctx.fillStyle = wood; ctx.fillRect(-R * 0.25, -R * 0.14, R * 0.6, R * 0.28);              // pažba
+    ctx.fillStyle = '#4a4f55'; ctx.fillRect(R * 0.3, -R * 0.09, R * 1.05, R * 0.18);          // hlaveň
+    ctx.fillStyle = dark; ctx.fillRect(R * 1.3, -R * 0.11, R * 0.1, R * 0.22);                // ústí
+  } else if (shape === 'bomb') {
+    ctx.fillStyle = '#20242c'; ctx.fillRect(R * 0.3, -R * 0.3, R * 0.6, R * 0.6);             // koule
+    ctx.fillStyle = '#4a4f55'; ctx.fillRect(R * 0.36, -R * 0.24, R * 0.2, R * 0.2);           // lesk
+    ctx.fillStyle = '#6a4a2a'; ctx.fillRect(R * 0.55, -R * 0.44, R * 0.08, R * 0.18);         // knot
+    ctx.fillStyle = '#ffd35c'; ctx.fillRect(R * 0.54, -R * 0.5, R * 0.1, R * 0.08);           // jiskra
+  } else { // staff
+    ctx.fillStyle = wood; ctx.fillRect(-R * 0.1, -R * 0.08, R * 0.95, R * 0.16);
+    const c = wcol || '#9ad0ff'; ctx.fillStyle = c; ctx.globalAlpha = 0.5; ctx.fillRect(R * 0.62, -R * 0.34, R * 0.5, R * 0.68); ctx.globalAlpha = 1;
+    ctx.fillStyle = c; ctx.fillRect(R * 0.72, -R * 0.22, R * 0.32, R * 0.44);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(R * 0.8, -R * 0.12, R * 0.14, R * 0.14);
   }
   ctx.restore();
 }
