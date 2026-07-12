@@ -49,12 +49,16 @@ function applyMapDims(i) {
   COLS = m.cols; ROWS = m.rows;
   ARENA_W = COLS * TILE; ARENA_H = ROWS * TILE;
   CORE = { tx: Math.floor(COLS / 2) - 1, ty: ROWS - 3, w: 3, h: 2 };   // dolní střed
-  // spawny JEN v zadní části (horní hrana) → plánovatelná obrana
+  // Koridor: prostřední ~50 % šířky; po stranách barikáda (viz genObstacles).
+  const side = corridorSide();
+  const x0 = side * TILE, x1 = (COLS - side) * TILE;
   SPAWNS = [
-    { x: COLS * TILE * 0.14, y: -20 }, { x: COLS * TILE * 0.31, y: -20 }, { x: COLS * TILE * 0.5, y: -20 },
-    { x: COLS * TILE * 0.69, y: -20 }, { x: COLS * TILE * 0.86, y: -20 },
+    { x: x0 + (x1 - x0) * 0.12, y: -20 }, { x: x0 + (x1 - x0) * 0.34, y: -20 }, { x: x0 + (x1 - x0) * 0.5, y: -20 },
+    { x: x0 + (x1 - x0) * 0.66, y: -20 }, { x: x0 + (x1 - x0) * 0.88, y: -20 },
   ];
 }
+// šířka boční barikády (v dlaždicích) na každé straně
+function corridorSide() { return Math.max(2, Math.floor(COLS * 0.25)); }
 function clampIdx(i) { return Math.max(0, Math.min(NUM_MAPS - 1, i)); }
 applyMapDims(0);
 
@@ -192,26 +196,26 @@ function hordeComposition(wave) { const w = { chodec: 1 }; if (wave >= 7) w.beha
 /* ---------- Pasti (15) ---------- */
 /* Archetypy: ONESHOT | SLOW | DOT_AOE | EMITTER */
 const TRAPS = {
-  // jednorázové (nášlapné)
-  bodce:      { name:'Bodce',        arch:'ONESHOT', dmg:50,  charges:3, cost:40,  color:'#b8b8c0', cat:'trap' },
-  ostnaty_val:{ name:'Ostnatý val',  arch:'ONESHOT', dmg:26,  charges:6, cost:60,  color:'#9aa0a8', cat:'trap' },
-  medvedka:   { name:'Medvědí past', arch:'ONESHOT', dmg:95,  charges:1, cost:55,  color:'#6a6a72', cat:'trap' },
-  jama:       { name:'Bodcová jáma', arch:'ONESHOT', dmg:150, charges:1, cost:80,  color:'#3a3a42', cat:'trap' },
-  cakan:      { name:'Kolová past',  arch:'ONESHOT', dmg:70,  charges:2, cost:70,  color:'#c8a060', cat:'trap' },
-  // zpomalovací pole
-  smola:      { name:'Smola',        arch:'SLOW',    slow:{mul:0.4},  hp:70,  cost:55,  color:'#3a3320', cat:'trap' },
-  dehet:      { name:'Dehtová jáma', arch:'SLOW',    slow:{mul:0.55}, hp:90,  cost:75,  color:'#20201a', cat:'trap' },
-  mrazova:    { name:'Mrazivá past', arch:'SLOW',    slow:{mul:0.25}, hp:80,  cost:110, color:'#8fe0ff', cat:'trap' },
-  // plošné poškození v čase
-  ohniste:    { name:'Ohniště',      arch:'DOT_AOE', dps:12, radius:52, dur:600, cost:70,  color:'#ff7b3a', cat:'trap' },
-  jed:        { name:'Jedový plyn',  arch:'DOT_AOE', dps:9,  radius:64, dur:700, cost:85,  color:'#7ad06a', cat:'trap' },
-  kyselina:   { name:'Kyselá louže', arch:'DOT_AOE', dps:22, radius:42, dur:600, cost:100, color:'#c8e030', cat:'trap' },
-  svaty_kruh: { name:'Svatý kruh',   arch:'DOT_AOE', dps:16, radius:56, dur:800, cost:130, color:'#f0e0a0', cat:'trap' },
-  // věže (automatické, blokující)
-  samostril:  { name:'Samostříl',    arch:'EMITTER', dmg:11, range:210, rate:38, projSpeed:10, hp:90,  cost:120, color:'#8a7a5a', cat:'trap' },
-  tesla:      { name:'Teslova věž',  arch:'EMITTER', dmg:7,  range:190, rate:14, projSpeed:13, hp:80,  cost:150, color:'#8fbaff', cat:'trap' },
-  plamenomet: { name:'Plamenomet',   arch:'EMITTER', dmg:6,  range:130, rate:8,  projSpeed:8,  hp:100, cost:170, color:'#ff8a3a', cat:'trap' },
-  balista_v:  { name:'Věž s balistou', arch:'EMITTER', dmg:28, range:300, rate:80, projSpeed:15, pierce:3, hp:130, cost:220, color:'#7a6a4a', cat:'trap' },
+  // jednorázové (nášlapné) — po vybití zmizí, jinak trvalé
+  bodce:      { name:'Bodce',        arch:'ONESHOT', dmg:50,  charges:3, cost:70,  color:'#b8b8c0', cat:'trap' },
+  ostnaty_val:{ name:'Ostnatý val',  arch:'ONESHOT', dmg:26,  charges:6, cost:100, color:'#9aa0a8', cat:'trap' },
+  medvedka:   { name:'Medvědí past', arch:'ONESHOT', dmg:95,  charges:1, cost:95,  color:'#6a6a72', cat:'trap' },
+  jama:       { name:'Bodcová jáma', arch:'ONESHOT', dmg:150, charges:1, cost:140, color:'#3a3a42', cat:'trap' },
+  cakan:      { name:'Kolová past',  arch:'ONESHOT', dmg:70,  charges:2, cost:120, color:'#c8a060', cat:'trap' },
+  // zpomalovací pole (trvalé)
+  smola:      { name:'Smola',        arch:'SLOW',    slow:{mul:0.4},  hp:70,  cost:95,  color:'#3a3320', cat:'trap' },
+  dehet:      { name:'Dehtová jáma', arch:'SLOW',    slow:{mul:0.55}, hp:90,  cost:130, color:'#20201a', cat:'trap' },
+  mrazova:    { name:'Mrazivá past', arch:'SLOW',    slow:{mul:0.25}, hp:80,  cost:190, color:'#8fe0ff', cat:'trap' },
+  // plošné poškození v čase (trvalé)
+  ohniste:    { name:'Ohniště',      arch:'DOT_AOE', dps:12, radius:52, cost:120, color:'#ff7b3a', cat:'trap' },
+  jed:        { name:'Jedový plyn',  arch:'DOT_AOE', dps:9,  radius:64, cost:150, color:'#7ad06a', cat:'trap' },
+  kyselina:   { name:'Kyselá louže', arch:'DOT_AOE', dps:22, radius:42, cost:170, color:'#c8e030', cat:'trap' },
+  svaty_kruh: { name:'Svatý kruh',   arch:'DOT_AOE', dps:16, radius:56, cost:220, color:'#f0e0a0', cat:'trap' },
+  // věže (automatické, blokující, trvalé)
+  samostril:  { name:'Samostříl',    arch:'EMITTER', dmg:11, range:210, rate:38, projSpeed:10, hp:90,  cost:200, color:'#8a7a5a', cat:'trap' },
+  tesla:      { name:'Teslova věž',  arch:'EMITTER', dmg:7,  range:190, rate:14, projSpeed:13, hp:80,  cost:250, color:'#8fbaff', cat:'trap' },
+  plamenomet: { name:'Plamenomet',   arch:'EMITTER', dmg:6,  range:130, rate:8,  projSpeed:8,  hp:100, cost:290, color:'#ff8a3a', cat:'trap' },
+  balista_v:  { name:'Věž s balistou', arch:'EMITTER', dmg:28, range:300, rate:80, projSpeed:15, pierce:3, hp:130, cost:370, color:'#7a6a4a', cat:'trap' },
 };
 
 /* ---------- Zdi / stavby (blokují pohyb + mají HP) ---------- */

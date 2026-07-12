@@ -183,51 +183,46 @@ function shopCard(id, name, cost, cat, extra, act, disabled) {
     <div class="scc">${disabled || '💎 ' + cost}</div>
   </div>`;
 }
-let shopTab = 'shop';
+let shopTab = 'weapons';
+const SHOP_TABS = [['weapons', '🗡 Zbraně'], ['traps', '🪤 Pasti'], ['walls', '🧱 Zdi'], ['warriors', '🛡 Spojenci'], ['ammo', '🎯 Munice'], ['char', '🧙 Postava']];
 function refreshShop() { if (state === 'shop') renderShop(); lastShopSig = typeof shopSig === 'function' ? shopSig(run) : ''; }
 function shopHeader() {
-  return `<h2>${shopTab === 'char' ? 'Postava' : 'Obchod'} · vlna ${run.wave + 1}</h2>
+  return `<h2>Obchod · vlna ${run.wave + 1}</h2>
     <div class="wallet">💎 ${meGems()} &nbsp; ❤ ${run.lives} &nbsp; 🏰 ${players.map(p => p.class.name).join(' + ')}</div>
-    <div class="tabs">
-      <button data-act="tab" data-id="shop" class="tab ${shopTab === 'shop' ? 'on' : ''}">🛒 Obchod</button>
-      <button data-act="tab" data-id="char" class="tab ${shopTab === 'char' ? 'on' : ''}">🧙 Postava</button>
-    </div>`;
+    <div class="tabs">${SHOP_TABS.map(t => `<button data-act="tab" data-id="${t[0]}" class="tab ${shopTab === t[0] ? 'on' : ''}">${t[1]}</button>`).join('')}</div>`;
 }
 function renderShop() {
-  ovContent.innerHTML = shopHeader() + (shopTab === 'char' ? renderCharTab() : renderShopTab())
+  ovContent.innerHTML = shopHeader() + renderShopCat(shopTab)
     + `<button data-act="tobuild">Dál → stavění ▶</button>`;
   paintShopIcons();
 }
-function renderShopTab() {
-  const lvl = profile.playerLevel;
-  const weaponCards = Object.keys(WEAPONS).filter(id => !run.ownedWeapons.includes(id) && WEAPONS[id].cost > 0).map(id => {
-    const w = WEAPONS[id];
-    const locked = lvl < w.unlock;
-    const cost = costOf(w.cost, w.cat === 'melee' ? 'melee' : 'ranged');
-    const cant = locked ? `🔒 úroveň ${w.unlock}` : (meGems() < cost ? 'málo 💎' : null);
-    return shopCard(id, `${ico('weapon', id)} ${w.name}`, cost, null, `dmg ${w.dmg} · ${w.cat === 'melee' ? 'zblízka' : 'dálka'}`, 'buyweapon', cant);
-  }).join('');
-  // Vlastněné zbraně + vylepšení
-  const ownedCards = run.ownedWeapons.map(id => {
-    const w = WEAPONS[id]; const wl = run.wUpgrades[id] || 0;
-    const maxed = wl >= WEAPON_UP_MAX; const cost = weaponUpCost(w, wl);
-    const extra = `Lv.${wl} · dmg ${Math.round(w.dmg * (1 + 0.1 * wl))}`;
-    return shopCard(id, `${ico('weapon', id)} ${w.name}`, cost, null, extra, 'upweapon', maxed ? 'MAX' : (meGems() < cost ? 'málo 💎' : '⬆ ' + cost));
-  }).join('');
-  const ammoCards = Object.keys(AMMO).map(id => { const a = AMMO[id], cost = costOf(a.cost, 'ammo'); return shopCard(id, `🎯 ${a.name}`, cost, 'ammo', `+${a.bundle} · máš ${run.ammo[id] || 0}`, 'buyammo', meGems() < cost ? 'málo 💎' : null); }).join('');
-  const lifeCost = 40;
-  const lifeCard = shopCard('life', '❤ Život brány (+5)', lifeCost, 'ammo', `jádro: ${run.lives}`, 'buylife', meGems() < lifeCost ? 'málo 💎' : null);
-  const trapCards = Object.keys(TRAPS).map(id => { const t = TRAPS[id], cost = costOf(t.cost, 'trap'); return shopCard(id, `${ico('trap', id)} ${t.name}`, cost, 'trap', `máš ${run.owned[id] || 0}`, 'buybuild', meGems() < cost ? 'málo 💎' : null); }).join('');
-  const wallCards = Object.keys(STRUCTURES).map(id => { const s = STRUCTURES[id], cost = costOf(s.cost, 'wall'); return shopCard(id, `${ico('wall', id)} ${s.name}`, cost, 'wall', `HP ${Math.round(s.hp * (teamMax('wallHp') || 1))} · máš ${run.owned[id] || 0}`, 'buybuild', meGems() < cost ? 'málo 💎' : null); }).join('');
-  const warCards = Object.keys(WARRIORS).map(id => { const w = WARRIORS[id], cost = costOf(w.cost, 'warrior'); return shopCard(id, `${ico('warrior', id)} ${w.name}`, cost, 'warrior', `HP ${w.hp} · máš ${run.owned[id] || 0}`, 'buybuild', meGems() < cost ? 'málo 💎' : null); }).join('');
-  return `<div class="shop">
-      ${ownedCards ? `<h3>Vylepšit zbraně</h3><div class="grid">${ownedCards}</div>` : ''}
-      <h3>Nové zbraně</h3><div class="grid">${weaponCards || '<div class="empty">Vše koupeno</div>'}</div>
-      <h3>Munice a život</h3><div class="grid">${ammoCards}${lifeCard}</div>
-      <h3>Pasti a věže</h3><div class="grid">${trapCards}</div>
-      <h3>Zdi</h3><div class="grid">${wallCards}</div>
-      <h3>Spojenci</h3><div class="grid">${warCards}</div>
-    </div>`;
+function shopGrid(cards, empty) { return `<div class="grid">${cards || '<div class="empty">' + (empty || '—') + '</div>'}</div>`; }
+function renderShopCat(tab) {
+  if (tab === 'char') return renderCharTab();
+  if (tab === 'weapons') {
+    const lvl = profile.playerLevel;
+    const owned = run.ownedWeapons.map(id => { const w = WEAPONS[id], wl = run.wUpgrades[id] || 0, maxed = wl >= WEAPON_UP_MAX, cost = weaponUpCost(w, wl);
+      return shopCard(id, `${ico('weapon', id)} ${w.name}`, cost, null, `Lv.${wl} · dmg ${Math.round(w.dmg * (1 + 0.1 * wl))}`, 'upweapon', maxed ? 'MAX' : (meGems() < cost ? 'málo 💎' : '⬆ ' + cost)); }).join('');
+    const buy = Object.keys(WEAPONS).filter(id => !run.ownedWeapons.includes(id) && WEAPONS[id].cost > 0).map(id => { const w = WEAPONS[id], locked = lvl < w.unlock, cost = costOf(w.cost, w.cat === 'melee' ? 'melee' : 'ranged');
+      return shopCard(id, `${ico('weapon', id)} ${w.name}`, cost, null, `dmg ${w.dmg} · ${w.cat === 'melee' ? 'zblízka' : 'dálka'}`, 'buyweapon', locked ? `🔒 úroveň ${w.unlock}` : (meGems() < cost ? 'málo 💎' : null)); }).join('');
+    return `<div class="shop">${owned ? '<h3>Vylepšit vlastní zbraně</h3>' + shopGrid(owned) : ''}<h3>Koupit nové zbraně</h3>${shopGrid(buy, 'Vše koupeno')}</div>`;
+  }
+  if (tab === 'traps') {
+    const cards = Object.keys(TRAPS).map(id => { const t = TRAPS[id], cost = costOf(t.cost, 'trap'); return shopCard(id, `${ico('trap', id)} ${t.name}`, cost, 'trap', `máš ${run.owned[id] || 0}`, 'buybuild', meGems() < cost ? 'málo 💎' : null); }).join('');
+    return `<div class="shop"><p style="font-size:12px;color:#9aa87e">Pasti i věže jsou <b>trvalé</b> — zůstávají i po přechodu na další mapu.</p><h3>Pasti a věže (${Object.keys(TRAPS).length})</h3>${shopGrid(cards)}</div>`;
+  }
+  if (tab === 'walls') {
+    const cards = Object.keys(STRUCTURES).map(id => { const s = STRUCTURES[id], cost = costOf(s.cost, 'wall'); return shopCard(id, `${ico('wall', id)} ${s.name}`, cost, 'wall', `HP ${Math.round(s.hp * (teamMax('wallHp') || 1))} · máš ${run.owned[id] || 0}`, 'buybuild', meGems() < cost ? 'málo 💎' : null); }).join('');
+    return `<div class="shop"><h3>Zdi a brány</h3>${shopGrid(cards)}</div>`;
+  }
+  if (tab === 'warriors') {
+    const cards = Object.keys(WARRIORS).map(id => { const w = WARRIORS[id], cost = costOf(w.cost, 'warrior'); return shopCard(id, `${ico('warrior', id)} ${w.name}`, cost, 'warrior', `HP ${w.hp} · máš ${run.owned[id] || 0}`, 'buybuild', meGems() < cost ? 'málo 💎' : null); }).join('');
+    return `<div class="shop"><h3>Váleční spojenci</h3>${shopGrid(cards)}</div>`;
+  }
+  // ammo + život
+  const ammo = Object.keys(AMMO).map(id => { const a = AMMO[id], cost = costOf(a.cost, 'ammo'); return shopCard(id, `🎯 ${a.name}`, cost, 'ammo', `+${a.bundle} · máš ${run.ammo[id] || 0}`, 'buyammo', meGems() < cost ? 'málo 💎' : null); }).join('');
+  const life = shopCard('life', '❤ Život brány (+5)', 40, 'ammo', `jádro: ${run.lives}`, 'buylife', meGems() < 40 ? 'málo 💎' : null);
+  return `<div class="shop"><h3>Munice</h3>${shopGrid(ammo)}<h3>Život brány</h3>${shopGrid(life)}</div>`;
 }
 function renderCharTab() {
   const p = localPlayer() || players[0]; const up = run.upgrades; const w = WEAPONS[p.weaponId] || {};
@@ -398,9 +393,17 @@ function startBuildPhase() {
   setState('build');
 }
 function advanceToMap(i) {
+  // trvalé obrany si přeneseme na novou mapu (co se vejde do koridoru)
+  const keepW = walls.slice(), keepT = turrets.slice(), keepTr = traps.slice(), keepWa = warriors.slice();
   loadMap(i);
-  walls = []; turrets = []; traps = []; warriors = [];
   enemies = []; bullets = []; eBullets = []; groundFx = []; pickups = []; decals = []; particles = [];
+  walls = []; turrets = []; traps = []; warriors = [];
+  const valid = (tx, ty) => inBounds(tx, ty) && grid.tiles[tileIndex(tx, ty)] !== 1 && !grid.coreTiles.includes(tileIndex(tx, ty)) && grid.structures[tileIndex(tx, ty)] === null;
+  for (const s of keepW) if (valid(s.tx, s.ty)) { s.hp = s.hpMax; grid.structures[tileIndex(s.tx, s.ty)] = s; walls.push(s); }
+  for (const s of keepT) if (s.temp == null && valid(s.tx, s.ty)) { s.hp = s.hpMax; s.fireCool = 0; grid.structures[tileIndex(s.tx, s.ty)] = s; turrets.push(s); }
+  for (const t of keepTr) if (inBounds(t.tx, t.ty) && grid.tiles[tileIndex(t.tx, t.ty)] !== 1 && !grid.coreTiles.includes(tileIndex(t.tx, t.ty))) traps.push(t);
+  for (const w of keepWa) { const tx = Math.floor(w.x / TILE), ty = Math.floor(w.y / TILE); if (inBounds(tx, ty) && grid.tiles[tileIndex(tx, ty)] !== 1) { w.hp = w.hpMax; warriors.push(w); } }
+  flowDirty = true;
   const cx = (CORE.tx + CORE.w / 2) * TILE;
   players.forEach((p, idx) => { p.x = cx + (idx === 0 ? -20 : 20); p.y = (CORE.ty - 1) * TILE; });
   if (players[0]) updateCamera(players[0].x, players[0].y, 1, true);

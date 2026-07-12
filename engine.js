@@ -77,32 +77,32 @@ function loadMap(i) {
   buildArena();
   flowDirty = true;
 }
-// Procedurální rozmístění překážek (skály/zdi) do lajn a chokepointů; roste s pořadím mapy.
+// Boční barikády (koridor uprostřed) + chokepointy uvnitř; roste s pořadím mapy.
 function genObstacles(seed, mapIdx) {
   const rnd = mulberry32(seed);
   OBSTACLES = [];
   const blocked = new Set();
   const key = (tx, ty) => tx + ',' + ty;
   const isCore = (tx, ty) => tx >= CORE.tx - 1 && tx <= CORE.tx + CORE.w && ty >= CORE.ty - 1 && ty <= CORE.ty + CORE.h;
-  const put = (tx, ty) => { if (tx < 1 || ty < 1 || tx >= COLS - 1 || ty >= ROWS - 2 || isCore(tx, ty) || blocked.has(key(tx, ty))) return; blocked.add(key(tx, ty)); OBSTACLES.push([tx, ty]); };
-  // vodorovné „hradby" s mezerami (chokepointy) — víc na pozdějších mapách
-  const bands = 2 + Math.min(5, Math.floor(mapIdx / 2));
+  const addRaw = (tx, ty) => { if (!inBounds(tx, ty) || isCore(tx, ty) || blocked.has(key(tx, ty))) return; blocked.add(key(tx, ty)); OBSTACLES.push([tx, ty]); };
+  const side = corridorSide();
+  const L = side, R = COLS - side - 1;                 // průchozí koridor = sloupce [L..R]
+  // BOČNÍ BARIKÁDY — plné sloupce po stranách (nedá se tudy chodit)
+  for (let ty = 0; ty < ROWS; ty++) { for (let tx = 0; tx < L; tx++) addRaw(tx, ty); for (let tx = R + 1; tx < COLS; tx++) addRaw(tx, ty); }
+  const put = (tx, ty) => { if (tx < L || tx > R || ty < 2 || ty >= ROWS - 3) return; addRaw(tx, ty); };
+  // vodorovné hradby v koridoru s mezerou (chokepoint)
+  const bands = 2 + Math.min(4, Math.floor(mapIdx / 2));
   for (let b = 0; b < bands; b++) {
     const ty = 3 + Math.floor((ROWS - 8) * (b + 1) / (bands + 1)) + Math.floor((rnd() - 0.5) * 2);
-    const gaps = 1 + Math.floor(rnd() * 2);
-    const gapCols = new Set();
-    for (let g = 0; g < gaps; g++) gapCols.add(1 + Math.floor(rnd() * (COLS - 2)));
-    for (let tx = 1; tx < COLS - 1; tx++) {
-      let near = false; for (const gc of gapCols) if (Math.abs(tx - gc) <= 1) near = true;
-      if (!near && rnd() < 0.85) put(tx, ty);
-    }
+    const gapCols = new Set(); const gaps = 1 + Math.floor(rnd() * 2);
+    for (let g = 0; g < gaps; g++) gapCols.add(L + Math.floor(rnd() * (R - L + 1)));
+    for (let tx = L; tx <= R; tx++) { let near = false; for (const gc of gapCols) if (Math.abs(tx - gc) <= 1) near = true; if (!near && rnd() < 0.8) put(tx, ty); }
   }
-  // rozházené shluky balvanů
-  const clusters = 3 + Math.floor(mapIdx / 2) + Math.floor(rnd() * 3);
+  // shluky balvanů v koridoru
+  const clusters = 2 + Math.floor(mapIdx / 3) + Math.floor(rnd() * 2);
   for (let c = 0; c < clusters; c++) {
-    const cx = 1 + Math.floor(rnd() * (COLS - 2)), cy = 3 + Math.floor(rnd() * (ROWS - 8));
-    const s = 1 + Math.floor(rnd() * 2);
-    for (let dx = 0; dx <= s; dx++) for (let dy = 0; dy <= s; dy++) if (rnd() < 0.6) put(cx + dx, cy + dy);
+    const cx = L + Math.floor(rnd() * (R - L + 1)), cy = 3 + Math.floor(rnd() * (ROWS - 8)), s = 1 + Math.floor(rnd() * 2);
+    for (let dx = 0; dx <= s; dx++) for (let dy = 0; dy <= s; dy++) if (rnd() < 0.55) put(cx + dx, cy + dy);
   }
 }
 function tileIndex(tx, ty) { return ty * COLS + tx; }
