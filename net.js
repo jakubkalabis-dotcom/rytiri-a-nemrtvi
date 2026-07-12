@@ -158,6 +158,7 @@ function netHandleCmd(m) {
     case 'tobuild': startBuildPhase(); break;
     case 'toshop': setState('shop'); break;
     case 'cycle': cycleWeapon(players[1]); break;
+    case 'ability': useAbility(players[1]); break;
     case 'ready': readyGuest = true; if (readyHost) { startWave(); } break;
     case 'unready': readyGuest = false; break;
     case 'place': { const prev = buildSel; buildSel = m.sel; placeAt(m.tx, m.ty); buildSel = prev; break; }
@@ -170,22 +171,27 @@ function netHandleCmd(m) {
    SERIALIZACE (host → guest)
    ========================================================================== */
 function serializeState() {
-  return {
+  const snap = {
     st: state,
-    run: run && { gems: run.gems, lives: run.lives, wave: run.wave, score: run.score || 0, ownedWeapons: run.ownedWeapons, ammo: run.ammo, owned: run.owned },
+    run: run && { gems: run.gems, lives: run.lives, wave: run.wave, score: run.score || 0, ownedWeapons: run.ownedWeapons, ammo: run.ammo, owned: run.owned, combo: run.combo || 0, comboT: run.comboT || 0 },
     wave: wave && { boss: wave.boss, spawned: wave.spawned, total: wave.total, reward: wave.reward },
     banner: banner && { text: banner.text, t: banner.t, warn: banner.warn },
-    readyHost, readyGuest,
-    players: players.map(p => ({ x: p.x, y: p.y, r: p.r, hp: p.hp, hpMax: p.hpMax, aimAngle: p.aimAngle, inv: p.inv, downed: p.downed, classId: p.classId, color: p.color, weaponId: p.weaponId, mana: p.mana, manaMax: p.manaMax })),
-    enemies: enemies.map(e => ({ x: e.x, y: e.y, r: e.r, hp: e.hp, hpMax: e.hpMax, flash: e.flash, arch: e.arch, color: e.color })),
-    bullets: bullets.map(b => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, r: b.r, color: b.color, thrown: b.thrown })),
+    readyHost, readyGuest, freezeTimer,
+    players: players.map(p => ({ x: p.x, y: p.y, r: p.r, hp: p.hp, hpMax: p.hpMax, aimAngle: p.aimAngle, inv: p.inv, downed: p.downed, classId: p.classId, color: p.color, weaponId: p.weaponId, mana: p.mana, manaMax: p.manaMax, walk: p.walk || 0, buffRapid: p.buffRapid || 0, buffPower: p.buffPower || 0, shieldT: p.shieldT || 0, rageT: p.rageT || 0, abilityCd: p.abilityCd || 0 })),
+    enemies: enemies.map(e => ({ x: e.x, y: e.y, r: e.r, hp: e.hp, hpMax: e.hpMax, flash: e.flash, arch: e.arch, color: e.color, typeId: e.typeId, elite: e.elite, spawnT: e.spawnT })),
+    bullets: bullets.map(b => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, r: b.r, color: b.color, thrown: b.thrown, magic: b.magic, ang: b.ang, crit: b.crit })),
     eBullets: eBullets.map(b => ({ x: b.x, y: b.y, r: b.r, color: b.color })),
-    walls: walls.map(s => ({ defId: s.defId, tx: s.tx, ty: s.ty, x: s.x, y: s.y, hp: s.hp, hpMax: s.hpMax, flash: s.flash })),
-    turrets: turrets.map(s => ({ defId: s.defId, tx: s.tx, ty: s.ty, x: s.x, y: s.y, hp: s.hp, hpMax: s.hpMax, flash: s.flash })),
+    walls: walls.map(s => ({ defId: s.defId, tx: s.tx, ty: s.ty, x: s.x, y: s.y, hp: s.hp, hpMax: s.hpMax, flash: s.flash, temp: s.temp })),
+    turrets: turrets.map(s => ({ defId: s.defId, tx: s.tx, ty: s.ty, x: s.x, y: s.y, hp: s.hp, hpMax: s.hpMax, flash: s.flash, temp: s.temp })),
     traps: traps.map(t => ({ defId: t.defId, tx: t.tx, ty: t.ty, x: t.x, y: t.y, charges: t.charges, dur: t.dur })),
-    warriors: warriors.map(w => ({ defId: w.defId, x: w.x, y: w.y, r: w.r, hp: w.hp, hpMax: w.hpMax, flash: w.flash })),
+    warriors: warriors.map(w => ({ defId: w.defId, x: w.x, y: w.y, r: w.r, hp: w.hp, hpMax: w.hpMax, flash: w.flash, aim: w.aim })),
     groundFx: groundFx.map(g => ({ x: g.x, y: g.y, radius: g.radius, color: g.color })),
+    pickups: pickups.map(pu => ({ id: pu.id, x: pu.x, y: pu.y, bob: pu.bob })),
+    effects: effects.map(e => ({ ...e })),
+    ev: netEvents,
   };
+  netEvents = [];   // odeslané události zahodíme (jsou jednorázové)
+  return snap;
 }
 
 // Podpis ekonomiky pro rozhodnutí, kdy překreslit obchod na guestovi.
@@ -196,28 +202,42 @@ function applyState(s) {
   // ekonomika / run
   if (s.run) { if (!run) run = {}; Object.assign(run, s.run); if (!run.class && players[0]) run.class = players[0].class; }
   readyHost = s.readyHost; readyGuest = s.readyGuest;
+  freezeTimer = s.freezeTimer || 0;
   wave = s.wave ? s.wave : null;
   banner = s.banner ? s.banner : null;
   // hráči (napojíme třídu z classId)
   players.length = 0;
   for (const p of s.players) { p.class = CLASSES[p.classId]; p.passive = p.class ? p.class.passive : {}; p.input = { mx: 0, my: 0, aiming: false }; players.push(p); }
-  // nepřátelé / střely (render nepotřebuje def)
-  enemies = s.enemies;
+  // nepřátelé — napojíme def podle typeId (kvůli vykreslení bosse/pancíře)
+  enemies = s.enemies.map(e => (e.def = ENEMIES[e.typeId] || {}, e));
   bullets = s.bullets; eBullets = s.eBullets;
-  // stavby / pasti / válečníci — napojíme def podle defId (kvůli vykreslení)
   walls = s.walls.map(o => (o.def = STRUCTURES[o.defId] || TRAPS[o.defId], o));
   turrets = s.turrets.map(o => (o.def = TRAPS[o.defId], o));
   traps = s.traps.map(o => (o.def = TRAPS[o.defId], o));
   warriors = s.warriors.map(o => (o.def = WARRIORS[o.defId], o));
   groundFx = s.groundFx;
+  pickups = s.pickups || [];
+  effects = s.effects || [];
+  // jednorázové události → kosmetika u guesta
+  if (s.ev) for (const ev of s.ev) guestEvent(ev);
   // stav / overlay
   if (s.st !== state) {
-    setState(s.st);   // přepne overlay a případně překreslí menu/shop/…
+    if (s.st === 'combat' || s.st === 'build') { particles = []; floaters = []; decals = []; }
+    setState(s.st);
     lastShopSig = shopSig(run);
   } else if (s.st === 'shop') {
     const sig = shopSig(run);
-    if (sig !== lastShopSig) { renderShop(); lastShopSig = sig; }  // překresli obchod jen při změně
+    if (sig !== lastShopSig) { renderShop(); lastShopSig = sig; }
   }
+}
+// Guest vytvoří lokální efekt/zvuk podle události od hostitele.
+function guestEvent(ev) {
+  if (ev.k === 'hit') { spawnFloater(ev.x, ev.y, ev.d, !!ev.c); burst(ev.x, ev.y, '#ffd0d0', ev.c ? 6 : 3); sfx.hitFlesh(); }
+  else if (ev.k === 'die') { explode(ev.x, ev.y, ev.color, ev.big ? 28 : 12); spawnDecal(ev.x, ev.y, ev.big ? 24 : 12); sfx.enemyDie(); shake = Math.min(9, shake + (ev.big ? 5 : 1.2)); }
+  else if (ev.k === 'freeze') { flash = 0.2; sfx.magic(); }
+  else if (ev.k === 'pick') { burst(ev.x, ev.y, ev.color, 14); sfx.heal(); }
+  else if (ev.k === 'ability') { sfx.buy(); }
+  else if (ev.k === 'spawn') { burst(ev.x, ev.y, 'rgba(150,40,60,0.6)', 4); }
 }
 
 /* ============================================================================

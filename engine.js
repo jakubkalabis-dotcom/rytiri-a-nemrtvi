@@ -79,6 +79,86 @@ function buildArena() {
   for (let dy = 0; dy < CORE.h; dy++)
     for (let dx = 0; dx < CORE.w; dx++)
       grid.coreTiles.push(tileIndex(CORE.tx + dx, CORE.ty + dy));
+  buildTerrain();
+}
+
+/* ---------- Procedurální terén (offscreen cache) ---------- */
+// Deterministický PRNG, aby dekorace seděly stejně u hostitele i guesta.
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+let terrainCanvas = null, decor = [];
+function buildTerrain() {
+  const rnd = mulberry32(20260712);
+  // dekorace na volných dlaždicích
+  decor = [];
+  for (let ty = 0; ty < ROWS; ty++) for (let tx = 0; tx < COLS; tx++) {
+    const i = tileIndex(tx, ty);
+    if (grid.tiles[i] === 1) continue;
+    const isCore = tx >= CORE.tx && tx < CORE.tx + CORE.w && ty >= CORE.ty && ty < CORE.ty + CORE.h;
+    if (isCore) continue;
+    const r = rnd();
+    const x = (tx + rnd()) * TILE, y = (ty + rnd()) * TILE;
+    if (r < 0.05 && (ty < 3 || tx < 2 || tx > COLS - 3)) decor.push({ t: 'tree', x, y, s: 9 + rnd() * 5 });
+    else if (r < 0.12) decor.push({ t: 'bush', x, y, s: 4 + rnd() * 3 });
+    else if (r < 0.30) decor.push({ t: 'tuft', x, y, s: 3 + rnd() * 2, d: rnd() });
+    else if (r < 0.36) decor.push({ t: 'flower', x, y, hue: (rnd() * 360) | 0 });
+    else if (r < 0.40) decor.push({ t: 'pebble', x, y, s: 2 + rnd() * 2 });
+  }
+  // render do offscreen
+  let cnv = terrainCanvas;
+  if (!cnv) { cnv = document.createElement('canvas'); cnv.width = ARENA_W; cnv.height = ARENA_H; terrainCanvas = cnv; }
+  const g = cnv.getContext('2d');
+  g.clearRect(0, 0, ARENA_W, ARENA_H);
+  // tráva s jemnou variací
+  for (let ty = 0; ty < ROWS; ty++) for (let tx = 0; tx < COLS; tx++) {
+    const n = mulberry32((tx * 73856093) ^ (ty * 19349663))();
+    const base = 30 + Math.floor(n * 16);
+    g.fillStyle = `rgb(${34 + Math.floor(n * 10)},${base + 26},${28 + Math.floor(n * 8)})`;
+    g.fillRect(tx * TILE, ty * TILE, TILE, TILE);
+    if (n > 0.7) { g.fillStyle = 'rgba(255,255,255,0.03)'; g.fillRect(tx * TILE, ty * TILE, TILE, TILE); }
+  }
+  // dekorace
+  for (const d of decor) terrainDecor(g, d);
+  // balvany na překážkách
+  for (const [tx, ty] of OBSTACLES) terrainRock(g, tx, ty);
+}
+function terrainDecor(g, d) {
+  if (d.t === 'tuft') {
+    g.strokeStyle = 'rgba(120,170,90,0.5)'; g.lineWidth = 1.5;
+    for (let k = -1; k <= 1; k++) { g.beginPath(); g.moveTo(d.x + k * 2, d.y); g.lineTo(d.x + k * 2 + (d.d - 0.5) * 4, d.y - d.s * 2); g.stroke(); }
+  } else if (d.t === 'flower') {
+    g.fillStyle = 'rgba(120,170,90,0.5)'; g.fillRect(d.x - 0.5, d.y - 3, 1, 4);
+    g.fillStyle = `hsl(${d.hue},70%,65%)`; g.beginPath(); g.arc(d.x, d.y - 4, 1.8, 0, Math.PI * 2); g.fill();
+  } else if (d.t === 'pebble') {
+    g.fillStyle = 'rgba(120,120,120,0.5)'; g.beginPath(); g.arc(d.x, d.y, d.s, 0, Math.PI * 2); g.fill();
+  } else if (d.t === 'bush') {
+    g.fillStyle = '#2c4a24'; g.beginPath(); g.arc(d.x, d.y, d.s, 0, Math.PI * 2); g.arc(d.x + d.s * 0.7, d.y + 1, d.s * 0.8, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#356028'; g.beginPath(); g.arc(d.x - 1, d.y - 1, d.s * 0.6, 0, Math.PI * 2); g.fill();
+  } else if (d.t === 'tree') {
+    g.fillStyle = 'rgba(0,0,0,0.18)'; g.beginPath(); g.ellipse(d.x, d.y + d.s * 0.6, d.s, d.s * 0.4, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#5a3a20'; g.fillRect(d.x - 2, d.y - 2, 4, d.s);
+    g.fillStyle = '#2c4a24'; g.beginPath(); g.arc(d.x, d.y - d.s * 0.6, d.s, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#356028'; g.beginPath(); g.arc(d.x - d.s * 0.4, d.y - d.s * 0.8, d.s * 0.7, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#3f7030'; g.beginPath(); g.arc(d.x + d.s * 0.4, d.y - d.s * 0.7, d.s * 0.55, 0, Math.PI * 2); g.fill();
+  }
+}
+function terrainRock(g, tx, ty) {
+  const x = tx * TILE, y = ty * TILE;
+  g.fillStyle = 'rgba(0,0,0,0.25)'; g.beginPath(); g.ellipse(x + TILE / 2, y + TILE * 0.72, TILE * 0.42, TILE * 0.2, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#5a5f66'; roundRectOn(g, x + 3, y + 4, TILE - 6, TILE - 8, 7); g.fill();
+  g.fillStyle = '#6f757d'; roundRectOn(g, x + 6, y + 5, TILE - 15, TILE - 16, 5); g.fill();
+  g.fillStyle = '#4a4f55'; g.beginPath(); g.arc(x + TILE * 0.68, y + TILE * 0.62, 3, 0, Math.PI * 2); g.fill();
+  g.fillStyle = 'rgba(90,140,70,0.5)'; g.beginPath(); g.arc(x + TILE * 0.35, y + TILE * 0.7, 3, 0, Math.PI * 2); g.fill(); // mech
+}
+// roundRect na libovolný ctx
+function roundRectOn(g, x, y, w, h, r) {
+  g.beginPath(); g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+}
+// stín pod entitou
+function drawShadow(x, y, r) {
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.beginPath(); ctx.ellipse(x, y + r * 0.7, r * 0.95, r * 0.42, 0, 0, Math.PI * 2); ctx.fill();
 }
 
 /* ---------- Flow-field pathfinding (BFS distanční pole od jádra) ---------- */

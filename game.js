@@ -31,6 +31,8 @@ function applyLocalInput() {
   if (myInput.aiming) p.aimAngle = myInput.aimAngle;
 }
 let bullets = [], eBullets = [], groundFx = [], particles = [], effects = [];
+let pickups = [], floaters = [], decals = [], netEvents = [];
+let freezeTimer = 0, animClock = 0, hitStop = 0;
 let lastTime = performance.now();
 let shake = 0, flash = 0, banner = null;
 let wave = null;      // stav probíhající vlny
@@ -43,9 +45,10 @@ const STICK_R = 50;
 function inArena(y) { return y < ARENA_H; }
 const BTN = {
   weapon:   { x: 6,      y: ARENA_H + 8,  w: 150, h: 38 },
-  autofire: { x: 164,    y: ARENA_H + 8,  w: 120, h: 38 },
-  pause:    { x: W - 60, y: ARENA_H + 8,  w: 54,  h: 38 },
+  autofire: { x: 164,    y: ARENA_H + 8,  w: 104, h: 38 },
+  pause:    { x: W - 52, y: ARENA_H + 8,  w: 46,  h: 38 },
   switch2:  { x: 6,      y: ARENA_H + 52, w: 150, h: 36 },   // přepínač zbraní zpět
+  ability:  { x: 164,    y: ARENA_H + 50, w: 104, h: 40 },   // aktivní schopnost
   start:    { x: W - 132,y: ARENA_H + 50, w: 126, h: 40 },   // start vlny (build)
 };
 function inRect(px, py, r) { return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h; }
@@ -71,6 +74,8 @@ function newRun(classIds) {
   for (const wid of run.ownedWeapons) grantAmmoFor(wid, 2);
   enemies = []; walls = []; turrets = []; traps = []; warriors = [];
   bullets = []; eBullets = []; groundFx = []; particles = []; effects = [];
+  pickups = []; floaters = []; decals = []; netEvents = []; freezeTimer = 0;
+  run.combo = 0; run.comboT = 0;
   buildArena();
   flowDirty = true;
   players.length = 0;
@@ -92,6 +97,7 @@ function makePlayer(cls, classId) {
     weaponId: cls.start[0], cool: 0, aimAngle: -Math.PI / 2, inv: 0, downed: false,
     manaMax: Math.round(100 * (pas.manaMax || 1)), mana: Math.round(100 * (pas.manaMax || 1)),
     manaRegen: 0.28 * (pas.manaRegen || 1),
+    abilityCd: 0, buffRapid: 0, buffPower: 0, shieldT: 0, rageT: 0, dashT: 0, walk: 0,
     passive: pas,
     input: { mx: 0, my: 0, aiming: false },
   };
@@ -380,8 +386,10 @@ function startWave() {
   const wv = run.wave;
   const boss = isBossWave(wv);
   const queue = [];
+  let bossId = null;
   if (boss) {
-    queue.push('nekromant');
+    bossId = bossForWave(wv);
+    queue.push(bossId);
     const minions = 6 + wv;
     const comp = waveComposition(wv);
     for (let k = 0; k < minions; k++) queue.push(pickWeighted(comp));
@@ -394,7 +402,7 @@ function startWave() {
            kills: 0, reward: { gems: 0, kills: 0, xp: 0 } };
   flowDirty = true;
   setState('combat');
-  banner = { text: boss ? '⚠ BOSS: NEKROMANT ⚠' : 'VLNA ' + wv, t: 100, warn: boss };
+  banner = { text: boss ? '⚠ BOSS: ' + ENEMIES[bossId].name.toUpperCase() + ' ⚠' : 'VLNA ' + wv, t: 110, warn: boss };
   if (boss) sfx.boss(); else sfx.waveStart();
 }
 function pickWeighted(weights) {
@@ -407,35 +415,50 @@ function spawnEnemy(typeId) {
   const base = ENEMIES[typeId];
   const sc = enemyScale(run.wave);
   const s = SPAWNS[(Math.random() * SPAWNS.length) | 0];
-  // boss škáluje HP podle pořadí boss vlny (5., 10., 15. …), ostatní podle vlny
   const bossNum = Math.max(1, Math.floor(run.wave / 5));
-  const hp = Math.round(base.hp * (base.arch === 'BOSS' ? (1 + 0.25 * (bossNum - 1)) : sc.hp));
+  let hpMul = base.arch === 'BOSS' ? (1 + 0.25 * (bossNum - 1)) : sc.hp;
+  let spdMul = base.arch === 'BOSS' ? 1 : sc.spd;
+  let dmgMul = sc.dmg;
+  // elitní přídomek (jen běžní nepřátelé)
+  let elite = null;
+  if (base.arch !== 'BOSS' && Math.random() < eliteChance(run.wave)) {
+    elite = ELITE_KEYS[(Math.random() * ELITE_KEYS.length) | 0];
+    const ed = ELITES[elite]; hpMul *= ed.hpMul; spdMul *= ed.spdMul; dmgMul *= ed.dmgMul;
+  }
+  const hp = Math.round(base.hp * hpMul);
   const e = {
     typeId, arch: base.arch, def: base,
-    x: s.x, y: s.y, r: base.size / 2,
+    x: s.x, y: s.y, r: base.size / 2, spawnT: 22,
     hp, hpMax: hp,
-    speed: base.speed * sc.spd,
-    dmg: base.dmg * sc.dmg,
+    speed: base.speed * spdMul,
+    dmg: base.dmg * dmgMul,
     atkRate: base.atkRate, atkCool: 0, fireCool: 60, wallCool: 0,
-    color: base.color, flash: 0,
+    color: base.color, flash: 0, elite,
     slowMul: 1, slowTimer: 0, dotDps: 0, dotTimer: 0,
     summonCool: base.summonRate || 0,
   };
   enemies.push(e);
+  emitEv({ k: 'spawn', x: e.x, y: e.y });
 }
+// Ephemerální událost pro guesta (kosmetika: exploze, sfx). Host je posílá dál.
+function emitEv(ev) { if (net.role === 'host') netEvents.push(ev); }
 
 /* ============================================================================
    BOJ — zbraně
    ========================================================================== */
 function activeWeapon(p) { return WEAPONS[p.weaponId]; }
 function rateMod(p, w) {
-  if (w.cat === 'ranged' && p.passive.rangedRate) return p.passive.rangedRate;
-  return 1;
+  let m = 1;
+  if (w.cat === 'ranged' && p.passive.rangedRate) m = p.passive.rangedRate;
+  if (p.buffRapid > 0) m *= 0.5;   // drop „Rychlopalba"
+  if (p.rageT > 0) m *= 0.6;       // berserk zuřivost
+  return m;
 }
 function rangeMod(p, w) {
   if (w.cat === 'ranged' && p.passive.rangedRange) return p.passive.rangedRange;
   return 1;
 }
+// Vrací {dmg, crit}
 function weaponDmg(p, w) {
   let d = w.dmg;
   const pas = p.passive;
@@ -443,9 +466,12 @@ function weaponDmg(p, w) {
   if (w.ammo === 'mana') d *= (pas.magicDmg || 1);
   if (w.arch === 'THROWN_AOE') d *= (pas.aoeDmg || 1);
   d *= (pas.holyDmg || 1);
-  // berserk: čím méně HP, tím víc poškození (do +40 %)
+  if (p.buffPower > 0) d *= 1.5;   // drop „Síla"
+  if (p.rageT > 0) d *= 1.8;       // berserk zuřivost
   if (pas.berserk) d *= 1 + 0.4 * (1 - p.hp / p.hpMax);
-  if (pas.crit && Math.random() < pas.crit) { d *= (pas.critMul || 2); }
+  let crit = false;
+  if (pas.crit && Math.random() < pas.crit) { d *= (pas.critMul || 2); crit = true; }
+  p._lastCrit = crit;
   return d;
 }
 function consumeAmmo(p, w) {
@@ -504,17 +530,18 @@ function spawnBullet(p, w, aim, range, dmg) {
   bullets.push({
     x: p.x + Math.cos(aim) * p.r, y: p.y + Math.sin(aim) * p.r,
     vx: Math.cos(aim) * w.projSpeed, vy: Math.sin(aim) * w.projSpeed,
-    r: 4, dmg, pierce: w.pierce || 0, range, traveled: 0,
-    dot: w.dot, slow: w.slow, knockback: w.knockback || 0,
-    color: w.color, hitIds: [], owner: p,
+    r: 4, dmg, pierce: w.pierce || 0, range, traveled: 0, ang: aim,
+    dot: w.dot, slow: w.slow, knockback: w.knockback || 0, magic: w.ammo === 'mana',
+    color: w.color, hitIds: [], owner: p, crit: p ? p._lastCrit : false,
   });
+  effects.push({ type: 'muzzle', x: p.x + Math.cos(aim) * p.r, y: p.y + Math.sin(aim) * p.r, a: aim, t: 4, color: w.color });
 }
 function spawnThrown(p, w, aim, range, dmg) {
   const rad = (w.aoeRadius || 50) * (p.passive.aoeRadius || 1);
   bullets.push({
     x: p.x + Math.cos(aim) * p.r, y: p.y + Math.sin(aim) * p.r,
     vx: Math.cos(aim) * w.projSpeed, vy: Math.sin(aim) * w.projSpeed,
-    r: 6, dmg, pierce: 0, range, traveled: 0, thrown: true, aoeRadius: rad,
+    r: 6, dmg, pierce: 0, range, traveled: 0, thrown: true, aoeRadius: rad, spin: 0,
     dot: w.dot, color: w.color, hitIds: [], owner: p,
   });
 }
@@ -552,26 +579,45 @@ function hitscan(p, w, aim, range, dmg) {
   }
 }
 
-function damageEnemy(e, dmg, w, p) {
+function damageEnemy(e, dmg, w, p, crit) {
+  // pancéřovaní pohltí část poškození
+  if (e.def.armored || (e.elite === 'pancerovany')) dmg *= 0.7;
   e.hp -= dmg;
   e.flash = 5;
+  if (crit == null && p) crit = p._lastCrit;
   if (w && w.dot) { e.dotDps = Math.max(e.dotDps, w.dot.dps * ((p && p.passive.dotDmg) || 1)); e.dotTimer = w.dot.dur; }
   if (w && w.slow) { e.slowMul = w.slow.mul; e.slowTimer = w.slow.dur; }
-  burst(e.x, e.y, '#ffd0d0', 3);
+  spawnFloater(e.x, e.y - e.r, Math.round(dmg), crit);
+  burst(e.x, e.y, '#ffd0d0', crit ? 6 : 3);
+  emitEv({ k: 'hit', x: e.x, y: e.y - e.r, d: Math.round(dmg), c: crit ? 1 : 0 });
   sfx.hitFlesh();
   if (e.hp <= 0) killEnemy(e);
+  else if (crit) hitStop = Math.max(hitStop, 2);
 }
 function killEnemy(e) {
   if (e.dead) return;
   e.dead = true;
-  const gems = Math.round((e.def.bounty || 4) * GEMS_PER_KILL_MUL);
-  run.gems += gems; run.score = (run.score || 0) + (e.def.score || 10);
+  // combo → násobič skóre a gemů
+  run.combo = (run.combo || 0) + 1; run.comboT = 180;
+  const mult = comboMult();
+  const gems = Math.max(1, Math.round((e.def.bounty || 4) * GEMS_PER_KILL_MUL * mult * (e.elite ? 3 : 1)));
+  run.gems += gems; run.score = (run.score || 0) + Math.round((e.def.score || 10) * mult * (e.elite ? 3 : 1));
   if (wave) { wave.kills++; wave.reward.kills++; }
-  addXp(xpForKill(e.def));
-  explode(e.x, e.y, e.color, e.arch === 'TANK' || e.arch === 'BOSS' ? 26 : 12);
+  addXp(xpForKill(e.def) * (e.elite ? 3 : 1));
+  const big = e.arch === 'TANK' || e.arch === 'BOSS';
+  explode(e.x, e.y, e.color, big ? 28 : 12);
+  spawnDecal(e.x, e.y, e.arch === 'BOSS' ? 26 : e.r);
+  emitEv({ k: 'die', x: e.x, y: e.y, color: e.color, big: big ? 1 : 0 });
   sfx.enemyDie();
-  shake = Math.min(8, shake + (e.arch === 'BOSS' ? 8 : e.arch === 'TANK' ? 3 : 1));
+  shake = Math.min(9, shake + (e.arch === 'BOSS' ? 9 : e.arch === 'TANK' ? 3 : 1.2));
+  if (e.arch === 'BOSS') hitStop = 6;
+  // elita „zhoubný" vybuchne, elita jindy → zaručený drop
+  if (e.elite === 'zhoubny' || e.def.arch === 'EXPLODER' && false) aoeExplosion(e.x, e.y, 60, e.dmg, null, '#c060ff');
+  if (e.elite) dropPickup(e.x, e.y, true);
+  else if (Math.random() < 0.09) dropPickup(e.x, e.y, false);
 }
+// Násobič combo: 1× → až ~3× při dlouhé sérii
+function comboMult() { return 1 + Math.min(2, (run.combo || 0) * 0.05); }
 function addXp(n) {
   profile.xp += n;
   while (profile.xp >= xpToLevel(profile.playerLevel)) {
@@ -596,9 +642,10 @@ function nearestEnemyExcluding(x, y, range, ex) {
   for (const e of cand) { if (e.dead || ex.has(e)) continue; const dx = e.x - x, dy = e.y - y, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = e; } }
   return best;
 }
+// Nepřátelé cílí jen ŽIVÉ hráče; když jsou všichni padlí, vrací null → jdou k jádru.
 function nearestPlayer(x, y) {
   let best = null, bd = Infinity;
-  for (const p of players) { const d = (p.x - x) ** 2 + (p.y - y) ** 2; if (d < bd) { bd = d; best = p; } }
+  for (const p of players) { if (p.downed) continue; const d = (p.x - x) ** 2 + (p.y - y) ** 2; if (d < bd) { bd = d; best = p; } }
   return best;
 }
 
@@ -614,6 +661,27 @@ function burst(x, y, color, n = 10) {
 function explode(x, y, color, n = 14) {
   burst(x, y, color, n);
   particles.push({ x, y, ring: true, r: 3, rMax: 20 + n, life: 1, decay: 0.07, color });
+  // trocha „dýmu"
+  for (let i = 0; i < Math.min(6, n / 3); i++) {
+    const a = Math.random() * Math.PI * 2, s = Math.random() * 1.5;
+    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 0.4, life: 1, decay: 0.02, size: 4 + Math.random() * 4, color: 'rgba(40,40,40,0.5)', smoke: true });
+  }
+}
+// Plovoucí číslo poškození
+function spawnFloater(x, y, dmg, crit) {
+  floaters.push({ x: x + (Math.random() - 0.5) * 6, y, txt: '' + dmg, t: crit ? 46 : 34, crit: !!crit, vy: crit ? -1.1 : -0.8 });
+}
+// Trvalá krvavá skvrna na zemi
+function spawnDecal(x, y, r) {
+  decals.push({ x, y, r: r * 0.7 + Math.random() * 4, a: 0.35 });
+  if (decals.length > 60) decals.shift();
+}
+// Drop dočasného bonusu
+function dropPickup(x, y, guaranteed) {
+  let total = 0; for (const k in DROP_WEIGHTS) total += DROP_WEIGHTS[k];
+  let r = Math.random() * total, id = 'heal';
+  for (const k in DROP_WEIGHTS) { r -= DROP_WEIGHTS[k]; if (r <= 0) { id = k; break; } }
+  pickups.push({ id, x, y, t: 600, bob: Math.random() * 6 });
 }
 function aoeExplosion(x, y, radius, dmg, dot, srcColor) {
   explode(x, y, srcColor || '#ff8a3a', 24);
@@ -633,9 +701,11 @@ function aoeExplosion(x, y, radius, dmg, dot, srcColor) {
    UPDATE (per stav)
    ========================================================================== */
 function update(dt) {
+  animClock += dt;
   if (banner && (banner.t -= dt) <= 0) banner = null;
   if (shake > 0) shake = Math.max(0, shake - 0.5 * dt);
   if (flash > 0) flash = Math.max(0, flash - 0.05 * dt);
+  if (hitStop > 0) { hitStop -= dt; return; }   // krátké „zamrznutí" po velkém zásahu
   if (state === 'combat') updateCombat(dt);
   else if (state === 'build') updateBuild(dt);
 }
@@ -650,6 +720,9 @@ function updateCombat(dt) {
   enemyHash.clear();
   for (const e of enemies) enemyHash.insert(e);
 
+  if (freezeTimer > 0) freezeTimer -= dt;
+  if (run.comboT > 0) { run.comboT -= dt; if (run.comboT <= 0) run.combo = 0; }
+
   updatePlayers(dt);
   updateEnemies(dt);
   updateWarriors(dt);
@@ -658,7 +731,9 @@ function updateCombat(dt) {
   updateGroundFx(dt);
   updateBullets(dt);
   updateEnemyBullets(dt);
+  updatePickups(dt);
   updateParticles(dt);
+  updateFloaters(dt);
   updateEffects(dt);
 
   // spawn z fronty
@@ -696,17 +771,49 @@ function updatePlayers(dt) {
   for (const p of players) {
     if (p.downed) continue;   // padlý hráč čeká na oživení (další fáze stavění)
     if (p.inv > 0) p.inv -= dt;
+    if (p.abilityCd > 0) p.abilityCd -= dt;
+    if (p.buffRapid > 0) p.buffRapid -= dt;
+    if (p.buffPower > 0) p.buffPower -= dt;
+    if (p.shieldT > 0) p.shieldT -= dt;
+    if (p.rageT > 0) p.rageT -= dt;
     if (p.mana < p.manaMax) p.mana = Math.min(p.manaMax, p.mana + p.manaRegen * dt);
     // léčivá aura (kněz)
     if (p.passive.healAura) p.hp = Math.min(p.hpMax, p.hp + p.passive.healAura * dt);
     // pohyb
     let sp = p.baseSpeed;
     if (p.passive.berserk && p.hp < p.hpMax * 0.35) sp *= 1.3;
+    if (p.rageT > 0) sp *= 1.25;
+    if (p.dashT > 0) { // výpad (zvěd) — rychlý pohyb ve směru míření
+      p.dashT -= dt; sp *= 3.4; p.input.mx = Math.cos(p.aimAngle); p.input.my = Math.sin(p.aimAngle); p.inv = Math.max(p.inv, 4);
+      const near = enemyHash.query(p.x, p.y, p.r + 14);
+      for (const e of near) if (!e.dead && dist(p.x, p.y, e.x, e.y) < e.r + p.r + 4) damageEnemy(e, 18 * (p.passive.meleeDmg || 1), null, p);
+    }
+    const moving = Math.abs(p.input.mx) + Math.abs(p.input.my) > 0.05;
+    if (moving) { p.walk += 0.3 * dt; if (Math.random() < 0.12) burst(p.x, p.y + p.r * 0.6, 'rgba(120,110,90,0.5)', 1); } // prach
     const nx = p.x + p.input.mx * sp * dt, ny = p.y + p.input.my * sp * dt;
     moveEntity(p, nx, ny);
     p.x = clamp(p.x, p.r, ARENA_W - p.r); p.y = clamp(p.y, p.r, ARENA_H - p.r);
     // střelba
     updatePlayerCombat(p, dt);
+  }
+}
+// Aktivní schopnost třídy
+function useAbility(p) {
+  if (!p || p.downed || p.abilityCd > 0) return;
+  const ab = ABILITIES[p.classId]; if (!ab) return;
+  p.abilityCd = ab.cd;
+  const a = p.aimAngle;
+  emitEv({ k: 'ability', x: p.x, y: p.y, cls: p.classId });
+  effects.push({ type: 'nova', x: p.x, y: p.y, r: 4, rMax: 90, t: 24, color: p.color });
+  switch (p.classId) {
+    case 'rytir': p.shieldT = 300; for (const e of enemyHash.query(p.x, p.y, 160)) if (!e.dead) { const an = Math.atan2(p.y - e.y, p.x - e.x); e.x += Math.cos(an) * 6; e.y += Math.sin(an) * 6; } sfx.buy(); break;
+    case 'lovec': { const wq = WEAPONS.dlouhy_luk; for (let i = -4; i <= 4; i++) spawnBullet(p, wq, a + i * 0.14, 400, wq.dmg * 1.2); sfx.bow(); break; }
+    case 'berserk': p.rageT = 360; p.hp = Math.min(p.hpMax, p.hp + 20); sfx.groan(); break;
+    case 'zved': p.dashT = 12; sfx.throwsnd(); break;
+    case 'mag': { freezeTimer = Math.max(freezeTimer, 90); aoeExplosion(p.x, p.y, 120, 30 * (p.passive.magicDmg || 1), null, '#8fe0ff'); for (const e of enemyHash.query(p.x, p.y, 120)) if (!e.dead) { e.slowMul = 0.4; e.slowTimer = 180; } break; }
+    case 'alchymista': for (let i = 0; i < 6; i++) { const an = (i / 6) * Math.PI * 2; aoeExplosion(p.x + Math.cos(an) * 60, p.y + Math.sin(an) * 60, 60 * (p.passive.aoeRadius || 1), 30 * (p.passive.aoeDmg || 1), null, '#ff7b3a'); } break;
+    case 'inzenyr': { const tx = Math.floor(p.x / TILE), ty = Math.floor(p.y / TILE); const def = TRAPS.samostril; if (!isBlocked(tx, ty) && !grid.coreTiles.includes(tileIndex(tx, ty)) && grid.structures[tileIndex(tx, ty)] === null) { const obj = { def, defId: 'samostril', tx, ty, x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE, r: 15, hp: 90, hpMax: 90, fireCool: 0, flash: 0, temp: 900 }; grid.structures[tileIndex(tx, ty)] = obj; turrets.push(obj); flowDirty = true; } for (const s of walls) s.hp = s.hpMax; sfx.place(); break; }
+    case 'knez': for (const q of players) if (!q.downed) { q.hp = Math.min(q.hpMax, q.hp + 60); q.buffPower = 300; } aoeExplosion(p.x, p.y, 130, 40, null, '#f0e0a0'); break;
   }
 }
 function updatePlayerCombat(p, dt) {
@@ -729,6 +836,7 @@ function damagePlayer(p, amount) {
   if (p.passive.dodge && Math.random() < p.passive.dodge) { effects.push({ type: 'text', x: p.x, y: p.y - 20, txt: 'úhyb', t: 30, color: '#c8c85c' }); return; }
   let dmg = amount;
   if (p.passive.block && Math.random() < p.passive.block) dmg *= 0.4;
+  if (p.shieldT > 0) dmg *= 0.35;   // aktivní štít (Bojový pokřik)
   p.hp -= dmg; p.inv = 45;
   flash = 0.5; shake = Math.min(9, shake + 5); sfx.hurt();
   burst(p.x, p.y, '#ff6a6a', 12);
@@ -854,7 +962,8 @@ function updateEnemies(dt) {
       if (od > 0 && od < e.r + o.r) { dx += ox / od * 0.5; dy += oy / od * 0.5; }
     }
 
-    const spd = e.speed * e.slowMul;
+    if (e.spawnT > 0) e.spawnT -= dt;   // krátká „nezranitelnost" objevení (jen vizuál)
+    const spd = e.speed * e.slowMul * (freezeTimer > 0 ? 0 : 1);
     // past „smola" pod nohama
     const trap = traps.find(t => t.def.arch === 'SLOW' && t.tx === Math.floor(e.x / TILE) && t.ty === Math.floor(e.y / TILE));
     const slowField = trap ? trap.def.slow.mul : 1;
@@ -962,6 +1071,7 @@ function updateWarriors(dt) {
 function updateTurrets(dt) {
   for (const t of turrets) {
     if (t.flash > 0) t.flash -= dt;
+    if (t.temp != null) { t.temp -= dt; if (t.temp <= 0) { t.hp = 0; damageStructure(t, 0); continue; } }
     t.fireCool -= dt;
     const def = t.def;
     const rate = def.rate * teamRate('emitterRate');
@@ -1030,7 +1140,7 @@ function updateBullets(dt) {
       if (e.dead || b.hitIds.includes(e)) continue;
       if (dist(b.x, b.y, e.x, e.y) < e.r + b.r) {
         if (b.thrown) { aoeExplosion(b.x, b.y, b.aoeRadius, b.dmg, b.dot, b.color); b.dead = true; break; }
-        damageEnemy(e, b.dmg, b, b.owner); b.hitIds.push(e);
+        damageEnemy(e, b.dmg, b, b.owner, b.crit); b.hitIds.push(e);
         if (b.knockback) { const a = Math.atan2(b.vy, b.vx); e.x += Math.cos(a) * b.knockback; e.y += Math.sin(a) * b.knockback; }
         if (b.owner && b.owner.passive && b.owner.passive.lifesteal) b.owner.hp = Math.min(b.owner.hpMax, b.owner.hp + b.dmg * b.owner.passive.lifesteal);
         if (b.pierce > 0) b.pierce--; else { b.dead = true; break; }
@@ -1046,7 +1156,7 @@ function updateEnemyBullets(dt) {
     if (blocksProjectile(tx, ty)) { b.dead = true; continue; }
     if (b.x < -20 || b.x > ARENA_W + 20 || b.y < -20 || b.y > ARENA_H + 20) { b.dead = true; continue; }
     for (const p of players) {
-      if (p.inv <= 0 && hitCircle(b, p)) { damagePlayer(p, b.dmg); b.dead = true; break; }
+      if (!p.downed && p.inv <= 0 && hitCircle(b, p)) { damagePlayer(p, b.dmg); b.dead = true; break; }
     }
     for (const wr of warriors) { if (hitCircle(b, wr)) { wr.hp -= b.dmg; wr.flash = 5; b.dead = true; break; } }
   }
@@ -1056,8 +1166,34 @@ function updateParticles(dt) {
   for (const p of particles) {
     if (p.ring) { p.r += (p.rMax - p.r) * 0.2 * dt; p.life -= p.decay * dt; continue; }
     p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.92; p.vy *= 0.92; p.life -= p.decay * dt;
+    if (p.smoke) p.size += 0.3 * dt;
   }
   particles = particles.filter(p => p.life > 0);
+}
+function updateFloaters(dt) {
+  for (const f of floaters) { f.y += f.vy * dt; f.vy *= 0.94; f.t -= dt; }
+  floaters = floaters.filter(f => f.t > 0);
+}
+function updatePickups(dt) {
+  for (const pu of pickups) {
+    pu.t -= dt; pu.bob += 0.1 * dt;
+    for (const p of players) {
+      if (p.downed) continue;
+      if (dist(pu.x, pu.y, p.x, p.y) < p.r + 14) { applyPickup(pu, p); pu.dead = true; break; }
+    }
+  }
+  pickups = pickups.filter(pu => !pu.dead && pu.t > 0);
+}
+function applyPickup(pu, p) {
+  const d = DROPS[pu.id];
+  if (d.kind === 'buff') { if (pu.id === 'rapid') p.buffRapid = d.dur; else p.buffPower = d.dur; }
+  else if (d.kind === 'freeze') { freezeTimer = 150; emitEv({ k: 'freeze' }); }
+  else if (d.kind === 'heal') { for (const q of players) if (!q.downed) q.hp = Math.min(q.hpMax, q.hp + 45); }
+  else if (d.kind === 'gems') { run.gems += d.gems; }
+  burst(pu.x, pu.y, d.color, 14);
+  spawnFloater(pu.x, pu.y - 8, 0, false); floaters[floaters.length - 1].txt = d.icon + ' ' + d.name; floaters[floaters.length - 1].pickup = d.color;
+  sfx.heal();
+  emitEv({ k: 'pick', x: pu.x, y: pu.y, color: d.color });
 }
 function updateEffects(dt) {
   for (const e of effects) e.t -= dt;
@@ -1069,14 +1205,16 @@ function updateEffects(dt) {
    ========================================================================== */
 function render() {
   ctx.clearRect(0, 0, W, H);
-  if (state === 'menu' || state === 'class') { drawMenuBg(); return; }
+  if (state === 'menu' || state === 'class' || state === 'host' || state === 'join') { drawMenuBg(); return; }
   ctx.save();
   if (shake > 0.2) ctx.translate((Math.random() - 0.5) * shake * 2, (Math.random() - 0.5) * shake * 2);
   applyCamera();
   drawArena();
+  drawDecals();
+  drawGroundFx();
   drawTraps();
   drawStructures();
-  drawGroundFx();
+  drawPickups();
   drawWarriors();
   drawEnemies();
   drawBullets();
@@ -1084,6 +1222,9 @@ function render() {
   drawPlayers();
   if (state === 'build') drawBuildGhost();
   drawParticles();
+  drawFloaters();
+  if (freezeTimer > 0) { ctx.fillStyle = 'rgba(140,220,255,0.12)'; ctx.fillRect(0, 0, ARENA_W, ARENA_H); }
+  drawVignette();
   ctx.restore();
 
   // HUD (bez otřesu)
@@ -1091,47 +1232,107 @@ function render() {
   if (banner) drawBanner();
   if (flash > 0.01) { ctx.fillStyle = `rgba(255,40,40,${flash})`; ctx.fillRect(0, 0, W, ARENA_H); }
 }
+function drawVignette() {
+  if (!vignetteCache) {
+    vignetteCache = document.createElement('canvas'); vignetteCache.width = ARENA_W; vignetteCache.height = ARENA_H;
+    const g = vignetteCache.getContext('2d');
+    const rg = g.createRadialGradient(ARENA_W / 2, ARENA_H / 2, ARENA_H * 0.35, ARENA_W / 2, ARENA_H / 2, ARENA_H * 0.72);
+    rg.addColorStop(0, 'rgba(0,0,0,0)'); rg.addColorStop(1, 'rgba(0,0,0,0.42)');
+    g.fillStyle = rg; g.fillRect(0, 0, ARENA_W, ARENA_H);
+  }
+  ctx.drawImage(vignetteCache, 0, 0);
+}
+let vignetteCache = null;
 
 function drawMenuBg() {
-  ctx.fillStyle = '#1a2a18';
-  ctx.fillRect(0, 0, W, H);
-  ctx.globalAlpha = 0.25;
-  for (let ty = 0; ty < ROWS; ty++) for (let tx = 0; tx < COLS; tx++) {
-    ctx.fillStyle = (tx + ty) % 2 ? '#24361f' : '#20301c';
-    ctx.fillRect(tx * TILE, ty * TILE, TILE, TILE);
-  }
-  ctx.globalAlpha = 1;
+  if (terrainCanvas) ctx.drawImage(terrainCanvas, 0, 0, ARENA_W, ARENA_H, 0, 0, W, H);
+  else { ctx.fillStyle = '#243018'; ctx.fillRect(0, 0, W, H); }
+  ctx.fillStyle = 'rgba(8,10,6,0.55)'; ctx.fillRect(0, 0, W, H);
 }
 function drawArena() {
-  for (let ty = 0; ty < ROWS; ty++)
-    for (let tx = 0; tx < COLS; tx++) {
-      ctx.fillStyle = (tx + ty) % 2 ? '#2c4224' : '#284020';
-      ctx.fillRect(tx * TILE, ty * TILE, TILE, TILE);
-    }
-  // překážky (skály)
-  for (const [tx, ty] of OBSTACLES) {
-    ctx.fillStyle = '#5a5f66';
-    roundRect(tx * TILE + 3, ty * TILE + 3, TILE - 6, TILE - 6, 6); ctx.fill();
-    ctx.fillStyle = '#6f757d';
-    roundRect(tx * TILE + 7, ty * TILE + 6, TILE - 16, TILE - 16, 4); ctx.fill();
-  }
-  // spawn brány
+  if (terrainCanvas) ctx.drawImage(terrainCanvas, 0, 0);
+  // animované spawn portály
   for (const s of SPAWNS) {
-    ctx.fillStyle = 'rgba(150,40,60,0.5)';
-    ctx.beginPath(); ctx.arc(clamp(s.x, 6, ARENA_W - 6), clamp(s.y, 6, ARENA_H - 6), 10, 0, Math.PI * 2); ctx.fill();
+    const px = clamp(s.x, 12, ARENA_W - 12), py = clamp(s.y, 12, ARENA_H - 12);
+    const pulse = 0.6 + Math.sin(animClock * 0.08 + px) * 0.25;
+    ctx.save(); ctx.translate(px, py);
+    ctx.fillStyle = 'rgba(120,30,60,0.35)'; ctx.beginPath(); ctx.ellipse(0, 0, 13, 8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = `rgba(200,60,90,${pulse})`; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(0, 0, 11, 6, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.rotate(animClock * 0.05);
+    ctx.fillStyle = 'rgba(180,50,80,0.5)'; ctx.beginPath(); ctx.arc(9, 0, 1.6, 0, Math.PI * 2); ctx.arc(-9, 0, 1.6, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
   }
-  // jádro (brána hradu)
+  drawGate();
+}
+function drawGate() {
   const cx = CORE.tx * TILE, cy = CORE.ty * TILE, cw = CORE.w * TILE, ch = CORE.h * TILE;
-  ctx.fillStyle = '#6a5030'; roundRect(cx + 2, cy + 2, cw - 4, ch - 4, 6); ctx.fill();
-  ctx.fillStyle = '#8a6a40'; roundRect(cx + 6, cy + 6, cw - 12, ch - 12, 4); ctx.fill();
-  ctx.fillStyle = '#c8a45c'; ctx.font = 'bold 22px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('🏰', cx + cw / 2, cy + ch / 2);
-  ctx.textBaseline = 'alphabetic';
+  // stín
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; roundRect(cx + 3, cy + ch - 6, cw - 6, 10, 4); ctx.fill();
+  // hradba
+  ctx.fillStyle = '#6a7078'; roundRect(cx + 2, cy + 4, cw - 4, ch - 6, 4); ctx.fill();
+  ctx.fillStyle = '#7c828a'; roundRect(cx + 5, cy + 7, cw - 10, ch - 12, 3); ctx.fill();
+  // cimbuří
+  ctx.fillStyle = '#5a6068';
+  for (let i = 0; i < CORE.w * 2; i++) if (i % 2 === 0) ctx.fillRect(cx + 4 + i * 8, cy, 8, 8);
+  // brána (dřevo)
+  const gw = cw * 0.5, gx = cx + cw / 2 - gw / 2;
+  ctx.fillStyle = '#4a3420'; roundRect(gx, cy + 12, gw, ch - 16, 4); ctx.fill();
+  ctx.strokeStyle = '#2e2214'; ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) { ctx.beginPath(); ctx.moveTo(gx + i * gw / 4, cy + 12); ctx.lineTo(gx + i * gw / 4, cy + ch - 4); ctx.stroke(); }
+  // věže po stranách + vlajka
+  for (const bx of [cx - 2, cx + cw - 10]) {
+    ctx.fillStyle = '#5a6068'; roundRect(bx, cy - 6, 12, ch + 6, 3); ctx.fill();
+    ctx.fillStyle = '#7c828a'; roundRect(bx + 2, cy - 4, 8, 8, 2); ctx.fill();
+  }
+  // vlajka na levé věži
+  const fx = cx, fy = cy - 6;
+  ctx.strokeStyle = '#cfcfcf'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(fx + 6, fy); ctx.lineTo(fx + 6, fy - 16); ctx.stroke();
+  ctx.fillStyle = players[0] ? players[0].color : '#c8a45c';
+  const fw = 12 + Math.sin(animClock * 0.15) * 2;
+  ctx.beginPath(); ctx.moveTo(fx + 6, fy - 16); ctx.lineTo(fx + 6 + fw, fy - 13); ctx.lineTo(fx + 6, fy - 10); ctx.fill();
+  // pochodně (blikají)
+  for (const tx of [cx + 2, cx + cw - 4]) drawTorch(tx, cy + 6);
+}
+function drawTorch(x, y) {
+  ctx.fillStyle = '#3a2a18'; ctx.fillRect(x - 1.5, y, 3, 10);
+  const fl = 4 + Math.sin(animClock * 0.4 + x) * 1.5;
+  ctx.fillStyle = 'rgba(255,160,40,0.25)'; ctx.beginPath(); ctx.arc(x, y - 2, fl * 2.4, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ffb020'; ctx.beginPath(); ctx.ellipse(x, y - 3, fl * 0.6, fl, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff0a0'; ctx.beginPath(); ctx.ellipse(x, y - 2, fl * 0.3, fl * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+}
+function drawDecals() {
+  for (const d of decals) { ctx.fillStyle = `rgba(90,20,20,${d.a})`; ctx.beginPath(); ctx.ellipse(d.x, d.y, d.r, d.r * 0.6, 0, 0, Math.PI * 2); ctx.fill(); }
+}
+function drawPickups() {
+  for (const pu of pickups) {
+    const d = DROPS[pu.id]; const yy = pu.y + Math.sin(pu.bob) * 3;
+    ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(pu.x, pu.y + 8, 8, 3, 0, 0, Math.PI * 2); ctx.fill();
+    const glow = 0.4 + Math.sin(animClock * 0.15) * 0.2;
+    ctx.fillStyle = d.color; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(pu.x, yy, 12 * glow + 6, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.fillStyle = d.color; roundRect(pu.x - 8, yy - 8, 16, 16, 4); ctx.fill();
+    ctx.fillStyle = '#1a1a1a'; ctx.font = 'bold 11px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(d.icon, pu.x, yy + 1); ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  }
+}
+function drawFloaters() {
+  for (const f of floaters) {
+    ctx.globalAlpha = clamp(f.t / 20, 0, 1);
+    ctx.textAlign = 'center';
+    if (f.pickup) { ctx.fillStyle = f.pickup; ctx.font = 'bold 12px system-ui'; ctx.fillText(f.txt, f.x, f.y); }
+    else if (f.crit) { ctx.fillStyle = '#fff'; ctx.font = 'bold 18px system-ui'; ctx.fillText(f.txt + '!', f.x, f.y); ctx.fillStyle = '#ffd35c'; ctx.font = 'bold 17px system-ui'; ctx.fillText(f.txt + '!', f.x, f.y - 0.5); }
+    else { ctx.fillStyle = '#ffe0e0'; ctx.font = 'bold 12px system-ui'; ctx.fillText(f.txt, f.x, f.y); }
+    ctx.globalAlpha = 1; ctx.textAlign = 'left';
+  }
 }
 function drawStructures() {
   for (const s of [...walls, ...turrets]) {
-    ctx.fillStyle = s.flash > 0 ? '#fff' : s.def.color;
+    ctx.fillStyle = 'rgba(0,0,0,0.28)'; roundRect(s.tx * TILE + 3, s.ty * TILE + TILE - 6, TILE - 6, 8, 3); ctx.fill();
+    ctx.fillStyle = s.flash > 0 ? '#fff' : shade(s.def.color, -0.25);
     roundRect(s.tx * TILE + 2, s.ty * TILE + 2, TILE - 4, TILE - 4, 5); ctx.fill();
+    ctx.fillStyle = s.flash > 0 ? '#fff' : s.def.color;
+    roundRect(s.tx * TILE + 3, s.ty * TILE + 3, TILE - 6, TILE - 9, 4); ctx.fill();
+    if (s.temp != null) { ctx.strokeStyle = `rgba(140,220,255,${0.4 + Math.sin(animClock * 0.3) * 0.3})`; ctx.lineWidth = 1.5; roundRect(s.tx * TILE + 2, s.ty * TILE + 2, TILE - 4, TILE - 4, 5); ctx.stroke(); }
     if (s.def.arch === 'EMITTER') {
       ctx.fillStyle = '#3a2f1f'; ctx.beginPath(); ctx.arc(s.x, s.y, 8, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = '#d0b060'; ctx.lineWidth = 3;
@@ -1169,55 +1370,125 @@ function drawGroundFx() {
 }
 function drawWarriors() {
   for (const wr of warriors) {
-    ctx.fillStyle = wr.flash > 0 ? '#fff' : wr.def.color;
+    drawShadow(wr.x, wr.y, wr.r);
+    ctx.fillStyle = wr.flash > 0 ? '#fff' : shade(wr.def.color, -0.25);
     ctx.beginPath(); ctx.arc(wr.x, wr.y, wr.r, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#ffffff88'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = wr.flash > 0 ? '#fff' : wr.def.color;
+    ctx.beginPath(); ctx.arc(wr.x, wr.y - 1, wr.r * 0.8, 0, Math.PI * 2); ctx.fill();
+    // helma / lesk
+    ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.beginPath(); ctx.arc(wr.x - 3, wr.y - 4, 2, 0, Math.PI * 2); ctx.fill();
+    // zbraň ve směru míření
+    ctx.strokeStyle = '#d8d8e0'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(wr.x, wr.y); ctx.lineTo(wr.x + Math.cos(wr.aim || 0) * (wr.r + 7), wr.y + Math.sin(wr.aim || 0) * (wr.r + 7)); ctx.stroke();
     // HP
-    ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(wr.x - 12, wr.y - wr.r - 7, 24, 3);
+    ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(wr.x - 12, wr.y - wr.r - 7, 24, 3);
     ctx.fillStyle = '#5cff8a'; ctx.fillRect(wr.x - 12, wr.y - wr.r - 7, 24 * (wr.hp / wr.hpMax), 3);
   }
 }
 function drawEnemies() {
   for (const e of enemies) {
-    ctx.save(); ctx.translate(e.x, e.y);
+    const bob = Math.sin(animClock * 0.18 + e.x * 0.1) * (e.arch === 'RUNNER' ? 2.2 : 1.2);
+    drawShadow(e.x, e.y, e.r);
+    // elitní / mražená záře
+    if (e.elite) { const g = ELITES[e.elite].glow; ctx.fillStyle = g; ctx.globalAlpha = 0.25 + Math.sin(animClock * 0.2) * 0.1; ctx.beginPath(); ctx.arc(e.x, e.y + bob, e.r + 5, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; }
+    if (freezeTimer > 0) { ctx.strokeStyle = '#bfefff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(e.x, e.y + bob, e.r + 2, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.save(); ctx.translate(e.x, e.y + bob);
+    if (e.spawnT > 0) ctx.globalAlpha = 1 - e.spawnT / 30;
     const col = e.flash > 0 ? '#ffffff' : e.color;
-    if (e.arch === 'TANK' || e.arch === 'BOSS') {
-      ctx.fillStyle = col; roundRect(-e.r, -e.r, e.r * 2, e.r * 2, 6); ctx.fill();
-      ctx.fillStyle = 'rgba(0,0,0,.25)'; roundRect(-e.r + 4, -e.r + 4, e.r * 2 - 8, e.r * 2 - 8, 4); ctx.fill();
+    const dark = e.flash > 0 ? '#ffffff' : shade(e.color, -0.3);
+    if (e.arch === 'BOSS') {
+      // aura
+      ctx.fillStyle = e.color; ctx.globalAlpha = 0.2 + Math.sin(animClock * 0.12) * 0.08; ctx.beginPath(); ctx.arc(0, 0, e.r + 10, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = e.spawnT > 0 ? 1 - e.spawnT / 30 : 1;
+      // plášť / tělo
+      ctx.fillStyle = dark; ctx.beginPath(); ctx.moveTo(-e.r, e.r * 0.9); ctx.lineTo(0, -e.r); ctx.lineTo(e.r, e.r * 0.9); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0, -e.r * 0.3, e.r * 0.55, 0, Math.PI * 2); ctx.fill();
+      // oči
+      ctx.fillStyle = '#ff3b3b'; ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.arc(-e.r * 0.22, -e.r * 0.35, e.r * 0.1, 0, Math.PI * 2); ctx.arc(e.r * 0.22, -e.r * 0.35, e.r * 0.1, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+    } else if (e.arch === 'TANK') {
+      ctx.fillStyle = dark; roundRect(-e.r, -e.r, e.r * 2, e.r * 2, 7); ctx.fill();
+      ctx.fillStyle = col; roundRect(-e.r + 3, -e.r + 3, e.r * 2 - 6, e.r * 2 - 6, 5); ctx.fill();
+      if (e.def.armored) { ctx.strokeStyle = '#aeb6c0'; ctx.lineWidth = 2; ctx.strokeRect(-e.r + 5, -e.r + 5, e.r * 2 - 10, e.r * 2 - 10); } // pancíř
+      ctx.fillStyle = '#ff5a3a'; ctx.beginPath(); ctx.arc(-e.r * 0.35, -e.r * 0.1, e.r * 0.13, 0, Math.PI * 2); ctx.arc(e.r * 0.35, -e.r * 0.1, e.r * 0.13, 0, Math.PI * 2); ctx.fill();
     } else {
-      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0, 0, e.r, 0, Math.PI * 2); ctx.fill();
+      // zombie kruh + „ruce"
+      ctx.fillStyle = dark; ctx.beginPath(); ctx.arc(0, 0, e.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0, -1, e.r * 0.85, 0, Math.PI * 2); ctx.fill();
+      const eye = e.arch === 'EXPLODER' ? '#ffec6a' : (e.arch === 'RANGED' ? '#8affb0' : '#ffe86a');
+      ctx.fillStyle = eye; ctx.beginPath(); ctx.arc(-e.r * 0.32, -e.r * 0.1, e.r * 0.15, 0, Math.PI * 2); ctx.arc(e.r * 0.32, -e.r * 0.1, e.r * 0.15, 0, Math.PI * 2); ctx.fill();
+      if (e.arch === 'EXPLODER') { const pz = 0.5 + Math.sin(animClock * 0.5) * 0.5; ctx.strokeStyle = `rgba(255,120,60,${pz})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, e.r + 2, 0, Math.PI * 2); ctx.stroke(); }
     }
-    // oči
-    ctx.fillStyle = e.arch === 'EXPLODER' ? '#ffec6a' : '#2a0000';
-    ctx.beginPath(); ctx.arc(-e.r * 0.35, -e.r * 0.15, e.r * 0.16, 0, Math.PI * 2); ctx.arc(e.r * 0.35, -e.r * 0.15, e.r * 0.16, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
+    ctx.restore(); ctx.globalAlpha = 1;
     // HP proužek
-    if (e.hp < e.hpMax) {
-      ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(e.x - e.r, e.y - e.r - 6, e.r * 2, 3);
-      ctx.fillStyle = e.arch === 'BOSS' ? '#ff5c8a' : '#ff8a4a'; ctx.fillRect(e.x - e.r, e.y - e.r - 6, e.r * 2 * (e.hp / e.hpMax), 3);
+    if (e.hp < e.hpMax && e.arch !== 'BOSS') {
+      ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(e.x - e.r, e.y - e.r - 8, e.r * 2, 3);
+      ctx.fillStyle = e.elite ? ELITES[e.elite].glow : '#ff8a4a'; ctx.fillRect(e.x - e.r, e.y - e.r - 8, e.r * 2 * (e.hp / e.hpMax), 3);
     }
   }
 }
+// ztmavení/zesvětlení hex barvy
+function shade(hex, amt) {
+  if (!hex || hex[0] !== '#') return hex;
+  let r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  r = clamp(Math.round(r + r * amt), 0, 255); g = clamp(Math.round(g + g * amt), 0, 255); b = clamp(Math.round(b + b * amt), 0, 255);
+  return `rgb(${r},${g},${b})`;
+}
 function drawBullets() {
   for (const b of bullets) {
-    ctx.fillStyle = b.color || '#ffe08a';
-    if (b.thrown) { ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); }
-    else { ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(Math.atan2(b.vy, b.vx)); ctx.fillRect(-5, -1.5, 10, 3); ctx.restore(); }
+    const col = b.color || '#ffe08a';
+    if (b.thrown) {
+      b.spin = (b.spin || 0) + 0.3;
+      ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.spin);
+      ctx.fillStyle = '#3a2a1a'; ctx.beginPath(); ctx.arc(0, 0, b.r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(-1, -1, b.r * 0.5, 0, Math.PI * 2); ctx.fill();
+      // jiskra zápalnice
+      ctx.fillStyle = '#ffd35c'; ctx.beginPath(); ctx.arc(b.r * 0.7, -b.r * 0.7, 1.5 + Math.random(), 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    } else if (b.magic) {
+      ctx.fillStyle = col; ctx.globalAlpha = 0.4; ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 3, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.7, 0, Math.PI * 2); ctx.fill();
+      particles.push({ x: b.x, y: b.y, vx: 0, vy: 0, life: 0.5, decay: 0.08, size: 2, color: col });
+    } else {
+      // šíp
+      ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.ang != null ? b.ang : Math.atan2(b.vy, b.vx));
+      ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(5, 0); ctx.stroke();
+      ctx.fillStyle = '#e8e8e8'; ctx.beginPath(); ctx.moveTo(5, 0); ctx.lineTo(1, -2.5); ctx.lineTo(1, 2.5); ctx.fill(); // hrot
+      ctx.strokeStyle = 'rgba(220,220,220,0.8)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(-4, -2); ctx.moveTo(-6, 0); ctx.lineTo(-4, 2); ctx.stroke(); // opeření
+      if (b.crit) { ctx.fillStyle = '#ffd35c'; ctx.beginPath(); ctx.arc(0, 0, 2, 0, Math.PI * 2); ctx.fill(); }
+      ctx.restore();
+    }
   }
-  for (const b of eBullets) { ctx.fillStyle = b.color || '#8affb0'; ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); }
+  for (const b of eBullets) {
+    ctx.fillStyle = b.color || '#8affb0'; ctx.globalAlpha = 0.35; ctx.beginPath(); ctx.arc(b.x, b.y, b.r + 2, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+  }
 }
 function drawEffects() {
   for (const e of effects) {
     if (e.type === 'swing') {
-      ctx.globalAlpha = clamp(e.t / 8, 0, 0.8);
-      ctx.strokeStyle = e.color || '#fff'; ctx.lineWidth = 4;
-      ctx.beginPath(); ctx.arc(e.x, e.y, e.range * 0.8, e.aim - e.spread, e.aim + e.spread); ctx.stroke();
-      ctx.globalAlpha = 1;
+      const prog = 1 - e.t / 8;
+      ctx.globalAlpha = clamp(e.t / 8, 0, 0.85);
+      ctx.strokeStyle = e.color || '#fff'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+      const a0 = e.aim - e.spread, a1 = e.aim + e.spread;
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.range * (0.6 + prog * 0.3), a0, a1); ctx.stroke();
+      ctx.globalAlpha = clamp(e.t / 8, 0, 0.35); ctx.lineWidth = 10;
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.range * (0.6 + prog * 0.3), a0, a1); ctx.stroke();
+      ctx.lineWidth = 1; ctx.lineCap = 'butt'; ctx.globalAlpha = 1;
     } else if (e.type === 'beam') {
-      ctx.globalAlpha = clamp(e.t / 6, 0, 1);
-      ctx.strokeStyle = e.color || '#9ad0ff'; ctx.lineWidth = 3;
+      ctx.globalAlpha = clamp(e.t / 6, 0, 0.4); ctx.strokeStyle = e.color || '#9ad0ff'; ctx.lineWidth = 8;
+      ctx.beginPath(); ctx.moveTo(e.x1, e.y1); ctx.lineTo(e.x2, e.y2); ctx.stroke();
+      ctx.globalAlpha = clamp(e.t / 6, 0, 1); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(e.x1, e.y1); ctx.lineTo(e.x2, e.y2); ctx.stroke();
       ctx.globalAlpha = 1;
+    } else if (e.type === 'muzzle') {
+      ctx.globalAlpha = clamp(e.t / 4, 0, 1); ctx.fillStyle = '#fff6c0';
+      ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(e.a);
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(10, -4); ctx.lineTo(14, 0); ctx.lineTo(10, 4); ctx.fill();
+      ctx.restore(); ctx.globalAlpha = 1;
+    } else if (e.type === 'nova') {
+      const prog = 1 - e.t / 24; const rr = e.rMax * prog;
+      ctx.globalAlpha = clamp(e.t / 24, 0, 0.7); ctx.strokeStyle = e.color || '#fff'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(e.x, e.y, rr, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
     } else if (e.type === 'text') {
       ctx.globalAlpha = clamp(e.t / 30, 0, 1); ctx.fillStyle = e.color; ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'center';
       ctx.fillText(e.txt, e.x, e.y - (30 - e.t) * 0.5); ctx.globalAlpha = 1; ctx.textAlign = 'left';
@@ -1227,30 +1498,56 @@ function drawEffects() {
 function drawPlayers() {
   const lp = localPlayer();
   for (const p of players) {
-    // padlý hráč = poloprůhledný duch (čeká na oživení)
     if (p.downed) {
-      ctx.globalAlpha = 0.35;
-      ctx.fillStyle = p.color;
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+      drawShadow(p.x, p.y, p.r);
+      ctx.globalAlpha = 0.3; ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y - Math.sin(animClock * 0.1) * 2, p.r, 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = 1;
-      ctx.fillStyle = '#fff'; ctx.font = '12px system-ui'; ctx.textAlign = 'center';
-      ctx.fillText('✝', p.x, p.y - p.r - 4); ctx.textAlign = 'left';
+      ctx.fillStyle = '#fff'; ctx.font = '13px system-ui'; ctx.textAlign = 'center';
+      ctx.fillText('✝', p.x, p.y - p.r - 6); ctx.textAlign = 'left';
       continue;
     }
-    if (p.inv > 0 && Math.floor(p.inv / 5) % 2) continue;
-    // označení vlastního hráče (kroužek)
-    if (isCoop() && p === lp) {
-      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]);
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.r + 5, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
-    }
+    drawShadow(p.x, p.y, p.r);
+    const bob = Math.sin(p.walk) * 1.5;
+    const blink = p.inv > 0 && Math.floor(p.inv / 5) % 2;
+    // aury schopností
+    if (p.shieldT > 0) { ctx.strokeStyle = `rgba(120,200,255,${0.5 + Math.sin(animClock * 0.3) * 0.3})`; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(p.x, p.y + bob, p.r + 6, 0, Math.PI * 2); ctx.stroke(); }
+    if (p.rageT > 0) { ctx.fillStyle = `rgba(255,60,40,${0.15 + Math.sin(animClock * 0.4) * 0.1})`; ctx.beginPath(); ctx.arc(p.x, p.y + bob, p.r + 8, 0, Math.PI * 2); ctx.fill(); }
+    if (p.buffPower > 0 || p.buffRapid > 0) { ctx.strokeStyle = p.buffPower > 0 ? 'rgba(255,120,230,0.6)' : 'rgba(120,220,255,0.6)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p.x, p.y + bob, p.r + 4, 0, Math.PI * 2); ctx.stroke(); }
+    if (isCoop() && p === lp) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(p.x, p.y + bob, p.r + 9, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
+    if (blink) continue;
+    ctx.save(); ctx.translate(p.x, p.y + bob);
+    // plášť za tělem (opačně než míření)
+    const ca = p.aimAngle + Math.PI;
+    ctx.fillStyle = shade(p.color, -0.15);
+    ctx.beginPath(); ctx.moveTo(Math.cos(ca - 0.5) * p.r, Math.sin(ca - 0.5) * p.r); ctx.lineTo(Math.cos(ca) * (p.r + 9), Math.sin(ca) * (p.r + 9)); ctx.lineTo(Math.cos(ca + 0.5) * p.r, Math.sin(ca + 0.5) * p.r); ctx.closePath(); ctx.fill();
     // tělo
-    ctx.fillStyle = p.color;
-    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#ffffffaa'; ctx.lineWidth = 2; ctx.stroke();
-    // směr / zbraň
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + Math.cos(p.aimAngle) * (p.r + 8), p.y + Math.sin(p.aimAngle) * (p.r + 8)); ctx.stroke();
+    ctx.fillStyle = shade(p.color, -0.2); ctx.beginPath(); ctx.arc(0, 0, p.r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(0, -1, p.r * 0.82, 0, Math.PI * 2); ctx.fill();
+    // helma lesk
+    ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.beginPath(); ctx.arc(-p.r * 0.3, -p.r * 0.35, p.r * 0.22, 0, Math.PI * 2); ctx.fill();
+    // zbraň v ruce
+    drawWeaponInHand(p);
+    ctx.restore();
   }
+}
+function drawWeaponInHand(p) {
+  const w = WEAPONS[p.weaponId] || {}; const a = p.aimAngle; const hx = Math.cos(a) * p.r, hy = Math.sin(a) * p.r;
+  ctx.save(); ctx.translate(hx, hy); ctx.rotate(a);
+  if (w.cat === 'melee' || !w.cat) {
+    ctx.strokeStyle = '#d8d8e0'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(12, 0); ctx.stroke();
+    ctx.strokeStyle = '#8a6a3a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-3, 0); ctx.lineTo(0, 0); ctx.stroke();
+  } else if (w.ammo === 'mana') {
+    ctx.strokeStyle = '#6a4a2a'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(-2, 0); ctx.lineTo(10, 0); ctx.stroke();
+    ctx.fillStyle = w.color || '#9ad0ff'; ctx.beginPath(); ctx.arc(11, 0, 3, 0, Math.PI * 2); ctx.fill();
+  } else if (w.ammo === 'prach') {
+    ctx.strokeStyle = '#5a5a5a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(13, 0); ctx.stroke();
+    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(-2, -1, 5, 3);
+  } else { // luk/kuše
+    ctx.strokeStyle = '#8a6a3a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(6, 0, 6, -1.4, 1.4); ctx.stroke();
+    ctx.strokeStyle = 'rgba(220,220,220,0.7)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(6 + Math.cos(-1.4) * 6, Math.sin(-1.4) * 6); ctx.lineTo(6 + Math.cos(1.4) * 6, Math.sin(1.4) * 6); ctx.stroke();
+  }
+  ctx.restore();
 }
 function drawBuildGhost() {
   if (!buildSel) return;
@@ -1284,39 +1581,72 @@ function drawButton(r, label, active) {
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
 }
 function drawHud() {
+  const me = localPlayer() || players[0];
   // horní info
   ctx.fillStyle = '#e8ecd8'; ctx.font = 'bold 15px system-ui'; ctx.textAlign = 'left';
   ctx.fillText('💎 ' + run.gems, 8, 22);
   ctx.fillText('❤ ' + run.lives, 8, 42);
   ctx.textAlign = 'center'; ctx.fillStyle = '#f0e0a0';
-  ctx.fillText((wave && wave.boss ? 'BOSS ' : 'VLNA ') + run.wave, W / 2, 22);
+  ctx.fillText((wave && wave.boss ? 'BOSS ' : 'VLNA ') + run.wave, W / 2, 20);
   if (state === 'combat' && wave) {
-    ctx.fillStyle = 'rgba(255,255,255,.15)'; roundRect(W / 2 - 70, 30, 140, 6, 3); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,.4)'; roundRect(W / 2 - 70, 27, 140, 6, 3); ctx.fill();
     const prog = (wave.total - enemies.length - (wave.total - wave.spawned)) / wave.total;
-    ctx.fillStyle = '#5cff8a'; roundRect(W / 2 - 70, 30, 140 * clamp(prog, 0, 1), 6, 3); ctx.fill();
+    ctx.fillStyle = '#5cff8a'; roundRect(W / 2 - 70, 27, 140 * clamp(prog, 0, 1), 6, 3); ctx.fill();
+  }
+  // combo
+  if (state === 'combat' && run.combo >= 3) {
+    ctx.textAlign = 'right'; ctx.fillStyle = '#ffd35c'; ctx.font = 'bold 16px system-ui';
+    ctx.fillText('x' + run.combo + ' KOMBO', W - 8, 22);
+    ctx.fillStyle = 'rgba(255,211,92,0.25)'; ctx.fillRect(W - 108, 27, 100, 4);
+    ctx.fillStyle = '#ffd35c'; ctx.fillRect(W - 108, 27, 100 * clamp(run.comboT / 180, 0, 1), 4);
+    ctx.textAlign = 'left';
+  }
+  // boss HP lišta
+  const boss = enemies.find(e => e.arch === 'BOSS');
+  if (boss) {
+    const bw = W - 80, bx = 40, by = 46;
+    ctx.fillStyle = 'rgba(0,0,0,.55)'; roundRect(bx, by, bw, 9, 4); ctx.fill();
+    ctx.fillStyle = '#ff4a7a'; roundRect(bx, by, bw * clamp(boss.hp / boss.hpMax, 0, 1), 9, 4); ctx.fill();
+    ctx.textAlign = 'center'; ctx.fillStyle = '#ffd0dc'; ctx.font = 'bold 11px system-ui';
+    ctx.fillText('☠ ' + boss.def.name.toUpperCase(), W / 2, by + 7.5); ctx.textAlign = 'left';
   }
   // HUD pás pozadí
   ctx.fillStyle = '#12160e'; ctx.fillRect(0, ARENA_H, W, HUD_H);
+  ctx.fillStyle = '#1a2010'; ctx.fillRect(0, ARENA_H, W, 2);
   ctx.strokeStyle = '#2a331f'; ctx.beginPath(); ctx.moveTo(0, ARENA_H); ctx.lineTo(W, ARENA_H); ctx.stroke();
 
   if (state === 'combat') {
-    const w = activeWeapon(players[0]);
-    const ammoTxt = w.ammo === 'melee' ? '∞' : (w.ammo === 'mana' ? Math.floor(players[0].mana) + '⚡' : (run.ammo[w.ammo] || 0));
+    const w = activeWeapon(me);
+    const ammoTxt = w.ammo === 'melee' ? '∞' : (w.ammo === 'mana' ? Math.floor(me.mana) + '⚡' : (run.ammo[w.ammo] || 0));
     drawButton(BTN.weapon, (w.cat === 'melee' ? '🗡 ' : '🏹 ') + w.name, false);
-    ctx.fillStyle = '#b0c090'; ctx.font = '11px system-ui'; ctx.textAlign = 'left';
+    ctx.fillStyle = (w.ammo !== 'melee' && w.ammo !== 'mana' && (run.ammo[w.ammo] || 0) === 0) ? '#ff7a6a' : '#b0c090';
+    ctx.font = '11px system-ui'; ctx.textAlign = 'left';
     ctx.fillText('munice: ' + ammoTxt, BTN.weapon.x + 6, BTN.weapon.y + BTN.weapon.h - 3);
-    drawButton(BTN.switch2, '⇄ přepnout zbraň', false);
-    drawButton(BTN.autofire, profile.settings.autofire ? '🎯 auto: ZAP' : '🎯 auto: VYP', profile.settings.autofire);
+    drawButton(BTN.switch2, '⇄ zbraň', false);
+    drawButton(BTN.autofire, profile.settings.autofire ? '🎯 ZAP' : '🎯 VYP', profile.settings.autofire);
     drawButton(BTN.pause, '⏸', false);
-    // mana proužek
-    if (w.ammo === 'mana') { ctx.fillStyle = 'rgba(120,180,255,.3)'; ctx.fillRect(BTN.weapon.x, BTN.weapon.y - 5, BTN.weapon.w, 3); ctx.fillStyle = '#8fbaff'; ctx.fillRect(BTN.weapon.x, BTN.weapon.y - 5, BTN.weapon.w * (players[0].mana / players[0].manaMax), 3); }
+    drawAbilityButton(me);
+    if (w.ammo === 'mana') { ctx.fillStyle = 'rgba(120,180,255,.3)'; ctx.fillRect(BTN.weapon.x, BTN.weapon.y - 5, BTN.weapon.w, 3); ctx.fillStyle = '#8fbaff'; ctx.fillRect(BTN.weapon.x, BTN.weapon.y - 5, BTN.weapon.w * (me.mana / me.manaMax), 3); }
     // HP hráče
     ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.fillRect(8, ARENA_H - 10, W - 16, 5);
-    ctx.fillStyle = '#ff6a6a'; ctx.fillRect(8, ARENA_H - 10, (W - 16) * (players[0].hp / players[0].hpMax), 5);
-    // joysticky
+    ctx.fillStyle = me.hp < me.hpMax * 0.3 ? '#ff3a3a' : '#ff6a6a'; ctx.fillRect(8, ARENA_H - 10, (W - 16) * clamp(me.hp / me.hpMax, 0, 1), 5);
     drawStick(moveStick, '#8fd08f'); drawStick(aimStick, '#f0c060');
   } else if (state === 'build') {
     drawBuildBar();
+  }
+}
+function drawAbilityButton(me) {
+  const r = BTN.ability, ab = ABILITIES[me.classId];
+  const ready = me.abilityCd <= 0;
+  ctx.fillStyle = ready ? '#3a5a34' : '#241a10';
+  roundRect(r.x, r.y, r.w, r.h, 8); ctx.fill();
+  ctx.strokeStyle = ready ? '#8fd08f' : '#4a3a2a'; ctx.lineWidth = 1.5; roundRect(r.x, r.y, r.w, r.h, 8); ctx.stroke();
+  ctx.fillStyle = ready ? '#e8ecd8' : '#8a7a5a'; ctx.font = '13px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText((ab ? ab.icon : '✦') + ' ' + (ab ? ab.name : ''), r.x + r.w / 2, r.y + r.h / 2);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  if (!ready) { // cooldown překryv
+    const frac = ab ? me.abilityCd / ab.cd : 0;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(r.x, r.y, r.w * frac, r.h);
   }
 }
 function drawStick(s, color) {
@@ -1378,6 +1708,7 @@ function hudTap(x, y) {
   if (state === 'combat') {
     if (inRect(x, y, BTN.pause)) { togglePause(); return true; }
     if (inRect(x, y, BTN.autofire)) { profile.settings.autofire = !profile.settings.autofire; saveProfile(profile); return true; }
+    if (inRect(x, y, BTN.ability)) { localUseAbility(); return true; }
     if (inRect(x, y, BTN.weapon) || inRect(x, y, BTN.switch2)) { localCycleWeapon(); return true; }
     return true; // klik do HUD pásu neřeší stick
   }
@@ -1399,6 +1730,10 @@ function cycleWeapon(p) {
 function localCycleWeapon() {
   if (net.role === 'guest') { netSend({ t: 'cmd', act: 'cycle' }); return; }
   cycleWeapon(players[0]);
+}
+function localUseAbility() {
+  if (net.role === 'guest') { netSend({ t: 'cmd', act: 'ability' }); return; }
+  useAbility(players[0]);
 }
 // „START VLNY" = potvrzení připravenosti; v co-op se čeká na oba.
 function toggleReady() {
@@ -1488,6 +1823,7 @@ window.addEventListener('keydown', e => {
   if (k === 'p') togglePause();
   if (k === 'm') { muted = !muted; profile.settings.muted = muted; saveProfile(profile); if (!muted) initAudio(); }
   if (k === 'q' && run) localCycleWeapon();
+  if (k === 'e' && run) localUseAbility();
 });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 canvas.addEventListener('mousemove', e => {
@@ -1528,9 +1864,11 @@ function loop(now) {
     const dt = Math.min(3, (now - lastTime) / 16.67);
     lastTime = now;
     if (net.role === 'guest') {
-      // guest nepočítá simulaci — jen posílá vstup a vykresluje poslední přijatý snímek
+      // guest nepočítá simulaci — jen posílá vstup, žene lokální kosmetiku a vykresluje
       if (state === 'combat') keyboardMove();
       if (typeof netSendInput === 'function') netSendInput();
+      animClock += dt;
+      if (state === 'combat') { updateParticles(dt); updateFloaters(dt); if (shake > 0) shake = Math.max(0, shake - 0.5 * dt); if (flash > 0) flash = Math.max(0, flash - 0.05 * dt); }
       render();
     } else {
       if (state === 'combat') { keyboardMove(); applyLocalInput(); }

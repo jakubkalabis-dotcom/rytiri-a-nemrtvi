@@ -90,11 +90,37 @@ const WEAPONS = {
 const ENEMIES = {
   chodec:    { name:'Chodec',    arch:'WALKER',   hp:20,  speed:0.7, dmg:6,  atkRate:40, size:24, bounty:4,  score:10,  leak:1, color:'#7ea06a' },
   behac:     { name:'Běhač',     arch:'RUNNER',   hp:13,  speed:1.7, dmg:5,  atkRate:28, size:20, bounty:5,  score:15,  leak:1, color:'#c9b04a' },
+  ohar:      { name:'Ohař',      arch:'RUNNER',   hp:10,  speed:2.3, dmg:7,  atkRate:24, size:18, bounty:6,  score:18,  leak:1, color:'#9a3a3a' },
   obr:       { name:'Obr',       arch:'TANK',     hp:110, speed:0.42,dmg:16, atkRate:60, size:40, bounty:14, score:45,  leak:2, color:'#8a5a3a' },
+  brnenec:   { name:'Brněnec',   arch:'TANK',     hp:70,  speed:0.6, dmg:12, atkRate:50, size:30, bounty:12, score:40,  leak:1, color:'#6a7a8a', armored:true },
   plivac:    { name:'Plivač',    arch:'RANGED',   hp:18,  speed:0.5, dmg:7,  atkRate:90, size:24, bounty:8,  score:25,  leak:1, color:'#5a8a6a', projSpeed:4.2, keepDist:170 },
   vybusny:   { name:'Výbušný',   arch:'EXPLODER', hp:16,  speed:1.15,dmg:34, atkRate:0,  size:26, bounty:10, score:30,  leak:1, color:'#b04a4a', aoeRadius:72 },
+  // Bossové (cyklují se – viz bossForWave)
   nekromant: { name:'Nekromant', arch:'BOSS',     hp:650, speed:0.55,dmg:24, atkRate:70, size:52, bounty:140,score:600, leak:5, color:'#7a3a9a', summon:'chodec', summonRate:200 },
+  abominace: { name:'Abominace', arch:'BOSS',     hp:1100,speed:0.4, dmg:34, atkRate:60, size:66, bounty:200,score:800, leak:6, color:'#6a4a2a', enrage:true },
+  lich:      { name:'Lich',      arch:'BOSS',     hp:820, speed:0.5, dmg:20, atkRate:55, size:50, bounty:220,score:900, leak:5, color:'#3a6a8a', summon:'behac', summonRate:170, volley:true },
 };
+const BOSS_CYCLE = ['nekromant', 'abominace', 'lich'];
+function bossForWave(wave) { return BOSS_CYCLE[(Math.floor(wave / 5) - 1) % BOSS_CYCLE.length]; }
+
+/* ---------- Elitní přídomky (náhodně na běžných nepřátelích od pozdějších vln) ---------- */
+const ELITES = {
+  rychly:      { name:'Rychlý',      hpMul:1.3, spdMul:1.6, dmgMul:1.1, glow:'#5cf0ff' },
+  pancerovany: { name:'Pancéřovaný', hpMul:2.6, spdMul:0.9, dmgMul:1.4, glow:'#c0c8d0' },
+  zhoubny:     { name:'Zhoubný',     hpMul:1.6, spdMul:1.1, dmgMul:1.3, glow:'#c060ff', explode:true },
+};
+const ELITE_KEYS = Object.keys(ELITES);
+function eliteChance(wave) { return wave < 3 ? 0 : Math.min(0.22, 0.04 + wave * 0.012); }
+
+/* ---------- Dočasné dropy (padají z nepřátel; elita dropne vždy) ---------- */
+const DROPS = {
+  rapid:  { name:'Rychlopalba', icon:'»', color:'#5cd8ff', dur:480, kind:'buff' },
+  power:  { name:'Síla',        icon:'★', color:'#ff7be5', dur:480, kind:'buff' },
+  freeze: { name:'Mráz',        icon:'❄', color:'#8fe0ff', kind:'freeze' },
+  heal:   { name:'Léčení',      icon:'✚', color:'#5cff8a', kind:'heal' },
+  truhla: { name:'Truhla',      icon:'💰', color:'#ffd35c', kind:'gems', gems:40 },
+};
+const DROP_WEIGHTS = { rapid: 5, power: 5, freeze: 3, heal: 4, truhla: 3 };
 // Škálování dle čísla vlny (wave = 1,2,3…):
 function enemyScale(wave) {
   return {
@@ -107,7 +133,9 @@ function enemyScale(wave) {
 function waveComposition(wave) {
   const w = { chodec: 1 };
   if (wave >= 2) w.behac   = 0.25 + Math.min(0.4, wave * 0.03);
+  if (wave >= 3) w.ohar    = 0.12 + Math.min(0.35, (wave - 3) * 0.03);
   if (wave >= 4) w.obr     = 0.12 + Math.min(0.3, (wave - 4) * 0.03);
+  if (wave >= 4) w.brnenec = 0.10 + Math.min(0.28, (wave - 4) * 0.025);
   if (wave >= 5) w.plivac  = 0.15 + Math.min(0.3, (wave - 5) * 0.025);
   if (wave >= 6) w.vybusny = 0.12 + Math.min(0.3, (wave - 6) * 0.03);
   return w;
@@ -194,6 +222,18 @@ const CLASSES = {
     costMul:{ melee:1, ranged:1, trap:1, wall:1, warrior:0.85, ammo:1 },
     passive:{ holyDmg:1.25, healAura:0.05, warriorBuff:1.2 },
   },
+};
+
+/* ---------- Aktivní schopnosti tříd (tlačítko + cooldown ve framech) ---------- */
+const ABILITIES = {
+  rytir:      { name:'Bojový pokřik', icon:'🛡', cd:600, desc:'Štít a provokace okolních nepřátel.' },
+  lovec:      { name:'Salva šípů',    icon:'🏹', cd:540, desc:'Vystřelí vějíř šípů.' },
+  berserk:    { name:'Zuřivost',      icon:'🩸', cd:660, desc:'Dočasně obří poškození a vysávání.' },
+  zved:       { name:'Úprk',          icon:'💨', cd:360, desc:'Prudký výpad, nezranitelnost, sekne po cestě.' },
+  mag:        { name:'Mrazivá nova',  icon:'❄', cd:600, desc:'Zmrazí a zraní vše kolem.' },
+  alchymista: { name:'Kobercový nálet', icon:'💣', cd:720, desc:'Rozhází několik bomb kolem sebe.' },
+  inzenyr:    { name:'Polní věž',      icon:'🔧', cd:660, desc:'Postaví dočasnou věž a opraví zdi.' },
+  knez:       { name:'Svaté světlo',   icon:'✨', cd:600, desc:'Vyléčí tým a spálí nemrtvé kolem.' },
 };
 
 /* ---------- Odměny a progrese ---------- */
