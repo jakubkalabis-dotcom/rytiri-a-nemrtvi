@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Rytíři a Nemrtví</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#12160e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Rytíři">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    background: #0c0f08;
+    color: #e8ecd8;
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none; user-select: none;
+  }
+  #game-area { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  canvas {
+    background: #12160e;
+    display: block;
+    touch-action: none;
+    box-shadow: 0 0 40px rgba(0,0,0,.6);
+  }
+  /* ---- Overlay (menu / výběr třídy / obchod / konec) ---- */
+  #overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+    background: rgba(10,12,7,.94);
+    padding: max(16px, env(safe-area-inset-top)) 14px max(16px, env(safe-area-inset-bottom));
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+  }
+  #overlay.hidden { display: none; }
+  #ovContent { width: 100%; max-width: 460px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  h2 { font-size: 24px; color: #f0e0a0; text-align: center; letter-spacing: .5px; margin-top: 8px; }
+  h3 { font-size: 13px; color: #8fb070; letter-spacing: 1px; align-self: flex-start; margin-top: 6px; }
+  p { color: #b6c098; font-size: 13px; line-height: 1.5; text-align: center; }
+  .wallet { color: #e8ecd8; font-size: 15px; background: rgba(255,255,255,.05); padding: 8px 14px; border-radius: 8px; text-align: center; }
+  button {
+    background: linear-gradient(180deg, #6a8f3a, #4a6b28);
+    color: #fff; border: none; padding: 13px 28px; border-radius: 10px;
+    font-size: 16px; font-weight: 700; cursor: pointer; min-height: 48px;
+    box-shadow: 0 4px 14px rgba(60,90,20,.4); width: 100%; max-width: 320px; margin: 6px 0;
+  }
+  button:hover { filter: brightness(1.1); }
+  button.ghost { background: #2a331f; box-shadow: none; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; width: 100%; }
+  .card {
+    background: #1a2012; border: 1px solid #33401f; border-radius: 10px; padding: 10px;
+    cursor: pointer; display: flex; flex-direction: column; gap: 4px; min-height: 44px;
+  }
+  .card:hover { border-color: #6a8f3a; }
+  .card.dis { opacity: .5; cursor: not-allowed; }
+  .class-card { align-items: center; text-align: center; }
+  .class-card .ci { font-size: 30px; }
+  .class-card .cn { font-weight: 700; font-size: 15px; }
+  .class-card .cd { font-size: 11px; color: #a0ac84; }
+  .class-card .cs { font-size: 11px; color: #d0c080; }
+  .shop-card .scn { font-weight: 600; font-size: 13px; }
+  .shop-card .scd { font-size: 11px; color: #9aa87e; }
+  .shop-card .scc { font-size: 13px; color: #ffd35c; font-weight: 700; }
+  .shop { width: 100%; display: flex; flex-direction: column; gap: 6px; }
+  .board { width: 100%; max-width: 320px; }
+  .row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 8px; border-radius: 4px; color: #cdd4b5; }
+  .row:nth-child(odd) { background: rgba(255,255,255,.04); }
+  .row .rank { color: #7a8560; width: 24px; }
+  .row .nm { flex: 1; text-align: left; padding-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .sc { color: #ffd35c; }
+  .empty { font-size: 12px; color: #6a734c; padding: 8px; text-align: center; }
+</style>
+</head>
+<body>
+<div id="game-area">
+  <canvas id="game" width="480" height="800"></canvas>
+  <div id="overlay"><div id="ovContent"></div></div>
+</div>
+
+<script src="data.js"></script>
+<script src="engine.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
