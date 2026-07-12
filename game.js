@@ -1063,11 +1063,13 @@ function updateEnemies(dt) {
     }
     // BOSS: přivolává + střílí vějíř
     if (e.arch === 'BOSS') {
-      e.summonCool -= dt;
-      // přivolávej jen když není přemíra nemrtvých (strop proti nekonečné vlně)
-      const minions = enemies.reduce((n, o) => n + (o.arch !== 'BOSS' && !o.dead ? 1 : 0), 0);
-      if (e.summonCool <= 0 && minions < 10) { spawnEnemy(e.def.summon); e.summonCool = e.def.summonRate; }
-      else if (e.summonCool <= 0) { e.summonCool = 40; }
+      // přivolává jen boss, který summon opravdu má (např. Abominace ne)
+      if (e.def.summon) {
+        e.summonCool -= dt;
+        const minions = enemies.reduce((n, o) => n + (o.arch !== 'BOSS' && !o.dead ? 1 : 0), 0);
+        if (e.summonCool <= 0 && minions < 10) { spawnEnemy(e.def.summon); e.summonCool = e.def.summonRate; }
+        else if (e.summonCool <= 0) { e.summonCool = 40; }
+      }
       e.fireCool -= dt;
       if (e.fireCool <= 0 && pl) {
         const base = Math.atan2(pl.y - e.y, pl.x - e.x);
