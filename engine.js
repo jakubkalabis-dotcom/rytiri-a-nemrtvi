@@ -8,6 +8,9 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height;   // 480 × 800
+try { ctx.imageSmoothingEnabled = false; } catch {}   // ostré pixely (Minecraft styl)
+// blokový obdélník (bez zaoblení) = pixelový vzhled
+function px(x, y, w, h, col) { ctx.fillStyle = col; ctx.fillRect(x | 0, y | 0, Math.ceil(w), Math.ceil(h)); }
 
 /* ---------- Viditelné hlášení chyb (diagnostika na mobilu) ---------- */
 function showFatal(msg) {
@@ -159,13 +162,20 @@ function buildTerrain() {
   const g = cnv.getContext('2d');
   g.clearRect(0, 0, ARENA_W, ARENA_H);
   const pal = (MAPS[currentMap] && MAPS[currentMap].pal) || ['#284020', '#2c4224', '#5a5f66', '#3f7030'];
-  const c0 = hexRGB(pal[0]), c1 = hexRGB(pal[1]);
+  const c0 = hexRGB(pal[0]), c1 = hexRGB(pal[1]), acc = hexRGB(pal[3]);
+  const CP = 4, N = TILE / CP;   // 4px „pixely" → 8×8 na dlaždici
   for (let ty = 0; ty < ROWS; ty++) for (let tx = 0; tx < COLS; tx++) {
-    const n = mulberry32((tx * 73856093) ^ (ty * 19349663) ^ currentMap * 2654435761)();
-    const c = n > 0.5 ? c0 : c1; const j = Math.floor((n - 0.5) * 14);
-    g.fillStyle = `rgb(${clamp(c[0] + j, 0, 255)},${clamp(c[1] + j, 0, 255)},${clamp(c[2] + j, 0, 255)})`;
-    g.fillRect(tx * TILE, ty * TILE, TILE, TILE);
-    if (n > 0.82) { g.fillStyle = 'rgba(255,255,255,0.03)'; g.fillRect(tx * TILE, ty * TILE, TILE, TILE); }
+    const base = ((tx + ty) & 1) ? c0 : c1;
+    const rs = mulberry32(((tx * 92821) ^ (ty * 68917) ^ (currentMap * 40503)) >>> 0);
+    for (let gy = 0; gy < N; gy++) for (let gx = 0; gx < N; gx++) {
+      const v = rs();
+      let r = base[0], gg = base[1], b = base[2];
+      const j = Math.floor((v - 0.5) * 22);
+      r += j; gg += j; b += j;
+      if (v > 0.93) { r = acc[0]; gg = acc[1]; b = acc[2]; }        // stébla/akcent
+      g.fillStyle = `rgb(${clamp(r, 0, 255)},${clamp(gg, 0, 255)},${clamp(b, 0, 255)})`;
+      g.fillRect(tx * TILE + gx * CP, ty * TILE + gy * CP, CP, CP);
+    }
   }
   for (const d of decor) terrainDecor(g, d, pal);
   for (const [tx, ty] of OBSTACLES) terrainRock(g, tx, ty, pal);
@@ -175,32 +185,40 @@ function buildTerrain() {
 }
 function hexRGB(h) { return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; }
 function terrainDecor(g, d, pal) {
-  const acc = pal[3] || '#3f7030';
+  const acc = pal[3] || '#3f7030'; const ac = hexRGB(acc);
+  const dark = `rgb(${clamp(ac[0] - 28, 0, 255)},${clamp(ac[1] - 28, 0, 255)},${clamp(ac[2] - 28, 0, 255)})`;
+  const X = d.x | 0, Y = d.y | 0;
   if (d.t === 'tuft') {
-    g.strokeStyle = acc; g.globalAlpha = 0.5; g.lineWidth = 1.5;
-    for (let k = -1; k <= 1; k++) { g.beginPath(); g.moveTo(d.x + k * 2, d.y); g.lineTo(d.x + k * 2 + (d.d - 0.5) * 4, d.y - d.s * 2); g.stroke(); }
-    g.globalAlpha = 1;
+    g.fillStyle = acc; g.fillRect(X - 3, Y - 2, 2, 4); g.fillRect(X, Y - 4, 2, 6); g.fillRect(X + 3, Y - 2, 2, 4);
   } else if (d.t === 'flower') {
-    g.fillStyle = acc; g.globalAlpha = 0.5; g.fillRect(d.x - 0.5, d.y - 3, 1, 4); g.globalAlpha = 1;
-    g.fillStyle = `hsl(${d.hue},70%,65%)`; g.beginPath(); g.arc(d.x, d.y - 4, 1.8, 0, Math.PI * 2); g.fill();
+    g.fillStyle = dark; g.fillRect(X, Y - 2, 2, 4);
+    g.fillStyle = `hsl(${d.hue},70%,62%)`; g.fillRect(X - 2, Y - 6, 6, 4); g.fillStyle = '#ffe860'; g.fillRect(X, Y - 4, 2, 2);
   } else if (d.t === 'pebble') {
-    g.fillStyle = pal[2]; g.globalAlpha = 0.5; g.beginPath(); g.arc(d.x, d.y, d.s, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
+    g.fillStyle = pal[2]; g.fillRect(X - 2, Y - 2, 5, 4);
   } else if (d.t === 'bush') {
-    g.fillStyle = acc; g.beginPath(); g.arc(d.x, d.y, d.s, 0, Math.PI * 2); g.arc(d.x + d.s * 0.7, d.y + 1, d.s * 0.8, 0, Math.PI * 2); g.fill();
+    const s = Math.round(d.s); g.fillStyle = dark; g.fillRect(X - s, Y - s, s * 2, s * 2);
+    g.fillStyle = acc; g.fillRect(X - s + 2, Y - s + 2, s * 2 - 4, s * 2 - 4);
   } else if (d.t === 'tree') {
-    g.fillStyle = 'rgba(0,0,0,0.18)'; g.beginPath(); g.ellipse(d.x, d.y + d.s * 0.6, d.s, d.s * 0.4, 0, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#4a3018'; g.fillRect(d.x - 2, d.y - 2, 4, d.s);
-    g.fillStyle = acc; g.beginPath(); g.arc(d.x, d.y - d.s * 0.6, d.s, 0, Math.PI * 2); g.fill();
-    g.fillStyle = acc; g.globalAlpha = 0.7; g.beginPath(); g.arc(d.x - d.s * 0.4, d.y - d.s * 0.8, d.s * 0.7, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
+    const s = Math.round(d.s);
+    g.fillStyle = 'rgba(0,0,0,0.22)'; g.fillRect(X - s, Y + s - 2, s * 2, 5);              // stín
+    g.fillStyle = '#4a3018'; g.fillRect(X - 2, Y - 2, 5, s + 4);                            // kmen
+    g.fillStyle = dark; g.fillRect(X - s, Y - s * 2, s * 2, s * 2);                          // koruna (blok)
+    g.fillStyle = acc; g.fillRect(X - s + 3, Y - s * 2 + 3, s * 2 - 6, s * 2 - 6);
+    g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(X - s + 3, Y - s * 2 + 3, 4, 4);      // lesk
   }
 }
 function terrainRock(g, tx, ty, pal) {
-  const x = tx * TILE, y = ty * TILE; const rc = pal[2] || '#5a5f66';
-  g.fillStyle = 'rgba(0,0,0,0.25)'; g.beginPath(); g.ellipse(x + TILE / 2, y + TILE * 0.72, TILE * 0.42, TILE * 0.2, 0, 0, Math.PI * 2); g.fill();
-  const c = hexRGB(rc);
-  g.fillStyle = `rgb(${clamp(c[0] - 20, 0, 255)},${clamp(c[1] - 20, 0, 255)},${clamp(c[2] - 20, 0, 255)})`; roundRectOn(g, x + 3, y + 4, TILE - 6, TILE - 8, 7); g.fill();
-  g.fillStyle = rc; roundRectOn(g, x + 6, y + 5, TILE - 15, TILE - 16, 5); g.fill();
-  g.fillStyle = 'rgba(0,0,0,0.25)'; g.beginPath(); g.arc(x + TILE * 0.68, y + TILE * 0.62, 3, 0, Math.PI * 2); g.fill();
+  const x = tx * TILE, y = ty * TILE; const c = hexRGB(pal[2] || '#5a5f66');
+  const CP = 4, N = TILE / CP;
+  const rs = mulberry32(((tx * 12347) ^ (ty * 65413)) >>> 0);
+  for (let gy = 0; gy < N; gy++) for (let gx = 0; gx < N; gx++) {
+    const v = rs(); const j = Math.floor((v - 0.5) * 30);
+    // spáry dlažby (tmavší mřížka)
+    const seam = (gx % 4 === 0 || gy % 4 === 0);
+    const k = seam ? -34 : j;
+    g.fillStyle = `rgb(${clamp(c[0] + k, 0, 255)},${clamp(c[1] + k, 0, 255)},${clamp(c[2] + k, 0, 255)})`;
+    g.fillRect(x + gx * CP, y + gy * CP, CP, CP);
+  }
 }
 // roundRect na libovolný ctx
 function roundRectOn(g, x, y, w, h, r) {

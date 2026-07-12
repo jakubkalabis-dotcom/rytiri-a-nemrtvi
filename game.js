@@ -1139,6 +1139,7 @@ function damageStructure(s, dmg) {
 function updateWarriors(dt) {
   for (const wr of warriors) {
     if (wr.flash > 0) wr.flash -= dt;
+    if (wr.atkAnim > 0) wr.atkAnim -= dt;
     const def = wr.def;
     const buff = teamMax('warriorBuff') || 1;
     const tgt = nearestEnemy(wr.x, wr.y, def.seek);
@@ -1153,7 +1154,7 @@ function updateWarriors(dt) {
       if (wr.cool <= 0 && d <= def.range + tgt.r) {
         if (def.arch === 'MELEE') { damageEnemy(tgt, def.dmg * buff, null, null); effects.push({ type: 'swing', x: wr.x, y: wr.y, aim: wr.aim, range: def.range, spread: 0.8, t: 6, color: def.color }); }
         else { bullets.push({ x: wr.x, y: wr.y, vx: Math.cos(wr.aim) * def.projSpeed, vy: Math.sin(wr.aim) * def.projSpeed, r: 3, dmg: def.dmg * buff, pierce: 0, range: def.range, traveled: 0, color: def.color, hitIds: [], owner: null }); }
-        wr.cool = def.rate;
+        wr.cool = def.rate; wr.atkAnim = 8;
       }
     } else {
       // návrat domů
@@ -1408,7 +1409,8 @@ function drawPickups() {
     ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(pu.x, pu.y + 8, 8, 3, 0, 0, Math.PI * 2); ctx.fill();
     const glow = 0.4 + Math.sin(animClock * 0.15) * 0.2;
     ctx.fillStyle = d.color; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(pu.x, yy, 12 * glow + 6, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
-    ctx.fillStyle = d.color; roundRect(pu.x - 8, yy - 8, 16, 16, 4); ctx.fill();
+    ctx.fillStyle = '#1a1a1a'; ctx.fillRect((pu.x - 9) | 0, (yy - 9) | 0, 18, 18);
+    ctx.fillStyle = d.color; ctx.fillRect((pu.x - 8) | 0, (yy - 8) | 0, 16, 16);
     ctx.fillStyle = '#1a1a1a'; ctx.font = 'bold 11px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(d.icon, pu.x, yy + 1); ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   }
@@ -1423,25 +1425,38 @@ function drawFloaters() {
     ctx.globalAlpha = 1; ctx.textAlign = 'left';
   }
 }
+// Bloková dlaždice s pixelovou texturou (dřevo = prkna, kámen = dlažba)
+function drawBlockTile(x, y, hex, flash, wood) {
+  const c = hexRGB(flash > 0 ? '#ffffff' : hex); const CP = 4, N = TILE / CP;
+  const rs = mulberry32(((x * 41 + y * 91) & 0xffff) >>> 0);
+  for (let gy = 0; gy < N; gy++) for (let gx = 0; gx < N; gx++) {
+    const v = rs(); let k = Math.floor((v - 0.5) * 26);
+    if (wood) { if (gy % 2 === 0) k -= 18; }             // prkna: tmavší pruhy
+    else if (gx % 4 === 0 || gy % 4 === 0) k = -30;      // dlažba: spáry
+    ctx.fillStyle = `rgb(${clamp(c[0] + k, 0, 255)},${clamp(c[1] + k, 0, 255)},${clamp(c[2] + k, 0, 255)})`;
+    ctx.fillRect(x + gx * CP, y + gy * CP, CP, CP);
+  }
+}
 function drawStructures() {
   for (const s of [...walls, ...turrets]) {
-    ctx.fillStyle = 'rgba(0,0,0,0.28)'; roundRect(s.tx * TILE + 3, s.ty * TILE + TILE - 6, TILE - 6, 8, 3); ctx.fill();
-    ctx.fillStyle = s.flash > 0 ? '#fff' : shade(s.def.color, -0.25);
-    roundRect(s.tx * TILE + 2, s.ty * TILE + 2, TILE - 4, TILE - 4, 5); ctx.fill();
-    ctx.fillStyle = s.flash > 0 ? '#fff' : s.def.color;
-    roundRect(s.tx * TILE + 3, s.ty * TILE + 3, TILE - 6, TILE - 9, 4); ctx.fill();
-    if (s.temp != null) { ctx.strokeStyle = `rgba(140,220,255,${0.4 + Math.sin(animClock * 0.3) * 0.3})`; ctx.lineWidth = 1.5; roundRect(s.tx * TILE + 2, s.ty * TILE + 2, TILE - 4, TILE - 4, 5); ctx.stroke(); }
+    if (!onScreen(s.x, s.y, TILE)) continue;
+    const x = s.tx * TILE, y = s.ty * TILE;
+    ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fillRect(x + 2, y + TILE - 4, TILE - 4, 5);
+    const wood = s.defId === 'drevena_barikada' || s.def.arch === 'EMITTER';
+    drawBlockTile(x, y, s.def.color, s.flash, wood);
+    if (s.defId === 'bodcova_zed') { ctx.fillStyle = '#c8ccd4'; for (let k = 0; k < 4; k++) { ctx.fillRect(x + 4 + k * 7, y + 2, 3, 6); ctx.fillRect(x + 4 + k * 7, y + TILE - 8, 3, 6); } }
+    if (s.temp != null) { ctx.strokeStyle = `rgba(140,220,255,${0.4 + Math.sin(animClock * 0.3) * 0.3})`; ctx.lineWidth = 1.5; ctx.strokeRect(x + 1, y + 1, TILE - 2, TILE - 2); }
     if (s.def.arch === 'EMITTER') {
-      ctx.fillStyle = '#3a2f1f'; ctx.beginPath(); ctx.arc(s.x, s.y, 8, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = '#d0b060'; ctx.lineWidth = 3;
+      // bloková věž s otáčecí kuší
+      ctx.fillStyle = '#2a2018'; ctx.fillRect(s.x - 6, s.y - 6, 12, 12);
       const tgt = nearestEnemy(s.x, s.y, s.def.range);
       const a = tgt ? Math.atan2(tgt.y - s.y, tgt.x - s.x) : -Math.PI / 2;
-      ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.x + Math.cos(a) * 12, s.y + Math.sin(a) * 12); ctx.stroke();
+      ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(a);
+      ctx.fillStyle = '#6a4a2a'; ctx.fillRect(-2, -6, 4, 12); ctx.fillStyle = '#c8a45c'; ctx.fillRect(2, -1.5, 12, 3); ctx.restore();
     }
-    // HP proužek
     if (s.hp < s.hpMax) {
-      ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(s.tx * TILE + 3, s.ty * TILE - 1, TILE - 6, 3);
-      ctx.fillStyle = '#5cff8a'; ctx.fillRect(s.tx * TILE + 3, s.ty * TILE - 1, (TILE - 6) * (s.hp / s.hpMax), 3);
+      ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(x + 3, y - 3, TILE - 6, 3);
+      ctx.fillStyle = '#5cff8a'; ctx.fillRect(x + 3, y - 3, (TILE - 6) * (s.hp / s.hpMax), 3);
     }
   }
 }
@@ -1468,62 +1483,115 @@ function drawGroundFx() {
 }
 function drawWarriors() {
   for (const wr of warriors) {
+    if (!onScreen(wr.x, wr.y, wr.r + 20)) continue;
     drawShadow(wr.x, wr.y, wr.r);
-    ctx.fillStyle = wr.flash > 0 ? '#fff' : shade(wr.def.color, -0.25);
-    ctx.beginPath(); ctx.arc(wr.x, wr.y, wr.r, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = wr.flash > 0 ? '#fff' : wr.def.color;
-    ctx.beginPath(); ctx.arc(wr.x, wr.y - 1, wr.r * 0.8, 0, Math.PI * 2); ctx.fill();
-    // helma / lesk
-    ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.beginPath(); ctx.arc(wr.x - 3, wr.y - 4, 2, 0, Math.PI * 2); ctx.fill();
-    // zbraň ve směru míření
-    ctx.strokeStyle = '#d8d8e0'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(wr.x, wr.y); ctx.lineTo(wr.x + Math.cos(wr.aim || 0) * (wr.r + 7), wr.y + Math.sin(wr.aim || 0) * (wr.r + 7)); ctx.stroke();
-    // HP
-    ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(wr.x - 12, wr.y - wr.r - 7, 24, 3);
-    ctx.fillStyle = '#5cff8a'; ctx.fillRect(wr.x - 12, wr.y - wr.r - 7, 24 * (wr.hp / wr.hpMax), 3);
+    const col = wr.flash > 0 ? '#ffffff' : wr.def.color;
+    const ranged = wr.def.arch === 'RANGED';
+    drawBlockyHumanoid(wr.x, wr.y, wr.r, wr.aim || -Math.PI / 2, animClock * 0.2, clamp((wr.atkAnim || 0) / 8, 0, 1), {
+      skin: '#d8a878', shirt: col, dark: shade(wr.def.color, -0.4), hat: '#c8ccd4', pants: '#3a3444',
+      weapon: ranged ? { cat: 'ranged', ammo: 'sip' } : { cat: 'melee' },
+    });
+    ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(wr.x - 12, wr.y - wr.r - 9, 24, 3);
+    ctx.fillStyle = '#5cff8a'; ctx.fillRect(wr.x - 12, wr.y - wr.r - 9, 24 * (wr.hp / wr.hpMax), 3);
   }
 }
 function drawEnemies() {
   for (const e of enemies) {
     if (!onScreen(e.x, e.y, e.r + 30)) continue;
-    const bob = Math.sin(animClock * 0.18 + e.x * 0.1) * (e.arch === 'RUNNER' ? 2.2 : 1.2);
+    const walkAmp = e.arch === 'RUNNER' ? 1 : 0.6;
+    const walkPh = animClock * (e.arch === 'RUNNER' ? 0.4 : 0.25) + e.x * 0.1;
+    const bob = Math.sin(walkPh) * (e.arch === 'RUNNER' ? 1.6 : 1.0);
     drawShadow(e.x, e.y, e.r);
-    // elitní / mražená záře
-    if (e.elite) { const g = ELITES[e.elite].glow; ctx.fillStyle = g; ctx.globalAlpha = 0.25 + Math.sin(animClock * 0.2) * 0.1; ctx.beginPath(); ctx.arc(e.x, e.y + bob, e.r + 5, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; }
-    if (freezeTimer > 0) { ctx.strokeStyle = '#bfefff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(e.x, e.y + bob, e.r + 2, 0, Math.PI * 2); ctx.stroke(); }
-    ctx.save(); ctx.translate(e.x, e.y + bob);
-    if (e.spawnT > 0) ctx.globalAlpha = 1 - e.spawnT / 30;
+    if (e.elite) { const g = ELITES[e.elite].glow; ctx.fillStyle = g; ctx.globalAlpha = 0.25 + Math.sin(animClock * 0.2) * 0.1; ctx.fillRect(e.x - e.r - 3, e.y + bob - e.r - 3, e.r * 2 + 6, e.r * 2 + 6); ctx.globalAlpha = 1; }
+    // směr „obličeje" = k jádru (zombie se šourají dolů)
+    const cx = (CORE.tx + CORE.w / 2) * TILE, cy = (CORE.ty + CORE.h / 2) * TILE;
+    const fa = Math.atan2(cy - e.y, cx - e.x);
     const col = e.flash > 0 ? '#ffffff' : e.color;
-    const dark = e.flash > 0 ? '#ffffff' : shade(e.color, -0.3);
-    if (e.arch === 'BOSS') {
-      // aura
-      ctx.fillStyle = e.color; ctx.globalAlpha = 0.2 + Math.sin(animClock * 0.12) * 0.08; ctx.beginPath(); ctx.arc(0, 0, e.r + 10, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = e.spawnT > 0 ? 1 - e.spawnT / 30 : 1;
-      // plášť / tělo
-      ctx.fillStyle = dark; ctx.beginPath(); ctx.moveTo(-e.r, e.r * 0.9); ctx.lineTo(0, -e.r); ctx.lineTo(e.r, e.r * 0.9); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0, -e.r * 0.3, e.r * 0.55, 0, Math.PI * 2); ctx.fill();
-      // oči
-      ctx.fillStyle = '#ff3b3b'; ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 8;
-      ctx.beginPath(); ctx.arc(-e.r * 0.22, -e.r * 0.35, e.r * 0.1, 0, Math.PI * 2); ctx.arc(e.r * 0.22, -e.r * 0.35, e.r * 0.1, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
-    } else if (e.arch === 'TANK') {
-      ctx.fillStyle = dark; roundRect(-e.r, -e.r, e.r * 2, e.r * 2, 7); ctx.fill();
-      ctx.fillStyle = col; roundRect(-e.r + 3, -e.r + 3, e.r * 2 - 6, e.r * 2 - 6, 5); ctx.fill();
-      if (e.def.armored) { ctx.strokeStyle = '#aeb6c0'; ctx.lineWidth = 2; ctx.strokeRect(-e.r + 5, -e.r + 5, e.r * 2 - 10, e.r * 2 - 10); } // pancíř
-      ctx.fillStyle = '#ff5a3a'; ctx.beginPath(); ctx.arc(-e.r * 0.35, -e.r * 0.1, e.r * 0.13, 0, Math.PI * 2); ctx.arc(e.r * 0.35, -e.r * 0.1, e.r * 0.13, 0, Math.PI * 2); ctx.fill();
-    } else {
-      // zombie kruh + „ruce"
-      ctx.fillStyle = dark; ctx.beginPath(); ctx.arc(0, 0, e.r, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0, -1, e.r * 0.85, 0, Math.PI * 2); ctx.fill();
-      const eye = e.arch === 'EXPLODER' ? '#ffec6a' : (e.arch === 'RANGED' ? '#8affb0' : '#ffe86a');
-      ctx.fillStyle = eye; ctx.beginPath(); ctx.arc(-e.r * 0.32, -e.r * 0.1, e.r * 0.15, 0, Math.PI * 2); ctx.arc(e.r * 0.32, -e.r * 0.1, e.r * 0.15, 0, Math.PI * 2); ctx.fill();
-      if (e.arch === 'EXPLODER') { const pz = 0.5 + Math.sin(animClock * 0.5) * 0.5; ctx.strokeStyle = `rgba(255,120,60,${pz})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, e.r + 2, 0, Math.PI * 2); ctx.stroke(); }
-    }
+    const dark = e.flash > 0 ? '#ffffff' : shade(e.color, -0.32);
+    const lite = e.flash > 0 ? '#ffffff' : shade(e.color, 0.18);
+    ctx.save(); ctx.translate(Math.round(e.x), Math.round(e.y + bob)); ctx.rotate(fa);
+    if (e.spawnT > 0) ctx.globalAlpha = 1 - e.spawnT / 30;
+    if (e.arch === 'BOSS') drawBossMob(e, col, dark, lite, walkPh);
+    else if (e.arch === 'EXPLODER') drawCreeper(e, col, dark, walkPh);
+    else if (e.typeId === 'ohar') drawHound(e, col, dark, walkPh);
+    else drawZombie(e, col, dark, lite, walkPh);
     ctx.restore(); ctx.globalAlpha = 1;
+    if (freezeTimer > 0) { ctx.strokeStyle = '#bfefff'; ctx.lineWidth = 1.5; ctx.strokeRect(e.x - e.r, e.y + bob - e.r, e.r * 2, e.r * 2); }
     // HP proužek
     if (e.hp < e.hpMax && e.arch !== 'BOSS') {
       ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(e.x - e.r, e.y - e.r - 8, e.r * 2, 3);
       ctx.fillStyle = e.elite ? ELITES[e.elite].glow : '#ff8a4a'; ctx.fillRect(e.x - e.r, e.y - e.r - 8, e.r * 2 * (e.hp / e.hpMax), 3);
     }
   }
+}
+// --- Blokové (Minecraft) mob figury (kreslí se v rotovaném rámci, +x = obličej) ---
+function drawZombie(e, col, dark, lite, ph) {
+  const R = e.r, lp = Math.sin(ph);
+  ctx.fillStyle = dark;
+  ctx.fillRect(-R * 0.7 + lp * R * 0.3, -R * 0.5, R * 0.45, R * 0.4);
+  ctx.fillRect(-R * 0.7 - lp * R * 0.3, R * 0.1, R * 0.45, R * 0.4);
+  ctx.fillStyle = dark; ctx.fillRect(-R * 0.5, -R * 0.6, R, R * 1.2);
+  ctx.fillStyle = col; ctx.fillRect(-R * 0.42, -R * 0.52, R * 0.84, R * 1.04);
+  // ruce natažené dopředu (klasická zombie)
+  const reach = R * 0.7 + Math.sin(ph) * R * 0.06;
+  ctx.fillStyle = col; ctx.fillRect(R * 0.3, -R * 0.6, reach, R * 0.3); ctx.fillRect(R * 0.3, R * 0.3, reach, R * 0.3);
+  ctx.fillStyle = lite; ctx.fillRect(R * 0.3 + reach, -R * 0.6, R * 0.18, R * 0.3); ctx.fillRect(R * 0.3 + reach, R * 0.3, R * 0.18, R * 0.3);
+  // hlava
+  ctx.fillStyle = dark; ctx.fillRect(-R * 0.45, -R * 0.45, R * 0.9, R * 0.9);
+  ctx.fillStyle = lite; ctx.fillRect(-R * 0.38, -R * 0.38, R * 0.76, R * 0.76);
+  ctx.fillStyle = e.arch === 'RANGED' ? '#8affb0' : '#241a10';
+  ctx.fillRect(R * 0.16, -R * 0.3, R * 0.18, R * 0.22); ctx.fillRect(R * 0.16, R * 0.08, R * 0.18, R * 0.22);
+  if (e.arch === 'RANGED') { ctx.fillStyle = '#2a4a1a'; ctx.fillRect(R * 0.3, -R * 0.08, R * 0.14, R * 0.16); }
+  if (e.def && e.def.armored) { ctx.fillStyle = 'rgba(200,210,220,0.35)'; ctx.fillRect(-R * 0.42, -R * 0.52, R * 0.84, R * 0.5); ctx.strokeStyle = '#c0c8d0'; ctx.lineWidth = 2; ctx.strokeRect(-R * 0.5, -R * 0.6, R, R * 1.2); }
+}
+function drawCreeper(e, col, dark, ph) {
+  const R = e.r, lp = Math.sin(ph * 1.4);
+  const green = e.flash > 0 ? '#ffffff' : '#54a83f', gd = e.flash > 0 ? '#ffffff' : '#3c7c2e';
+  ctx.fillStyle = gd;
+  ctx.fillRect(-R * 0.6 + lp * R * 0.2, -R * 0.55, R * 0.35, R * 0.35);
+  ctx.fillRect(-R * 0.6 - lp * R * 0.2, R * 0.2, R * 0.35, R * 0.35);
+  ctx.fillRect(R * 0.3 - lp * R * 0.2, -R * 0.55, R * 0.35, R * 0.35);
+  ctx.fillRect(R * 0.3 + lp * R * 0.2, R * 0.2, R * 0.35, R * 0.35);
+  ctx.fillStyle = gd; ctx.fillRect(-R * 0.5, -R * 0.55, R, R * 1.1);
+  ctx.fillStyle = green; ctx.fillRect(-R * 0.42, -R * 0.47, R * 0.84, R * 0.94);
+  ctx.fillStyle = '#0f1a0c';
+  ctx.fillRect(R * 0.03, -R * 0.34, R * 0.2, R * 0.24); ctx.fillRect(R * 0.03, R * 0.1, R * 0.2, R * 0.24);
+  ctx.fillRect(R * 0.28, -R * 0.14, R * 0.14, R * 0.28);
+  const pz = 0.35 + Math.sin(animClock * 0.5) * 0.35;
+  ctx.strokeStyle = `rgba(255,110,40,${pz})`; ctx.lineWidth = 2; ctx.strokeRect(-R * 0.5, -R * 0.55, R, R * 1.1);
+}
+function drawHound(e, col, dark, ph) {
+  const R = e.r, lp = Math.sin(ph);
+  const body = e.flash > 0 ? '#ffffff' : '#8a4a3a', bd = e.flash > 0 ? '#ffffff' : '#5e3226';
+  ctx.fillStyle = bd;
+  ctx.fillRect(-R * 0.3 + lp * R * 0.4, -R * 0.55, R * 0.24, R * 0.4);
+  ctx.fillRect(-R * 0.3 - lp * R * 0.4, R * 0.15, R * 0.24, R * 0.4);
+  ctx.fillRect(R * 0.35 - lp * R * 0.4, -R * 0.55, R * 0.24, R * 0.4);
+  ctx.fillRect(R * 0.35 + lp * R * 0.4, R * 0.15, R * 0.24, R * 0.4);
+  ctx.fillRect(-R * 0.95, -R * 0.12, R * 0.36, R * 0.24);
+  ctx.fillStyle = bd; ctx.fillRect(-R * 0.6, -R * 0.4, R * 1.2, R * 0.8);
+  ctx.fillStyle = body; ctx.fillRect(-R * 0.55, -R * 0.33, R * 1.05, R * 0.66);
+  ctx.fillStyle = body; ctx.fillRect(R * 0.45, -R * 0.4, R * 0.5, R * 0.8);
+  ctx.fillStyle = bd; ctx.fillRect(R * 0.5, -R * 0.58, R * 0.16, R * 0.2); ctx.fillRect(R * 0.5, R * 0.38, R * 0.16, R * 0.2);
+  ctx.fillStyle = bd; ctx.fillRect(R * 0.9, -R * 0.18, R * 0.3, R * 0.36);
+  ctx.fillStyle = '#ff3a2a'; ctx.fillRect(R * 0.58, -R * 0.24, R * 0.12, R * 0.14); ctx.fillRect(R * 0.58, R * 0.1, R * 0.12, R * 0.14);
+}
+function drawBossMob(e, col, dark, lite, ph) {
+  const R = e.r, lp = Math.sin(ph * 0.8), fade = e.spawnT > 0 ? 1 - e.spawnT / 30 : 1;
+  ctx.globalAlpha = (0.16 + Math.sin(animClock * 0.1) * 0.06) * fade;
+  ctx.fillStyle = col; ctx.fillRect(-R * 1.15, -R * 1.15, R * 2.3, R * 2.3); ctx.globalAlpha = fade;
+  ctx.fillStyle = dark; ctx.fillRect(-R * 0.6 + lp * R * 0.18, -R * 0.5, R * 0.5, R * 0.5); ctx.fillRect(-R * 0.6 - lp * R * 0.18, R * 0.0, R * 0.5, R * 0.5);
+  ctx.fillStyle = dark; ctx.fillRect(-R * 0.72, -R * 0.72, R * 1.44, R * 1.5);
+  ctx.fillStyle = col; ctx.fillRect(-R * 0.6, -R * 0.6, R * 1.2, R * 1.3);
+  const reach = R * 0.8 + Math.sin(animClock * 0.15) * R * 0.1;
+  ctx.fillStyle = col; ctx.fillRect(R * 0.3, -R * 0.9, reach, R * 0.42); ctx.fillRect(R * 0.3, R * 0.48, reach, R * 0.42);
+  ctx.fillStyle = dark; ctx.fillRect(R * 0.3 + reach, -R * 0.9, R * 0.26, R * 0.42); ctx.fillRect(R * 0.3 + reach, R * 0.48, R * 0.26, R * 0.42);
+  ctx.fillStyle = dark; ctx.fillRect(-R * 0.5, -R * 0.55, R, R);
+  ctx.fillStyle = lite; ctx.fillRect(-R * 0.42, -R * 0.47, R * 0.84, R * 0.84);
+  // rohy
+  ctx.fillStyle = dark; ctx.fillRect(-R * 0.52, -R * 0.66, R * 0.22, R * 0.22); ctx.fillRect(R * 0.3, -R * 0.66, R * 0.22, R * 0.22);
+  ctx.fillStyle = e.def && e.def.final ? '#ffdd33' : '#ff2a1a';
+  ctx.fillRect(R * 0.14, -R * 0.3, R * 0.2, R * 0.22); ctx.fillRect(R * 0.14, R * 0.08, R * 0.2, R * 0.22);
 }
 // ztmavení/zesvětlení hex barvy
 function shade(hex, amt) {
@@ -1617,56 +1685,63 @@ function drawPlayers() {
     if (isCoop() && p === lp) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(p.x, p.y + bob, p.r + 9, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
     if (blink) continue;
     const w0 = WEAPONS[p.weaponId] || {};
-    // výpad při útoku (melee dopředu, ranged mírný zpětný ráz)
     const atk = clamp(p.atkAnim / 10, 0, 1);
-    const lunge = w0.cat === 'melee' ? Math.sin(atk * Math.PI) * 5 : -Math.sin(atk * Math.PI) * 2;
-    ctx.save(); ctx.translate(p.x + Math.cos(p.aimAngle) * lunge, p.y + bob + Math.sin(p.aimAngle) * lunge);
-    // nožičky (chůze) — pod tělem, kolmo na směr pohledu
-    const legPh = Math.sin(p.walk);
-    const perp = p.aimAngle + Math.PI / 2;
-    for (const side of [-1, 1]) {
-      const off = side * p.r * 0.45, step = legPh * side * 2.5;
-      const lx = Math.cos(perp) * off + Math.cos(p.aimAngle) * step;
-      const ly = Math.sin(perp) * off + Math.sin(p.aimAngle) * step;
-      ctx.fillStyle = shade(p.color, -0.45); ctx.beginPath(); ctx.ellipse(lx, ly + p.r * 0.6, 2.5, 4, p.aimAngle, 0, Math.PI * 2); ctx.fill();
-    }
-    // plášť za tělem
-    const ca = p.aimAngle + Math.PI;
-    ctx.fillStyle = shade(p.color, -0.15);
-    ctx.beginPath(); ctx.moveTo(Math.cos(ca - 0.5) * p.r, Math.sin(ca - 0.5) * p.r); ctx.lineTo(Math.cos(ca) * (p.r + 9), Math.sin(ca) * (p.r + 9)); ctx.lineTo(Math.cos(ca + 0.5) * p.r, Math.sin(ca + 0.5) * p.r); ctx.closePath(); ctx.fill();
-    // tělo (trup) + hlava
-    ctx.fillStyle = shade(p.color, -0.2); ctx.beginPath(); ctx.arc(0, 0, p.r, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(0, -1, p.r * 0.82, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = shade(p.color, 0.2); ctx.beginPath(); ctx.arc(Math.cos(p.aimAngle) * 2, Math.sin(p.aimAngle) * 2 - 2, p.r * 0.42, 0, Math.PI * 2); ctx.fill(); // hlava
-    ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.beginPath(); ctx.arc(-p.r * 0.3, -p.r * 0.35, p.r * 0.2, 0, Math.PI * 2); ctx.fill();
-    drawWeaponInHand(p, atk);
-    ctx.restore();
+    drawBlockyHumanoid(p.x, p.y + bob, p.r, p.aimAngle, p.walk, atk, {
+      skin: '#d8a878', shirt: p.color, dark: shade(p.color, -0.4), hat: shade(p.color, 0.22), pants: '#39344f', weapon: w0,
+    });
   }
 }
-function drawWeaponInHand(p, atk) {
-  const w = WEAPONS[p.weaponId] || {}; const a = p.aimAngle;
-  // thrust: melee se rozmáchne, střelec cukne
-  const thrust = w.cat === 'melee' ? Math.sin(atk * Math.PI) * 6 : 0;
-  const swing = w.cat === 'melee' ? (1 - atk) * 0.9 - 0.45 : 0;   // oblouk seku
-  ctx.save(); ctx.translate(Math.cos(a) * (p.r + thrust), Math.sin(a) * (p.r + thrust)); ctx.rotate(a + swing);
+// Hranatá „Minecraft" postava viděná shora, natočená ve směru míření (ang).
+function drawBlockyHumanoid(x, y, r, ang, walk, atk, pal) {
+  const R = r; const lp = Math.sin(walk || 0); const sw = atk ? Math.sin(atk * Math.PI) : 0;
+  ctx.save(); ctx.translate(Math.round(x), Math.round(y)); ctx.rotate(ang);
+  // nohy (za tělem, animované)
+  ctx.fillStyle = pal.pants;
+  ctx.fillRect(-R * 0.72 + lp * R * 0.35, -R * 0.52, R * 0.5, R * 0.42);
+  ctx.fillRect(-R * 0.72 - lp * R * 0.35, R * 0.1, R * 0.5, R * 0.42);
+  // trup
+  ctx.fillStyle = pal.dark; ctx.fillRect(-R * 0.56, -R * 0.64, R * 1.06, R * 1.28);
+  ctx.fillStyle = pal.shirt; ctx.fillRect(-R * 0.47, -R * 0.54, R * 0.9, R * 1.08);
+  // ruce (pravá se rozmáchne s útokem)
+  const armF = sw * R * 0.5;
+  ctx.fillStyle = pal.shirt; ctx.fillRect(-R * 0.05, -R * 0.98, R * 0.4, R * 0.34);
+  ctx.fillStyle = pal.skin; ctx.fillRect(R * 0.33, -R * 0.98, R * 0.24, R * 0.34);
+  ctx.fillStyle = pal.shirt; ctx.fillRect(-R * 0.05 + armF, R * 0.64, R * 0.4, R * 0.34);
+  ctx.fillStyle = pal.skin; ctx.fillRect(R * 0.33 + armF, R * 0.64, R * 0.24, R * 0.34);
+  // hlava (nahoře) + helma + obličej
+  ctx.fillStyle = pal.dark; ctx.fillRect(-R * 0.5, -R * 0.5, R, R);
+  ctx.fillStyle = pal.skin; ctx.fillRect(-R * 0.42, -R * 0.42, R * 0.84, R * 0.84);
+  ctx.fillStyle = pal.hat; ctx.fillRect(-R * 0.5, -R * 0.5, R, R * 0.42);
+  ctx.fillStyle = '#20242c';
+  ctx.fillRect(R * 0.24, -R * 0.3, R * 0.15, R * 0.2);
+  ctx.fillRect(R * 0.24, R * 0.1, R * 0.15, R * 0.2);
+  // zbraň v pravé ruce (dopředu = +x)
+  drawWeaponBlocky(pal.weapon, R, atk, armF);
+  ctx.restore();
+}
+function drawWeaponBlocky(w, R, atk, armF) {
+  if (!w) return;
+  const thrust = (w.cat === 'melee') ? sinP(atk) * R * 0.6 : 0;
+  ctx.save(); ctx.translate(R * 0.5 + armF + thrust, R * 0.8);
   if (w.cat === 'melee' || !w.cat) {
-    ctx.strokeStyle = '#8a6a3a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-4, 0); ctx.lineTo(2, 0); ctx.stroke(); // jílec
-    ctx.strokeStyle = '#3a2a1a'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(1, -3); ctx.lineTo(1, 3); ctx.stroke(); // záštita
-    ctx.strokeStyle = '#e6e8ee'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(2, 0); ctx.lineTo(15, 0); ctx.stroke(); // čepel
-    ctx.fillStyle = '#e6e8ee'; ctx.beginPath(); ctx.moveTo(15, 0); ctx.lineTo(12, -2); ctx.lineTo(12, 2); ctx.fill();
+    ctx.fillStyle = '#6a4a2a'; ctx.fillRect(-R * 0.18, -R * 0.13, R * 0.28, R * 0.26);
+    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(R * 0.05, -R * 0.2, R * 0.1, R * 0.4);
+    ctx.fillStyle = '#c8ccd4'; ctx.fillRect(R * 0.12, -R * 0.1, R * 0.95, R * 0.2);
+    ctx.fillStyle = '#eef0f4'; ctx.fillRect(R * 0.12, -R * 0.1, R * 0.95, R * 0.08);
   } else if (w.ammo === 'mana') {
-    ctx.strokeStyle = '#6a4a2a'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(-3, 0); ctx.lineTo(11, 0); ctx.stroke();
-    const gl = w.color || '#9ad0ff'; ctx.fillStyle = gl; ctx.globalAlpha = 0.4; ctx.beginPath(); ctx.arc(12, 0, 5, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
-    ctx.beginPath(); ctx.arc(12, 0, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#6a4a2a'; ctx.fillRect(-R * 0.1, -R * 0.08, R * 0.85, R * 0.16);
+    const c = w.color || '#9ad0ff'; ctx.fillStyle = c; ctx.fillRect(R * 0.62, -R * 0.24, R * 0.42, R * 0.48);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(R * 0.72, -R * 0.12, R * 0.16, R * 0.16);
   } else if (w.ammo === 'prach') {
-    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(-4, -1.5, 8, 3);
-    ctx.strokeStyle = '#5a5a5a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(2, 0); ctx.lineTo(15, 0); ctx.stroke();
-  } else { // luk/kuše
-    ctx.strokeStyle = '#8a6a3a'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(5, 0, 7, -1.5, 1.5); ctx.stroke();
-    ctx.strokeStyle = 'rgba(230,230,230,0.8)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(5 + Math.cos(-1.5) * 7, Math.sin(-1.5) * 7); ctx.lineTo(5 + Math.cos(1.5) * 7, Math.sin(1.5) * 7); ctx.stroke();
+    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(-R * 0.18, -R * 0.16, R * 0.42, R * 0.32);
+    ctx.fillStyle = '#565b62'; ctx.fillRect(R * 0.2, -R * 0.1, R * 0.95, R * 0.2);
+  } else {
+    ctx.fillStyle = '#8a6a3a'; ctx.fillRect(R * 0.2, -R * 0.55, R * 0.16, R * 1.1);
+    ctx.fillStyle = 'rgba(235,235,235,0.85)'; ctx.fillRect(R * 0.28, -R * 0.55, R * 0.04, R * 1.1);
   }
   ctx.restore();
 }
+function sinP(a) { return Math.sin((a || 0) * Math.PI); }
 function drawBuildGhost() {
   if (!buildSel) return;
   // ghost pod „posledním dotykem" — použijeme uložený hover
