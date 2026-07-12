@@ -173,7 +173,7 @@ function serializeState() {
   return {
     st: state,
     run: run && { gems: run.gems, lives: run.lives, wave: run.wave, score: run.score || 0, ownedWeapons: run.ownedWeapons, ammo: run.ammo, owned: run.owned },
-    wave: wave && { boss: wave.boss, spawned: wave.spawned, total: wave.total },
+    wave: wave && { boss: wave.boss, spawned: wave.spawned, total: wave.total, reward: wave.reward },
     banner: banner && { text: banner.text, t: banner.t, warn: banner.warn },
     readyHost, readyGuest,
     players: players.map(p => ({ x: p.x, y: p.y, r: p.r, hp: p.hp, hpMax: p.hpMax, aimAngle: p.aimAngle, inv: p.inv, downed: p.downed, classId: p.classId, color: p.color, weaponId: p.weaponId, mana: p.mana, manaMax: p.manaMax })),

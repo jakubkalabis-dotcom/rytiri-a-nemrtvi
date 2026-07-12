@@ -222,7 +222,7 @@ function renderShop() {
 }
 
 function renderRoundEnd() {
-  const r = wave ? wave.reward : { gems: 0, kills: 0, xp: 0 };
+  const r = (wave && wave.reward) || { gems: 0, kills: 0, xp: 0 };
   ovContent.innerHTML = `
     <h2>Vlna ${run.wave} přežita!</h2>
     <div class="wallet">Zabito: <b>${r.kills}</b> · Získáno 💎 <b>${r.gems}</b> · XP <b>+${r.xp}</b></div>
