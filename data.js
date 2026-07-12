@@ -236,6 +236,21 @@ const ABILITIES = {
   knez:       { name:'Svaté světlo',   icon:'✨', cd:600, desc:'Vyléčí tým a spálí nemrtvé kolem.' },
 };
 
+/* ---------- Vylepšování statů postavy (za gemy, v rámci běhu, sdílené týmem) ---------- */
+const UPGRADES = {
+  hp:    { name:'Vitalita',   icon:'❤', unit:'+12% max HP',   base:60, step:0.12, color:'#ff6a6a' },
+  dmg:   { name:'Síla',       icon:'⚔', unit:'+8% poškození', base:75, step:0.08, color:'#ffb060' },
+  speed: { name:'Hbitost',    icon:'👟', unit:'+6% rychlost',  base:60, step:0.06, color:'#8fd08f' },
+  rate:  { name:'Zručnost',   icon:'⚡', unit:'-5% prodleva',   base:75, step:0.05, color:'#8fbaff' },
+  crit:  { name:'Přesnost',   icon:'✦', unit:'+4% kritika',    base:85, step:0.04, color:'#ffd35c' },
+  armor: { name:'Pancíř',     icon:'🛡', unit:'-5% obdržené',   base:70, step:0.05, color:'#c0c8d0' },
+};
+const UPGRADE_MAX = 10;
+function upgradeCost(def, lvl) { return Math.round(def.base * Math.pow(1.55, lvl)); }
+// vylepšení konkrétní zbraně (+% poškození, -% prodleva na úroveň)
+const WEAPON_UP_MAX = 6;
+function weaponUpCost(w, lvl) { return Math.round((w.cost * 0.5 + 40) * Math.pow(1.6, lvl)); }
+
 /* ---------- Odměny a progrese ---------- */
 const GEMS_PER_KILL_MUL = 1;          // × bounty nepřítele
 function waveReward(wave) { return 60 + wave * 18; }   // bonus gemů za dokončení vlny

@@ -154,6 +154,8 @@ function netHandleCmd(m) {
     case 'buyweapon': buyWeapon(m.id); break;
     case 'buyammo': buyAmmo(m.id); break;
     case 'buybuild': buyBuild(m.id); break;
+    case 'upstat': buyUpgrade(m.id); break;
+    case 'upweapon': buyWeaponUp(m.id); break;
     case 'buylife': if (run.gems >= 40) { run.gems -= 40; run.lives += 5; sfx.buy(); renderShop(); } break;
     case 'tobuild': startBuildPhase(); break;
     case 'toshop': setState('shop'); break;
@@ -173,7 +175,7 @@ function netHandleCmd(m) {
 function serializeState() {
   const snap = {
     st: state,
-    run: run && { gems: run.gems, lives: run.lives, wave: run.wave, score: run.score || 0, ownedWeapons: run.ownedWeapons, ammo: run.ammo, owned: run.owned, combo: run.combo || 0, comboT: run.comboT || 0 },
+    run: run && { gems: run.gems, lives: run.lives, wave: run.wave, score: run.score || 0, ownedWeapons: run.ownedWeapons, ammo: run.ammo, owned: run.owned, upgrades: run.upgrades, wUpgrades: run.wUpgrades, combo: run.combo || 0, comboT: run.comboT || 0 },
     wave: wave && { boss: wave.boss, spawned: wave.spawned, total: wave.total, reward: wave.reward },
     banner: banner && { text: banner.text, t: banner.t, warn: banner.warn },
     readyHost, readyGuest, freezeTimer,
@@ -195,7 +197,7 @@ function serializeState() {
 }
 
 // Podpis ekonomiky pro rozhodnutí, kdy překreslit obchod na guestovi.
-function shopSig(r) { return r ? r.gems + '|' + r.lives + '|' + (r.ownedWeapons ? r.ownedWeapons.length : 0) + '|' + JSON.stringify(r.owned) + '|' + JSON.stringify(r.ammo) : ''; }
+function shopSig(r) { return r ? r.gems + '|' + r.lives + '|' + (r.ownedWeapons ? r.ownedWeapons.length : 0) + '|' + JSON.stringify(r.owned) + '|' + JSON.stringify(r.ammo) + '|' + JSON.stringify(r.upgrades) + '|' + JSON.stringify(r.wUpgrades) : ''; }
 let lastShopSig = '';
 
 function applyState(s) {

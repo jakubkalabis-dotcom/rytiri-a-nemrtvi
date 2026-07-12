@@ -44,12 +44,13 @@ const ovContent = document.getElementById('ovContent');
 const STICK_R = 50;
 function inArena(y) { return y < ARENA_H; }
 const BTN = {
-  weapon:   { x: 6,      y: ARENA_H + 8,  w: 150, h: 38 },
-  autofire: { x: 164,    y: ARENA_H + 8,  w: 104, h: 38 },
-  pause:    { x: W - 52, y: ARENA_H + 8,  w: 46,  h: 38 },
-  switch2:  { x: 6,      y: ARENA_H + 52, w: 150, h: 36 },   // přepínač zbraní zpět
-  ability:  { x: 164,    y: ARENA_H + 50, w: 104, h: 40 },   // aktivní schopnost
-  start:    { x: W - 132,y: ARENA_H + 50, w: 126, h: 40 },   // start vlny (build)
+  weapon:   { x: 6,      y: ARENA_H + 6,  w: 148, h: 34 },
+  autoaim:  { x: 160,    y: ARENA_H + 6,  w: 78,  h: 34 },
+  autofire: { x: 242,    y: ARENA_H + 6,  w: 78,  h: 34 },
+  pause:    { x: W - 46, y: ARENA_H + 6,  w: 40,  h: 34 },
+  switch2:  { x: 6,      y: ARENA_H + 44, w: 148, h: 36 },   // přepínač zbraní zpět
+  ability:  { x: 160,    y: ARENA_H + 44, w: 200, h: 40 },   // aktivní schopnost
+  start:    { x: W - 132,y: ARENA_H + 48, w: 126, h: 40 },   // start vlny (build)
 };
 function inRect(px, py, r) { return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h; }
 
@@ -66,6 +67,8 @@ function newRun(classIds) {
     ownedWeapons: [],
     ammo: {},
     owned: {},          // stavební inventář: id -> počet
+    upgrades: { hp: 0, dmg: 0, speed: 0, rate: 0, crit: 0, armor: 0 }, // statová vylepšení (sdílená)
+    wUpgrades: {},      // vylepšení zbraní: weaponId -> úroveň
     score: 0,
   };
   for (const k in AMMO) run.ammo[k] = 0;
@@ -89,15 +92,17 @@ function newRun(classIds) {
 }
 function makePlayer(cls, classId) {
   const pas = cls.passive || {};
+  const baseHp = Math.round(120 * cls.hpMod);
+  const hpMax = Math.round(baseHp * (1 + 0.12 * ((run.upgrades && run.upgrades.hp) || 0)));
   return {
     classId, class: cls, color: cls.color,
     x: (CORE.tx + CORE.w / 2) * TILE, y: (CORE.ty - 1) * TILE, r: 12,
-    hpMax: Math.round(120 * cls.hpMod), hp: Math.round(120 * cls.hpMod),
+    baseHp, hpMax, hp: hpMax,
     baseSpeed: 2.6 * cls.spdMod * (pas.moveSpeed || 1),
     weaponId: cls.start[0], cool: 0, aimAngle: -Math.PI / 2, inv: 0, downed: false,
     manaMax: Math.round(100 * (pas.manaMax || 1)), mana: Math.round(100 * (pas.manaMax || 1)),
     manaRegen: 0.28 * (pas.manaRegen || 1),
-    abilityCd: 0, buffRapid: 0, buffPower: 0, shieldT: 0, rageT: 0, dashT: 0, walk: 0,
+    abilityCd: 0, buffRapid: 0, buffPower: 0, shieldT: 0, rageT: 0, dashT: 0, walk: 0, atkAnim: 0,
     passive: pas,
     input: { mx: 0, my: 0, aiming: false },
   };
@@ -175,56 +180,92 @@ function shopCard(id, name, cost, cat, extra, act, disabled) {
     <div class="scc">${disabled || '💎 ' + cost}</div>
   </div>`;
 }
+let shopTab = 'shop';
+function refreshShop() { if (state === 'shop') renderShop(); lastShopSig = typeof shopSig === 'function' ? shopSig(run) : ''; }
+function shopHeader() {
+  return `<h2>${shopTab === 'char' ? 'Postava' : 'Obchod'} · vlna ${run.wave + 1}</h2>
+    <div class="wallet">💎 ${run.gems} &nbsp; ❤ ${run.lives} &nbsp; 🏰 ${players.map(p => p.class.name).join(' + ')}</div>
+    <div class="tabs">
+      <button data-act="tab" data-id="shop" class="tab ${shopTab === 'shop' ? 'on' : ''}">🛒 Obchod</button>
+      <button data-act="tab" data-id="char" class="tab ${shopTab === 'char' ? 'on' : ''}">🧙 Postava</button>
+    </div>`;
+}
 function renderShop() {
+  ovContent.innerHTML = shopHeader() + (shopTab === 'char' ? renderCharTab() : renderShopTab())
+    + `<button data-act="tobuild">Dál → stavění ▶</button>`;
+}
+function renderShopTab() {
   const lvl = profile.playerLevel;
-  // Zbraně (nevlastněné)
   const weaponCards = Object.keys(WEAPONS).filter(id => !run.ownedWeapons.includes(id) && WEAPONS[id].cost > 0).map(id => {
     const w = WEAPONS[id];
     const locked = lvl < w.unlock;
     const cost = costOf(w.cost, w.cat === 'melee' ? 'melee' : 'ranged');
     const cant = locked ? `🔒 úroveň ${w.unlock}` : (run.gems < cost ? 'málo 💎' : null);
-    const tag = w.cat === 'melee' ? '🗡' : '🏹';
-    return shopCard(id, `${tag} ${w.name}`, cost, null, `dmg ${w.dmg} · ${w.arch === 'MELEE_SWING' ? 'zblízka' : 'dálka'}`, 'buyweapon', cant);
+    return shopCard(id, `${w.cat === 'melee' ? '🗡' : '🏹'} ${w.name}`, cost, null, `dmg ${w.dmg} · ${w.cat === 'melee' ? 'zblízka' : 'dálka'}`, 'buyweapon', cant);
   }).join('');
-  // Munice
-  const ammoCards = Object.keys(AMMO).map(id => {
-    const a = AMMO[id];
-    const cost = costOf(a.cost, 'ammo');
-    return shopCard(id, `🎯 ${a.name}`, cost, 'ammo', `+${a.bundle} · máš ${run.ammo[id] || 0}`, 'buyammo', run.gems < cost ? 'málo 💎' : null);
+  // Vlastněné zbraně + vylepšení
+  const ownedCards = run.ownedWeapons.map(id => {
+    const w = WEAPONS[id]; const wl = run.wUpgrades[id] || 0;
+    const maxed = wl >= WEAPON_UP_MAX; const cost = weaponUpCost(w, wl);
+    const extra = `Lv.${wl} · dmg ${Math.round(w.dmg * (1 + 0.1 * wl))}`;
+    return shopCard(id, `${w.cat === 'melee' ? '🗡' : '🏹'} ${w.name}`, cost, null, extra, 'upweapon', maxed ? 'MAX' : (run.gems < cost ? 'málo 💎' : '⬆ ' + cost));
   }).join('');
-  // Pasti a věže
-  const trapCards = Object.keys(TRAPS).map(id => {
-    const t = TRAPS[id];
-    const cost = costOf(t.cost, 'trap');
-    return shopCard(id, `🪤 ${t.name}`, cost, 'trap', `máš ${run.owned[id] || 0}`, 'buybuild', run.gems < cost ? 'málo 💎' : null);
-  }).join('');
-  // Zdi
-  const wallCards = Object.keys(STRUCTURES).map(id => {
-    const s = STRUCTURES[id];
-    const cost = costOf(s.cost, 'wall');
-    return shopCard(id, `🧱 ${s.name}`, cost, 'wall', `HP ${Math.round(s.hp * (teamMax('wallHp') || 1))} · máš ${run.owned[id] || 0}`, 'buybuild', run.gems < cost ? 'málo 💎' : null);
-  }).join('');
-  // Válečníci
-  const warCards = Object.keys(WARRIORS).map(id => {
-    const w = WARRIORS[id];
-    const cost = costOf(w.cost, 'warrior');
-    return shopCard(id, `🛡 ${w.name}`, cost, 'warrior', `HP ${w.hp} · máš ${run.owned[id] || 0}`, 'buybuild', run.gems < cost ? 'málo 💎' : null);
-  }).join('');
-  // Životy jádra
+  const ammoCards = Object.keys(AMMO).map(id => { const a = AMMO[id], cost = costOf(a.cost, 'ammo'); return shopCard(id, `🎯 ${a.name}`, cost, 'ammo', `+${a.bundle} · máš ${run.ammo[id] || 0}`, 'buyammo', run.gems < cost ? 'málo 💎' : null); }).join('');
   const lifeCost = 40;
   const lifeCard = shopCard('life', '❤ Život brány (+5)', lifeCost, 'ammo', `jádro: ${run.lives}`, 'buylife', run.gems < lifeCost ? 'málo 💎' : null);
-
-  ovContent.innerHTML = `
-    <h2>Obchod · vlna ${run.wave + 1}</h2>
-    <div class="wallet">💎 ${run.gems} &nbsp; ❤ ${run.lives} &nbsp; 🏰 ${players.map(p => p.class.name).join(' + ')}</div>
-    <div class="shop">
-      <h3>Zbraně</h3><div class="grid">${weaponCards || '<div class="empty">Vše koupeno</div>'}</div>
+  const trapCards = Object.keys(TRAPS).map(id => { const t = TRAPS[id], cost = costOf(t.cost, 'trap'); return shopCard(id, `🪤 ${t.name}`, cost, 'trap', `máš ${run.owned[id] || 0}`, 'buybuild', run.gems < cost ? 'málo 💎' : null); }).join('');
+  const wallCards = Object.keys(STRUCTURES).map(id => { const s = STRUCTURES[id], cost = costOf(s.cost, 'wall'); return shopCard(id, `🧱 ${s.name}`, cost, 'wall', `HP ${Math.round(s.hp * (teamMax('wallHp') || 1))} · máš ${run.owned[id] || 0}`, 'buybuild', run.gems < cost ? 'málo 💎' : null); }).join('');
+  const warCards = Object.keys(WARRIORS).map(id => { const w = WARRIORS[id], cost = costOf(w.cost, 'warrior'); return shopCard(id, `🛡 ${w.name}`, cost, 'warrior', `HP ${w.hp} · máš ${run.owned[id] || 0}`, 'buybuild', run.gems < cost ? 'málo 💎' : null); }).join('');
+  return `<div class="shop">
+      ${ownedCards ? `<h3>Vylepšit zbraně</h3><div class="grid">${ownedCards}</div>` : ''}
+      <h3>Nové zbraně</h3><div class="grid">${weaponCards || '<div class="empty">Vše koupeno</div>'}</div>
       <h3>Munice a život</h3><div class="grid">${ammoCards}${lifeCard}</div>
       <h3>Pasti a věže</h3><div class="grid">${trapCards}</div>
       <h3>Zdi</h3><div class="grid">${wallCards}</div>
       <h3>Spojenci</h3><div class="grid">${warCards}</div>
-    </div>
-    <button data-act="tobuild">Dál → stavění</button>`;
+    </div>`;
+}
+function renderCharTab() {
+  const p = localPlayer() || players[0]; const up = run.upgrades; const w = WEAPONS[p.weaponId] || {};
+  const ab = ABILITIES[p.classId] || {};
+  const stat = (label, val) => `<div class="statrow"><span>${label}</span><b>${val}</b></div>`;
+  const critPct = Math.round(((p.passive.crit || 0) + 0.04 * up.crit) * 100);
+  const statBlock = `<div class="statbox">
+      <div class="statname" style="color:${p.color}">${p.class.icon} ${p.class.name}</div>
+      ${stat('❤ Život', p.hpMax)}
+      ${stat('⚔ Poškození', '×' + (1 + 0.08 * up.dmg).toFixed(2) + (p.passive.meleeDmg ? ' (blíz +' + Math.round((p.passive.meleeDmg - 1) * 100) + '%)' : ''))}
+      ${stat('👟 Rychlost', '×' + ((1 + 0.06 * up.speed) * p.class.spdMod).toFixed(2))}
+      ${stat('⚡ Rychlost palby', '+' + Math.round(5 * up.rate + (p.passive.rangedRate ? (1 - p.passive.rangedRate) * 100 : 0)) + '%')}
+      ${stat('✦ Kritika', critPct + '%')}
+      ${stat('🛡 Pancíř', Math.round(5 * up.armor + (p.passive.block ? p.passive.block * 100 : 0)) + '%')}
+      ${stat('🗡 Zbraň', w.name + ' (Lv.' + (run.wUpgrades[p.weaponId] || 0) + ')')}
+      ${stat('✨ Schopnost', ab.name || '—')}
+    </div>`;
+  const upCards = Object.keys(UPGRADES).map(k => {
+    const def = UPGRADES[k]; const lv = up[k] || 0; const maxed = lv >= UPGRADE_MAX; const cost = upgradeCost(def, lv);
+    const bars = '▮'.repeat(lv) + '▯'.repeat(UPGRADE_MAX - lv);
+    return `<div class="card up-card ${maxed || run.gems < cost ? 'dis' : ''}" ${maxed ? '' : `data-act="upstat" data-id="${k}"`}>
+      <div class="scn" style="color:${def.color}">${def.icon} ${def.name}</div>
+      <div class="scd">${def.unit}</div>
+      <div class="upbar">${bars}</div>
+      <div class="scc">${maxed ? 'MAX' : '💎 ' + cost}</div>
+    </div>`;
+  }).join('');
+  return `${statBlock}<h3>Vylepšit staty (Lv. max ${UPGRADE_MAX})</h3><div class="grid">${upCards}</div>`;
+}
+function buyUpgrade(stat) {
+  const def = UPGRADES[stat]; if (!def) return;
+  const lvl = run.upgrades[stat] || 0; if (lvl >= UPGRADE_MAX) return;
+  const cost = upgradeCost(def, lvl); if (run.gems < cost) return;
+  run.gems -= cost; run.upgrades[stat] = lvl + 1;
+  if (stat === 'hp') for (const q of players) { const nm = Math.round(q.baseHp * (1 + 0.12 * run.upgrades.hp)); q.hp += nm - q.hpMax; q.hpMax = nm; }
+  sfx.buy(); refreshShop();
+}
+function buyWeaponUp(id) {
+  const w = WEAPONS[id]; if (!w || !run.ownedWeapons.includes(id)) return;
+  const lvl = run.wUpgrades[id] || 0; if (lvl >= WEAPON_UP_MAX) return;
+  const cost = weaponUpCost(w, lvl); if (run.gems < cost) return;
+  run.gems -= cost; run.wUpgrades[id] = lvl + 1; sfx.buy(); refreshShop();
 }
 
 function renderRoundEnd() {
@@ -260,16 +301,19 @@ overlay.addEventListener('click', e => {
   if (act === 'genanswer') { if (typeof netJoinAccept === 'function') netJoinAccept(); return; }
   if (act === 'hostaccept') { if (typeof netHostAccept === 'function') netHostAccept(); return; }
   if (act === 'pickclass') { pickClass(id); return; }
+  if (act === 'tab') { shopTab = id; renderShop(); return; }   // lokální přepnutí záložky
   // --- guest: ekonomika a tok = příkazy hostiteli ---
   if (net.role === 'guest') {
-    if (['buyweapon', 'buyammo', 'buybuild', 'buylife', 'tobuild', 'toshop'].includes(act)) { netSend({ t: 'cmd', act, id }); return; }
+    if (['buyweapon', 'buyammo', 'buybuild', 'buylife', 'upstat', 'upweapon', 'tobuild', 'toshop'].includes(act)) { netSend({ t: 'cmd', act, id }); return; }
     return;
   }
   // --- host / solo ---
   if (act === 'buyweapon') buyWeapon(id);
   else if (act === 'buyammo') buyAmmo(id);
   else if (act === 'buybuild') buyBuild(id);
-  else if (act === 'buylife') { if (run.gems >= 40) { run.gems -= 40; run.lives += 5; sfx.buy(); renderShop(); } }
+  else if (act === 'upstat') buyUpgrade(id);
+  else if (act === 'upweapon') buyWeaponUp(id);
+  else if (act === 'buylife') { if (run.gems >= 40) { run.gems -= 40; run.lives += 5; sfx.buy(); refreshShop(); } }
   else if (act === 'tobuild') { startBuildPhase(); }
   else if (act === 'toshop') { setState('shop'); }
 });
@@ -452,6 +496,9 @@ function rateMod(p, w) {
   if (w.cat === 'ranged' && p.passive.rangedRate) m = p.passive.rangedRate;
   if (p.buffRapid > 0) m *= 0.5;   // drop „Rychlopalba"
   if (p.rageT > 0) m *= 0.6;       // berserk zuřivost
+  const up = (run && run.upgrades) || {};
+  m *= Math.max(0.45, 1 - 0.05 * (up.rate || 0));                       // stat Zručnost
+  m *= Math.max(0.5, 1 - 0.03 * ((run.wUpgrades && run.wUpgrades[p.weaponId]) || 0)); // vylepšení zbraně
   return m;
 }
 function rangeMod(p, w) {
@@ -466,11 +513,15 @@ function weaponDmg(p, w) {
   if (w.ammo === 'mana') d *= (pas.magicDmg || 1);
   if (w.arch === 'THROWN_AOE') d *= (pas.aoeDmg || 1);
   d *= (pas.holyDmg || 1);
+  const up = (run && run.upgrades) || {};
+  d *= 1 + 0.08 * (up.dmg || 0);                                      // stat Síla
+  d *= 1 + 0.10 * ((run.wUpgrades && run.wUpgrades[p.weaponId]) || 0); // vylepšení zbraně
   if (p.buffPower > 0) d *= 1.5;   // drop „Síla"
   if (p.rageT > 0) d *= 1.8;       // berserk zuřivost
   if (pas.berserk) d *= 1 + 0.4 * (1 - p.hp / p.hpMax);
   let crit = false;
-  if (pas.crit && Math.random() < pas.crit) { d *= (pas.critMul || 2); crit = true; }
+  const critCh = (pas.crit || 0) + 0.04 * (up.crit || 0);            // stat Přesnost
+  if (critCh > 0 && Math.random() < critCh) { d *= (pas.critMul || 2); crit = true; }
   p._lastCrit = crit;
   return d;
 }
@@ -780,7 +831,7 @@ function updatePlayers(dt) {
     // léčivá aura (kněz)
     if (p.passive.healAura) p.hp = Math.min(p.hpMax, p.hp + p.passive.healAura * dt);
     // pohyb
-    let sp = p.baseSpeed;
+    let sp = p.baseSpeed * (1 + 0.06 * ((run.upgrades && run.upgrades.speed) || 0));
     if (p.passive.berserk && p.hp < p.hpMax * 0.35) sp *= 1.3;
     if (p.rageT > 0) sp *= 1.25;
     if (p.dashT > 0) { // výpad (zvěd) — rychlý pohyb ve směru míření
@@ -817,17 +868,20 @@ function useAbility(p) {
   }
 }
 function updatePlayerCombat(p, dt) {
+  if (p.atkAnim > 0) p.atkAnim -= dt;
   p.cool -= dt;
   const w = activeWeapon(p);
   const range = w.range * rangeMod(p, w);
-  let aim = p.aimAngle, wantFire = false;
-  if (p.input.aiming) { aim = p.aimAngle; wantFire = true; }
-  else if (profile.settings.autofire) {
-    const tgt = nearestEnemy(p.x, p.y, range);
-    if (tgt) { aim = Math.atan2(tgt.y - p.y, tgt.x - p.x); wantFire = true; }
+  const manual = p.input.aiming;             // ruční stick vždy přebíjí
+  const tgt = nearestEnemy(p.x, p.y, range);
+  let aim = p.aimAngle;
+  if (!manual && profile.settings.autoaim && tgt) { aim = Math.atan2(tgt.y - p.y, tgt.x - p.x); p.aimAngle = aim; }
+  let wantFire = manual;
+  if (!manual && profile.settings.autofire) {
+    wantFire = w.cat === 'melee' ? !!nearestEnemy(p.x, p.y, range) : !!tgt;
   }
   if (wantFire && p.cool <= 0) {
-    if (fireWeapon(p, w, aim)) { p.cool = w.rate * rateMod(p, w); p.aimAngle = aim; }
+    if (fireWeapon(p, w, aim)) { p.cool = w.rate * rateMod(p, w); p.aimAngle = aim; p.atkAnim = w.cat === 'melee' ? 10 : 6; }
     else p.cool = 20; // prázdno – krátká prodleva
   }
 }
@@ -837,6 +891,7 @@ function damagePlayer(p, amount) {
   let dmg = amount;
   if (p.passive.block && Math.random() < p.passive.block) dmg *= 0.4;
   if (p.shieldT > 0) dmg *= 0.35;   // aktivní štít (Bojový pokřik)
+  dmg *= Math.max(0.35, 1 - 0.05 * ((run.upgrades && run.upgrades.armor) || 0)); // stat Pancíř
   p.hp -= dmg; p.inv = 45;
   flash = 0.5; shake = Math.min(9, shake + 5); sfx.hurt();
   burst(p.x, p.y, '#ff6a6a', 12);
@@ -1516,36 +1571,54 @@ function drawPlayers() {
     if (p.buffPower > 0 || p.buffRapid > 0) { ctx.strokeStyle = p.buffPower > 0 ? 'rgba(255,120,230,0.6)' : 'rgba(120,220,255,0.6)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p.x, p.y + bob, p.r + 4, 0, Math.PI * 2); ctx.stroke(); }
     if (isCoop() && p === lp) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(p.x, p.y + bob, p.r + 9, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
     if (blink) continue;
-    ctx.save(); ctx.translate(p.x, p.y + bob);
-    // plášť za tělem (opačně než míření)
+    const w0 = WEAPONS[p.weaponId] || {};
+    // výpad při útoku (melee dopředu, ranged mírný zpětný ráz)
+    const atk = clamp(p.atkAnim / 10, 0, 1);
+    const lunge = w0.cat === 'melee' ? Math.sin(atk * Math.PI) * 5 : -Math.sin(atk * Math.PI) * 2;
+    ctx.save(); ctx.translate(p.x + Math.cos(p.aimAngle) * lunge, p.y + bob + Math.sin(p.aimAngle) * lunge);
+    // nožičky (chůze) — pod tělem, kolmo na směr pohledu
+    const legPh = Math.sin(p.walk);
+    const perp = p.aimAngle + Math.PI / 2;
+    for (const side of [-1, 1]) {
+      const off = side * p.r * 0.45, step = legPh * side * 2.5;
+      const lx = Math.cos(perp) * off + Math.cos(p.aimAngle) * step;
+      const ly = Math.sin(perp) * off + Math.sin(p.aimAngle) * step;
+      ctx.fillStyle = shade(p.color, -0.45); ctx.beginPath(); ctx.ellipse(lx, ly + p.r * 0.6, 2.5, 4, p.aimAngle, 0, Math.PI * 2); ctx.fill();
+    }
+    // plášť za tělem
     const ca = p.aimAngle + Math.PI;
     ctx.fillStyle = shade(p.color, -0.15);
     ctx.beginPath(); ctx.moveTo(Math.cos(ca - 0.5) * p.r, Math.sin(ca - 0.5) * p.r); ctx.lineTo(Math.cos(ca) * (p.r + 9), Math.sin(ca) * (p.r + 9)); ctx.lineTo(Math.cos(ca + 0.5) * p.r, Math.sin(ca + 0.5) * p.r); ctx.closePath(); ctx.fill();
-    // tělo
+    // tělo (trup) + hlava
     ctx.fillStyle = shade(p.color, -0.2); ctx.beginPath(); ctx.arc(0, 0, p.r, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(0, -1, p.r * 0.82, 0, Math.PI * 2); ctx.fill();
-    // helma lesk
-    ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.beginPath(); ctx.arc(-p.r * 0.3, -p.r * 0.35, p.r * 0.22, 0, Math.PI * 2); ctx.fill();
-    // zbraň v ruce
-    drawWeaponInHand(p);
+    ctx.fillStyle = shade(p.color, 0.2); ctx.beginPath(); ctx.arc(Math.cos(p.aimAngle) * 2, Math.sin(p.aimAngle) * 2 - 2, p.r * 0.42, 0, Math.PI * 2); ctx.fill(); // hlava
+    ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.beginPath(); ctx.arc(-p.r * 0.3, -p.r * 0.35, p.r * 0.2, 0, Math.PI * 2); ctx.fill();
+    drawWeaponInHand(p, atk);
     ctx.restore();
   }
 }
-function drawWeaponInHand(p) {
-  const w = WEAPONS[p.weaponId] || {}; const a = p.aimAngle; const hx = Math.cos(a) * p.r, hy = Math.sin(a) * p.r;
-  ctx.save(); ctx.translate(hx, hy); ctx.rotate(a);
+function drawWeaponInHand(p, atk) {
+  const w = WEAPONS[p.weaponId] || {}; const a = p.aimAngle;
+  // thrust: melee se rozmáchne, střelec cukne
+  const thrust = w.cat === 'melee' ? Math.sin(atk * Math.PI) * 6 : 0;
+  const swing = w.cat === 'melee' ? (1 - atk) * 0.9 - 0.45 : 0;   // oblouk seku
+  ctx.save(); ctx.translate(Math.cos(a) * (p.r + thrust), Math.sin(a) * (p.r + thrust)); ctx.rotate(a + swing);
   if (w.cat === 'melee' || !w.cat) {
-    ctx.strokeStyle = '#d8d8e0'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(12, 0); ctx.stroke();
-    ctx.strokeStyle = '#8a6a3a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-3, 0); ctx.lineTo(0, 0); ctx.stroke();
+    ctx.strokeStyle = '#8a6a3a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-4, 0); ctx.lineTo(2, 0); ctx.stroke(); // jílec
+    ctx.strokeStyle = '#3a2a1a'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(1, -3); ctx.lineTo(1, 3); ctx.stroke(); // záštita
+    ctx.strokeStyle = '#e6e8ee'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(2, 0); ctx.lineTo(15, 0); ctx.stroke(); // čepel
+    ctx.fillStyle = '#e6e8ee'; ctx.beginPath(); ctx.moveTo(15, 0); ctx.lineTo(12, -2); ctx.lineTo(12, 2); ctx.fill();
   } else if (w.ammo === 'mana') {
-    ctx.strokeStyle = '#6a4a2a'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(-2, 0); ctx.lineTo(10, 0); ctx.stroke();
-    ctx.fillStyle = w.color || '#9ad0ff'; ctx.beginPath(); ctx.arc(11, 0, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#6a4a2a'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(-3, 0); ctx.lineTo(11, 0); ctx.stroke();
+    const gl = w.color || '#9ad0ff'; ctx.fillStyle = gl; ctx.globalAlpha = 0.4; ctx.beginPath(); ctx.arc(12, 0, 5, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(12, 0, 3, 0, Math.PI * 2); ctx.fill();
   } else if (w.ammo === 'prach') {
-    ctx.strokeStyle = '#5a5a5a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(13, 0); ctx.stroke();
-    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(-2, -1, 5, 3);
+    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(-4, -1.5, 8, 3);
+    ctx.strokeStyle = '#5a5a5a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(2, 0); ctx.lineTo(15, 0); ctx.stroke();
   } else { // luk/kuše
-    ctx.strokeStyle = '#8a6a3a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(6, 0, 6, -1.4, 1.4); ctx.stroke();
-    ctx.strokeStyle = 'rgba(220,220,220,0.7)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(6 + Math.cos(-1.4) * 6, Math.sin(-1.4) * 6); ctx.lineTo(6 + Math.cos(1.4) * 6, Math.sin(1.4) * 6); ctx.stroke();
+    ctx.strokeStyle = '#8a6a3a'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(5, 0, 7, -1.5, 1.5); ctx.stroke();
+    ctx.strokeStyle = 'rgba(230,230,230,0.8)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(5 + Math.cos(-1.5) * 7, Math.sin(-1.5) * 7); ctx.lineTo(5 + Math.cos(1.5) * 7, Math.sin(1.5) * 7); ctx.stroke();
   }
   ctx.restore();
 }
@@ -1623,7 +1696,8 @@ function drawHud() {
     ctx.font = '11px system-ui'; ctx.textAlign = 'left';
     ctx.fillText('munice: ' + ammoTxt, BTN.weapon.x + 6, BTN.weapon.y + BTN.weapon.h - 3);
     drawButton(BTN.switch2, '⇄ zbraň', false);
-    drawButton(BTN.autofire, profile.settings.autofire ? '🎯 ZAP' : '🎯 VYP', profile.settings.autofire);
+    drawButton(BTN.autoaim, (profile.settings.autoaim ? '🎯 míř' : '🎯 vyp'), profile.settings.autoaim);
+    drawButton(BTN.autofire, (profile.settings.autofire ? '🔥 palba' : '🔥 vyp'), profile.settings.autofire);
     drawButton(BTN.pause, '⏸', false);
     drawAbilityButton(me);
     if (w.ammo === 'mana') { ctx.fillStyle = 'rgba(120,180,255,.3)'; ctx.fillRect(BTN.weapon.x, BTN.weapon.y - 5, BTN.weapon.w, 3); ctx.fillStyle = '#8fbaff'; ctx.fillRect(BTN.weapon.x, BTN.weapon.y - 5, BTN.weapon.w * (me.mana / me.manaMax), 3); }
@@ -1707,6 +1781,7 @@ function evtPos(clientX, clientY) {
 function hudTap(x, y) {
   if (state === 'combat') {
     if (inRect(x, y, BTN.pause)) { togglePause(); return true; }
+    if (inRect(x, y, BTN.autoaim)) { profile.settings.autoaim = !profile.settings.autoaim; saveProfile(profile); return true; }
     if (inRect(x, y, BTN.autofire)) { profile.settings.autofire = !profile.settings.autofire; saveProfile(profile); return true; }
     if (inRect(x, y, BTN.ability)) { localUseAbility(); return true; }
     if (inRect(x, y, BTN.weapon) || inRect(x, y, BTN.switch2)) { localCycleWeapon(); return true; }
