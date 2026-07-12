@@ -5,34 +5,40 @@
    posílá vstup/příkazy a jen vykresluje. Sdílený global scope s game.js.
    ========================================================================== */
 
-const RTC_CFG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-let netOffer = '', netAnswer = '';
+/* Signaling přes veřejný broker PeerJS → krátký ČÍSELNÝ kód hry (6 číslic).
+   Hostitel si u brokeru zaregistruje kód, spoluhráč zadá jen těch 6 čísel.
+   Samotné herní spojení je pořád přímé peer-to-peer (WebRTC DataChannel). */
+const PEER_OPTS = { config: { iceServers: [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
+] } };
 let netFrame = 0, inputFrame = 0;
+let netCode = '';        // 6místný kód hry (u hostitele)
+let peerObj = null;      // instance PeerJS Peer
 
-/* ---------- Kódování SDP do kopírovatelného textu ---------- */
-function encodeDesc(desc) { return btoa(JSON.stringify({ type: desc.type, sdp: desc.sdp })); }
-function decodeDesc(code) { const o = JSON.parse(atob(code.trim())); return new RTCSessionDescription(o); }
-// Počká na dokončení ICE gathering (non-trickle → jediný kód). Fallback timeout.
-function waitIce(pc) {
-  return new Promise(res => {
-    if (pc.iceGatheringState === 'complete') return res();
-    const check = () => { if (pc.iceGatheringState === 'complete') { pc.removeEventListener('icegatheringstatechange', check); res(); } };
-    pc.addEventListener('icegatheringstatechange', check);
-    setTimeout(res, 2800);
+function hasPeerJS() { return typeof Peer !== 'undefined'; }
+function randCode() { return String(Math.floor(100000 + Math.random() * 900000)); }
+
+/* Napojení PeerJS DataConnection přes shim, aby zbytek net.js (net.dc.send /
+   readyState) fungoval beze změny. */
+function wireConn(conn) {
+  net.conn = conn;
+  net.dc = {
+    get readyState() { return conn.open ? 'open' : 'connecting'; },
+    send: s => { try { conn.send(s); } catch {} },
+    close: () => { try { conn.close(); } catch {} },
+  };
+  conn.on('data', d => {
+    try { netDispatch(typeof d === 'string' ? JSON.parse(d) : d); }
+    catch (e) { showFatal('net: ' + e.message); }
   });
-}
-
-/* ---------- Napojení DataChannelu ---------- */
-function wireChannel(dc) {
-  net.dc = dc;
-  dc.onopen = () => {
+  conn.on('open', () => {
     net.connected = true;
-    // po spojení jdou oba na výběr třídy
     net.hostClass = null; net.guestClass = null;
     setState('class');
-  };
-  dc.onmessage = ev => { try { netDispatch(JSON.parse(ev.data)); } catch (e) { showFatal('net: ' + e.message); } };
-  dc.onclose = () => netOnDisconnect();
+  });
+  conn.on('close', () => netOnDisconnect());
+  conn.on('error', () => netOnDisconnect());
 }
 function netOnDisconnect() {
   if (!net.connected) return;
@@ -50,88 +56,78 @@ function netOnDisconnect() {
 }
 function netClose() {
   try { if (net.dc) net.dc.close(); } catch {}
-  try { if (net.pc) net.pc.close(); } catch {}
-  net.dc = null; net.pc = null; net.connected = false;
-  netOffer = ''; netAnswer = '';
+  try { if (net.conn) net.conn.close(); } catch {}
+  try { if (peerObj) peerObj.destroy(); } catch {}
+  net.dc = null; net.conn = null; peerObj = null; net.connected = false;
+  netCode = '';
 }
 function netSend(msg) { const dc = net.dc; if (dc && dc.readyState === 'open') { try { dc.send(JSON.stringify(msg)); } catch {} } }
 
 /* ---------- Hostitel ---------- */
-async function netHost() {
+function netHost() {
   netClose(); net.role = 'host'; net.mode = 'coop';
-  const pc = new RTCPeerConnection(RTC_CFG); net.pc = pc;
-  pc.oniceconnectionstatechange = () => { if (['disconnected', 'failed', 'closed'].includes(pc.iceConnectionState)) netOnDisconnect(); };
-  const dc = pc.createDataChannel('game', { ordered: true });
-  wireChannel(dc);
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  await waitIce(pc);
-  netOffer = encodeDesc(pc.localDescription);
-  if (state === 'host') renderHostLobby();
+  if (!hasPeerJS()) { lobbyError('Nepodařilo se načíst online modul. Zkontroluj připojení k internetu.'); return; }
+  tryHostWithCode(0);
 }
-async function netHostAccept() {
-  const el = document.getElementById('answerIn');
-  const code = el && el.value ? el.value : '';
-  if (!code.trim()) { alert('Vlož kód odpovědi od spoluhráče.'); return; }
-  try { await net.pc.setRemoteDescription(decodeDesc(code)); }
-  catch (e) { alert('Neplatný kód odpovědi.'); return; }
+function tryHostWithCode(attempt) {
+  netCode = randCode();
+  if (state === 'host') renderHostLobby();
+  const peer = new Peer(netCode, PEER_OPTS); peerObj = peer;
+  peer.on('open', () => { if (state === 'host') renderHostLobby(); });
+  peer.on('connection', conn => { wireConn(conn); });
+  peer.on('error', err => {
+    // kód už někdo zabral → zkus jiný (max 5×)
+    if (err && err.type === 'unavailable-id' && attempt < 5) { try { peer.destroy(); } catch {} tryHostWithCode(attempt + 1); return; }
+    if (!net.connected) lobbyError('Chyba online spojení: ' + (err && err.type ? err.type : 'neznámá') + '. Zkus to prosím znovu.');
+  });
 }
 
 /* ---------- Guest ---------- */
-async function netJoinAccept() {
-  const el = document.getElementById('offerIn');
-  const code = el && el.value ? el.value : '';
-  if (!code.trim()) { alert('Vlož kód pozvánky od hostitele.'); return; }
+function netJoinConnect() {
+  const el = document.getElementById('codeIn');
+  const code = el && el.value ? el.value.replace(/\D/g, '') : '';
+  if (code.length !== 6) { alert('Zadej 6místný kód hry od hostitele.'); return; }
+  if (!hasPeerJS()) { lobbyError('Nepodařilo se načíst online modul. Zkontroluj připojení k internetu.'); return; }
   netClose(); net.role = 'guest'; net.mode = 'coop';
-  const pc = new RTCPeerConnection(RTC_CFG); net.pc = pc;
-  pc.oniceconnectionstatechange = () => { if (['disconnected', 'failed', 'closed'].includes(pc.iceConnectionState)) netOnDisconnect(); };
-  pc.ondatachannel = ev => wireChannel(ev.channel);
-  try { await pc.setRemoteDescription(decodeDesc(code)); }
-  catch (e) { alert('Neplatný kód pozvánky.'); return; }
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
-  await waitIce(pc);
-  netAnswer = encodeDesc(pc.localDescription);
-  const wrap = document.getElementById('answerWrap');
-  if (wrap) wrap.innerHTML = `
-    <p style="color:#8fb070">Zkopíruj kód odpovědi a pošli ho hostiteli:</p>
-    <textarea id="answerBox" readonly class="codebox">${escapeHtml(netAnswer)}</textarea>
-    <button data-act="copycode" data-which="answer">📋 Kopírovat kód odpovědi</button>
-    <p style="color:#c0a060">Čekání na spojení…</p>`;
+  const status = document.getElementById('joinStatus');
+  if (status) status.textContent = 'Připojuji se ke hře ' + code + '…';
+  const peer = new Peer(PEER_OPTS); peerObj = peer;
+  peer.on('open', () => {
+    const conn = peer.connect(code, { reliable: true });
+    wireConn(conn);
+    setTimeout(() => { if (!net.connected) { const s = document.getElementById('joinStatus'); if (s) s.textContent = 'Nedaří se připojit — zkontroluj kód a zkus to znovu.'; } }, 8000);
+  });
+  peer.on('error', err => { if (!net.connected) { const s = document.getElementById('joinStatus'); if (s) s.textContent = 'Chyba: kód nenalezen nebo spojení selhalo. Zkus to znovu.'; } });
 }
 
-/* ---------- Kopírování ---------- */
+function lobbyError(msg) { if (typeof ovContent !== 'undefined' && ovContent) { const p = document.getElementById('lobbyErr'); if (p) p.textContent = msg; else ovContent.insertAdjacentHTML('beforeend', `<p id="lobbyErr" style="color:#e06060">${escapeHtml(msg)}</p>`); } }
+
+/* ---------- Kopírování kódu hry ---------- */
 function netCopy(which, el) {
-  const t = document.getElementById(which === 'offer' ? 'offerBox' : 'answerBox');
-  const val = t ? t.value : '';
+  const val = netCode || '';
   const done = () => { if (el) { const o = el.textContent; el.textContent = '✔ Zkopírováno'; setTimeout(() => { el.textContent = o; }, 1200); } };
-  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(val).then(done, () => { if (t) { t.focus(); t.select(); } });
-  else if (t) { t.focus(); t.select(); try { document.execCommand('copy'); done(); } catch {} }
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(val).then(done, () => {});
 }
 
 /* ---------- Lobby UI ---------- */
 function renderHostLobby() {
+  const ready = !!(peerObj && peerObj.open) || !!netCode;
   ovContent.innerHTML = `
     <h2>Hostovat co-op</h2>
-    <p>1) Zkopíruj <b>kód pozvánky</b> a pošli ho spoluhráči (např. přes zprávy).<br>
-       2) On ti vrátí <b>kód odpovědi</b> — vlož ho dole a dej <b>Spojit</b>.</p>
-    <p class="lbl">Kód pozvánky:</p>
-    <textarea id="offerBox" readonly class="codebox">${netOffer ? escapeHtml(netOffer) : 'generuji kód…'}</textarea>
-    <button data-act="copycode" data-which="offer">📋 Kopírovat kód pozvánky</button>
-    <p class="lbl">Kód odpovědi od spoluhráče:</p>
-    <textarea id="answerIn" class="codebox" placeholder="sem vlož kód odpovědi"></textarea>
-    <button data-act="hostaccept">Spojit</button>
+    <p>Řekni spoluhráči tento <b>kód hry</b>. Zadá ho na svém telefonu v <b>Připojit se</b>.</p>
+    <p class="lbl">Kód hry:</p>
+    <div class="gamecode">${ready ? escapeHtml(netCode) : '· · · · · ·'}</div>
+    <button data-act="copycode" data-which="code"${ready ? '' : ' disabled'}>📋 Kopírovat kód</button>
+    <p style="color:#c0a060">Čekání na spoluhráče…</p>
     <button data-act="menu" class="ghost">Zrušit</button>`;
 }
 function renderJoinLobby() {
   ovContent.innerHTML = `
     <h2>Připojit se ke hře</h2>
-    <p>1) Vlož <b>kód pozvánky</b> od hostitele a dej <b>Vytvořit odpověď</b>.<br>
-       2) Zkopíruj vzniklý <b>kód odpovědi</b> a pošli ho zpátky hostiteli.</p>
-    <p class="lbl">Kód pozvánky od hostitele:</p>
-    <textarea id="offerIn" class="codebox" placeholder="sem vlož kód pozvánky"></textarea>
-    <button data-act="genanswer">Vytvořit odpověď</button>
-    <div id="answerWrap"></div>
+    <p>Zadej <b>6místný kód hry</b>, který ti řekl hostitel.</p>
+    <input id="codeIn" class="codeinput" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="000000" autocomplete="off">
+    <button data-act="joinconnect">Připojit se</button>
+    <p id="joinStatus" style="color:#8fb070"></p>
     <button data-act="menu" class="ghost">Zrušit</button>`;
 }
 

@@ -92,6 +92,16 @@
     background: #10160c; border: 1px solid #33401f; border-radius: 8px; color: #cdd4b5;
     font-family: monospace; font-size: 11px; padding: 8px; word-break: break-all;
   }
+  .gamecode {
+    font-family: monospace; font-size: 44px; font-weight: bold; letter-spacing: 10px;
+    color: #ffd76a; text-align: center; padding: 12px 8px; margin: 4px 0;
+    background: #10160c; border: 2px solid #4a5a26; border-radius: 12px;
+  }
+  .codeinput {
+    width: 100%; text-align: center; font-family: monospace; font-size: 40px;
+    letter-spacing: 10px; padding: 10px; margin: 6px 0;
+    background: #10160c; border: 2px solid #4a5a26; border-radius: 12px; color: #ffd76a;
+  }
 </style>
 </head>
 <body>
@@ -100,6 +110,8 @@
   <div id="overlay"><div id="ovContent"></div></div>
 </div>
 
+<!-- PeerJS: veřejný broker pro krátký číselný kód hry (jen pro online co-op) -->
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="data.js"></script>
 <script src="engine.js"></script>
 <script src="game.js"></script>

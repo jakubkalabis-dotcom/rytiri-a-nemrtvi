@@ -338,8 +338,7 @@ overlay.addEventListener('click', e => {
   if (act === 'joingame') { net.role = 'guest'; net.mode = 'coop'; setState('join'); return; }
   if (act === 'menu') { if (typeof netClose === 'function') netClose(); net.role = null; net.mode = 'solo'; setState('menu'); return; }
   if (act === 'copycode') { if (typeof netCopy === 'function') netCopy(el.dataset.which, el); return; }
-  if (act === 'genanswer') { if (typeof netJoinAccept === 'function') netJoinAccept(); return; }
-  if (act === 'hostaccept') { if (typeof netHostAccept === 'function') netHostAccept(); return; }
+  if (act === 'joinconnect') { if (typeof netJoinConnect === 'function') netJoinConnect(); return; }
   if (act === 'pickclass') { pickClass(id); return; }
   if (act === 'tab') { shopTab = id; renderShop(); return; }   // lokální přepnutí záložky
   if (act === 'tobuild') { shopReady(); return; }              // ready-gate obchodu (co-op)
