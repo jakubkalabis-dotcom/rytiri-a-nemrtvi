@@ -44,8 +44,17 @@ function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 /* ---------- Kamera (pro MVP statická, připravená na scrollování) ---------- */
 const camera = { x: 0, y: 0, zoom: 1 };
-function applyCamera() { ctx.translate(-camera.x, -camera.y); }
+function applyCamera() { ctx.translate(-Math.round(camera.x), -Math.round(camera.y)); }
 function screenToWorld(sx, sy) { return { x: sx + camera.x, y: sy + camera.y }; }
+// Kamera plynule sleduje cíl (střed hráče) a je omezená na hranice mapy.
+function updateCamera(tx, ty, dt, snap) {
+  const gx = clamp(tx - VIEWW / 2, 0, Math.max(0, ARENA_W - VIEWW));
+  const gy = clamp(ty - VIEWH / 2, 0, Math.max(0, ARENA_H - VIEWH));
+  if (snap) { camera.x = gx; camera.y = gy; }
+  else { const k = Math.min(1, 0.15 * (dt || 1)); camera.x += (gx - camera.x) * k; camera.y += (gy - camera.y) * k; }
+}
+// Je bod na obrazovce (s okrajem)? Pro culling.
+function onScreen(x, y, m) { m = m || 40; return x > camera.x - m && x < camera.x + VIEWW + m && y > camera.y - m && y < camera.y + VIEWH + m; }
 
 /* ---------- Mřížka / dlaždice ---------- */
 // tiles: 0 = tráva, 1 = statická překážka. structures[i] = objekt zdi/null.
@@ -54,6 +63,46 @@ const grid = {
   structures: new Array(COLS * ROWS).fill(null),
   coreTiles: [],
 };
+// Přenačte mapu i: rozměry, pole, překážky, terén. (0-based index.)
+function loadMap(i) {
+  currentMap = clampIdx(i);
+  applyMapDims(currentMap);
+  const n = COLS * ROWS;
+  grid.tiles = new Uint8Array(n);
+  grid.structures = new Array(n).fill(null);
+  flowDist = new Float32Array(n); flowX = new Float32Array(n); flowY = new Float32Array(n); _bfsQueue = new Int32Array(n);
+  genObstacles(MAPS[currentMap].seed, currentMap);
+  buildArena();
+  flowDirty = true;
+}
+// Procedurální rozmístění překážek (skály/zdi) do lajn a chokepointů; roste s pořadím mapy.
+function genObstacles(seed, mapIdx) {
+  const rnd = mulberry32(seed);
+  OBSTACLES = [];
+  const blocked = new Set();
+  const key = (tx, ty) => tx + ',' + ty;
+  const isCore = (tx, ty) => tx >= CORE.tx - 1 && tx <= CORE.tx + CORE.w && ty >= CORE.ty - 1 && ty <= CORE.ty + CORE.h;
+  const put = (tx, ty) => { if (tx < 1 || ty < 1 || tx >= COLS - 1 || ty >= ROWS - 2 || isCore(tx, ty) || blocked.has(key(tx, ty))) return; blocked.add(key(tx, ty)); OBSTACLES.push([tx, ty]); };
+  // vodorovné „hradby" s mezerami (chokepointy) — víc na pozdějších mapách
+  const bands = 2 + Math.min(5, Math.floor(mapIdx / 2));
+  for (let b = 0; b < bands; b++) {
+    const ty = 3 + Math.floor((ROWS - 8) * (b + 1) / (bands + 1)) + Math.floor((rnd() - 0.5) * 2);
+    const gaps = 1 + Math.floor(rnd() * 2);
+    const gapCols = new Set();
+    for (let g = 0; g < gaps; g++) gapCols.add(1 + Math.floor(rnd() * (COLS - 2)));
+    for (let tx = 1; tx < COLS - 1; tx++) {
+      let near = false; for (const gc of gapCols) if (Math.abs(tx - gc) <= 1) near = true;
+      if (!near && rnd() < 0.85) put(tx, ty);
+    }
+  }
+  // rozházené shluky balvanů
+  const clusters = 3 + Math.floor(mapIdx / 2) + Math.floor(rnd() * 3);
+  for (let c = 0; c < clusters; c++) {
+    const cx = 1 + Math.floor(rnd() * (COLS - 2)), cy = 3 + Math.floor(rnd() * (ROWS - 8));
+    const s = 1 + Math.floor(rnd() * 2);
+    for (let dx = 0; dx <= s; dx++) for (let dy = 0; dy <= s; dy++) if (rnd() < 0.6) put(cx + dx, cy + dy);
+  }
+}
 function tileIndex(tx, ty) { return ty * COLS + tx; }
 function inBounds(tx, ty) { return tx >= 0 && ty >= 0 && tx < COLS && ty < ROWS; }
 function tileOf(x, y) { return { tx: Math.floor(x / TILE), ty: Math.floor(y / TILE) }; }
@@ -103,51 +152,55 @@ function buildTerrain() {
     else if (r < 0.36) decor.push({ t: 'flower', x, y, hue: (rnd() * 360) | 0 });
     else if (r < 0.40) decor.push({ t: 'pebble', x, y, s: 2 + rnd() * 2 });
   }
-  // render do offscreen
+  // render do offscreen (velikost dle aktuální mapy)
   let cnv = terrainCanvas;
-  if (!cnv) { cnv = document.createElement('canvas'); cnv.width = ARENA_W; cnv.height = ARENA_H; terrainCanvas = cnv; }
+  if (!cnv) { cnv = document.createElement('canvas'); terrainCanvas = cnv; }
+  cnv.width = ARENA_W; cnv.height = ARENA_H;
   const g = cnv.getContext('2d');
   g.clearRect(0, 0, ARENA_W, ARENA_H);
-  // tráva s jemnou variací
+  const pal = (MAPS[currentMap] && MAPS[currentMap].pal) || ['#284020', '#2c4224', '#5a5f66', '#3f7030'];
+  const c0 = hexRGB(pal[0]), c1 = hexRGB(pal[1]);
   for (let ty = 0; ty < ROWS; ty++) for (let tx = 0; tx < COLS; tx++) {
-    const n = mulberry32((tx * 73856093) ^ (ty * 19349663))();
-    const base = 30 + Math.floor(n * 16);
-    g.fillStyle = `rgb(${34 + Math.floor(n * 10)},${base + 26},${28 + Math.floor(n * 8)})`;
+    const n = mulberry32((tx * 73856093) ^ (ty * 19349663) ^ currentMap * 2654435761)();
+    const c = n > 0.5 ? c0 : c1; const j = Math.floor((n - 0.5) * 14);
+    g.fillStyle = `rgb(${clamp(c[0] + j, 0, 255)},${clamp(c[1] + j, 0, 255)},${clamp(c[2] + j, 0, 255)})`;
     g.fillRect(tx * TILE, ty * TILE, TILE, TILE);
-    if (n > 0.7) { g.fillStyle = 'rgba(255,255,255,0.03)'; g.fillRect(tx * TILE, ty * TILE, TILE, TILE); }
+    if (n > 0.82) { g.fillStyle = 'rgba(255,255,255,0.03)'; g.fillRect(tx * TILE, ty * TILE, TILE, TILE); }
   }
-  // dekorace
-  for (const d of decor) terrainDecor(g, d);
-  // balvany na překážkách
-  for (const [tx, ty] of OBSTACLES) terrainRock(g, tx, ty);
+  for (const d of decor) terrainDecor(g, d, pal);
+  for (const [tx, ty] of OBSTACLES) terrainRock(g, tx, ty, pal);
+  // mlha / atmosféra biomu
+  const fog = MAPS[currentMap] && MAPS[currentMap].fog;
+  if (fog) { g.fillStyle = fog; g.fillRect(0, 0, ARENA_W, ARENA_H); }
 }
-function terrainDecor(g, d) {
+function hexRGB(h) { return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; }
+function terrainDecor(g, d, pal) {
+  const acc = pal[3] || '#3f7030';
   if (d.t === 'tuft') {
-    g.strokeStyle = 'rgba(120,170,90,0.5)'; g.lineWidth = 1.5;
+    g.strokeStyle = acc; g.globalAlpha = 0.5; g.lineWidth = 1.5;
     for (let k = -1; k <= 1; k++) { g.beginPath(); g.moveTo(d.x + k * 2, d.y); g.lineTo(d.x + k * 2 + (d.d - 0.5) * 4, d.y - d.s * 2); g.stroke(); }
+    g.globalAlpha = 1;
   } else if (d.t === 'flower') {
-    g.fillStyle = 'rgba(120,170,90,0.5)'; g.fillRect(d.x - 0.5, d.y - 3, 1, 4);
+    g.fillStyle = acc; g.globalAlpha = 0.5; g.fillRect(d.x - 0.5, d.y - 3, 1, 4); g.globalAlpha = 1;
     g.fillStyle = `hsl(${d.hue},70%,65%)`; g.beginPath(); g.arc(d.x, d.y - 4, 1.8, 0, Math.PI * 2); g.fill();
   } else if (d.t === 'pebble') {
-    g.fillStyle = 'rgba(120,120,120,0.5)'; g.beginPath(); g.arc(d.x, d.y, d.s, 0, Math.PI * 2); g.fill();
+    g.fillStyle = pal[2]; g.globalAlpha = 0.5; g.beginPath(); g.arc(d.x, d.y, d.s, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
   } else if (d.t === 'bush') {
-    g.fillStyle = '#2c4a24'; g.beginPath(); g.arc(d.x, d.y, d.s, 0, Math.PI * 2); g.arc(d.x + d.s * 0.7, d.y + 1, d.s * 0.8, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#356028'; g.beginPath(); g.arc(d.x - 1, d.y - 1, d.s * 0.6, 0, Math.PI * 2); g.fill();
+    g.fillStyle = acc; g.beginPath(); g.arc(d.x, d.y, d.s, 0, Math.PI * 2); g.arc(d.x + d.s * 0.7, d.y + 1, d.s * 0.8, 0, Math.PI * 2); g.fill();
   } else if (d.t === 'tree') {
     g.fillStyle = 'rgba(0,0,0,0.18)'; g.beginPath(); g.ellipse(d.x, d.y + d.s * 0.6, d.s, d.s * 0.4, 0, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#5a3a20'; g.fillRect(d.x - 2, d.y - 2, 4, d.s);
-    g.fillStyle = '#2c4a24'; g.beginPath(); g.arc(d.x, d.y - d.s * 0.6, d.s, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#356028'; g.beginPath(); g.arc(d.x - d.s * 0.4, d.y - d.s * 0.8, d.s * 0.7, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#3f7030'; g.beginPath(); g.arc(d.x + d.s * 0.4, d.y - d.s * 0.7, d.s * 0.55, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#4a3018'; g.fillRect(d.x - 2, d.y - 2, 4, d.s);
+    g.fillStyle = acc; g.beginPath(); g.arc(d.x, d.y - d.s * 0.6, d.s, 0, Math.PI * 2); g.fill();
+    g.fillStyle = acc; g.globalAlpha = 0.7; g.beginPath(); g.arc(d.x - d.s * 0.4, d.y - d.s * 0.8, d.s * 0.7, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
   }
 }
-function terrainRock(g, tx, ty) {
-  const x = tx * TILE, y = ty * TILE;
+function terrainRock(g, tx, ty, pal) {
+  const x = tx * TILE, y = ty * TILE; const rc = pal[2] || '#5a5f66';
   g.fillStyle = 'rgba(0,0,0,0.25)'; g.beginPath(); g.ellipse(x + TILE / 2, y + TILE * 0.72, TILE * 0.42, TILE * 0.2, 0, 0, Math.PI * 2); g.fill();
-  g.fillStyle = '#5a5f66'; roundRectOn(g, x + 3, y + 4, TILE - 6, TILE - 8, 7); g.fill();
-  g.fillStyle = '#6f757d'; roundRectOn(g, x + 6, y + 5, TILE - 15, TILE - 16, 5); g.fill();
-  g.fillStyle = '#4a4f55'; g.beginPath(); g.arc(x + TILE * 0.68, y + TILE * 0.62, 3, 0, Math.PI * 2); g.fill();
-  g.fillStyle = 'rgba(90,140,70,0.5)'; g.beginPath(); g.arc(x + TILE * 0.35, y + TILE * 0.7, 3, 0, Math.PI * 2); g.fill(); // mech
+  const c = hexRGB(rc);
+  g.fillStyle = `rgb(${clamp(c[0] - 20, 0, 255)},${clamp(c[1] - 20, 0, 255)},${clamp(c[2] - 20, 0, 255)})`; roundRectOn(g, x + 3, y + 4, TILE - 6, TILE - 8, 7); g.fill();
+  g.fillStyle = rc; roundRectOn(g, x + 6, y + 5, TILE - 15, TILE - 16, 5); g.fill();
+  g.fillStyle = 'rgba(0,0,0,0.25)'; g.beginPath(); g.arc(x + TILE * 0.68, y + TILE * 0.62, 3, 0, Math.PI * 2); g.fill();
 }
 // roundRect na libovolný ctx
 function roundRectOn(g, x, y, w, h, r) {
@@ -164,10 +217,10 @@ function drawShadow(x, y, r) {
 /* ---------- Flow-field pathfinding (BFS distanční pole od jádra) ---------- */
 // dist = počet kroků do jádra; flowX/flowY = jednotkový vektor k dalšímu kroku.
 let flowDirty = true;
-const flowDist = new Float32Array(COLS * ROWS);
-const flowX = new Float32Array(COLS * ROWS);
-const flowY = new Float32Array(COLS * ROWS);
-const _bfsQueue = new Int32Array(COLS * ROWS);
+let flowDist = new Float32Array(COLS * ROWS);
+let flowX = new Float32Array(COLS * ROWS);
+let flowY = new Float32Array(COLS * ROWS);
+let _bfsQueue = new Int32Array(COLS * ROWS);
 const NEI = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
 
 function buildFlowField() {

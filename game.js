@@ -42,15 +42,15 @@ const ovContent = document.getElementById('ovContent');
 
 /* ---------- Layout HUD ---------- */
 const STICK_R = 50;
-function inArena(y) { return y < ARENA_H; }
+function inArena(y) { return y < VIEWH; }
 const BTN = {
-  weapon:   { x: 6,      y: ARENA_H + 6,  w: 148, h: 34 },
-  autoaim:  { x: 160,    y: ARENA_H + 6,  w: 78,  h: 34 },
-  autofire: { x: 242,    y: ARENA_H + 6,  w: 78,  h: 34 },
-  pause:    { x: W - 46, y: ARENA_H + 6,  w: 40,  h: 34 },
-  switch2:  { x: 6,      y: ARENA_H + 44, w: 148, h: 36 },   // přepínač zbraní zpět
-  ability:  { x: 160,    y: ARENA_H + 44, w: 200, h: 40 },   // aktivní schopnost
-  start:    { x: W - 132,y: ARENA_H + 48, w: 126, h: 40 },   // start vlny (build)
+  weapon:   { x: 6,      y: VIEWH + 6,  w: 148, h: 34 },
+  autoaim:  { x: 160,    y: VIEWH + 6,  w: 78,  h: 34 },
+  autofire: { x: 242,    y: VIEWH + 6,  w: 78,  h: 34 },
+  pause:    { x: W - 46, y: VIEWH + 6,  w: 40,  h: 34 },
+  switch2:  { x: 6,      y: VIEWH + 44, w: 148, h: 36 },   // přepínač zbraní zpět
+  ability:  { x: 160,    y: VIEWH + 44, w: 200, h: 40 },   // aktivní schopnost
+  start:    { x: W - 132,y: VIEWH + 48, w: 126, h: 40 },   // start vlny (build)
 };
 function inRect(px, py, r) { return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h; }
 
@@ -79,15 +79,15 @@ function newRun(classIds) {
   bullets = []; eBullets = []; groundFx = []; particles = []; effects = [];
   pickups = []; floaters = []; decals = []; netEvents = []; freezeTimer = 0;
   run.combo = 0; run.comboT = 0;
-  buildArena();
-  flowDirty = true;
+  loadMap(0);
   players.length = 0;
   const cx = (CORE.tx + CORE.w / 2) * TILE;
   classIds.forEach((cid, i) => {
     const p = makePlayer(CLASSES[cid], cid);
-    p.x = cx + (i === 0 ? -20 : 20);
+    p.x = cx + (i === 0 ? -20 : 20); p.y = (CORE.ty - 1) * TILE;
     players.push(p);
   });
+  updateCamera(players[0].x, players[0].y, 1, true);
   readyHost = false; readyGuest = false;
 }
 function makePlayer(cls, classId) {
@@ -127,7 +127,7 @@ function costOf(cost, cat) {
    ========================================================================== */
 function setState(s) {
   state = s;
-  if (s === 'menu' || s === 'class' || s === 'shop' || s === 'roundEnd' || s === 'gameOver' || s === 'host' || s === 'join') {
+  if (s === 'menu' || s === 'class' || s === 'shop' || s === 'roundEnd' || s === 'gameOver' || s === 'victory' || s === 'host' || s === 'join') {
     overlay.classList.remove('hidden');
   } else {
     overlay.classList.add('hidden');
@@ -137,6 +137,7 @@ function setState(s) {
   else if (s === 'shop') renderShop();
   else if (s === 'roundEnd') renderRoundEnd();
   else if (s === 'gameOver') renderGameOver();
+  else if (s === 'victory') renderVictory();
   else if (s === 'host' && typeof renderHostLobby === 'function') renderHostLobby();
   else if (s === 'join' && typeof renderJoinLobby === 'function') renderJoinLobby();
   else if (s === 'build') { banner = { text: 'FÁZE STAVĚNÍ', t: 90 }; }
@@ -270,20 +271,37 @@ function buyWeaponUp(id) {
 
 function renderRoundEnd() {
   const r = (wave && wave.reward) || { gems: 0, kills: 0, xp: 0 };
+  const mapEnd = isMapEndWave(run.wave);
+  const nextMap = mapForWave(run.wave + 1);
+  const note = mapEnd
+    ? `<p>🏆 <b>Mapa ${currentMap + 1} dokončena!</b> Další zastávka: <b>${MAPS[nextMap].name}</b> (mapa ${nextMap + 1}/${NUM_MAPS}).</p>`
+    : `<p>Jádro brány má ještě <b>${run.lives}</b> životů. Připrav se na další vlnu.</p>`;
   ovContent.innerHTML = `
-    <h2>Vlna ${run.wave} přežita!</h2>
+    <h2>${mapEnd ? 'Boss poražen!' : 'Vlna ' + run.wave + ' přežita!'}</h2>
     <div class="wallet">Zabito: <b>${r.kills}</b> · Získáno 💎 <b>${r.gems}</b> · XP <b>+${r.xp}</b></div>
-    <p>Jádro brány má ještě <b>${run.lives}</b> životů. Připrav se na další vlnu.</p>
+    ${note}
     <button data-act="toshop">Do obchodu</button>`;
 }
-
+function scoreBoardHtml() {
+  return loadScores().map((r, i) => `<div class="row"><span class="rank">${i + 1}.</span><span class="nm">${escapeHtml(r.name)}</span><span class="sc">vlna ${r.wave} · ${r.score}</span></div>`).join('') || '<div class="empty">—</div>';
+}
 function renderGameOver() {
   const score = run ? run.score || 0 : 0;
   ovContent.innerHTML = `
     <h2>Brána padla</h2>
-    <div class="wallet">Dosažená vlna: <b>${run.wave}</b> · Skóre: <b>${score}</b></div>
-    <div class="board"><h3>NEJLEPŠÍ SKÓRE</h3>${loadScores().map((r, i) => `<div class="row"><span class="rank">${i + 1}.</span><span class="nm">${escapeHtml(r.name)}</span><span class="sc">vlna ${r.wave} · ${r.score}</span></div>`).join('') || '<div class="empty">—</div>'}</div>
+    <div class="wallet">Mapa <b>${currentMap + 1}/${NUM_MAPS}</b> · vlna <b>${run.wave}</b> · Skóre: <b>${score}</b></div>
+    <div class="board"><h3>NEJLEPŠÍ SKÓRE</h3>${scoreBoardHtml()}</div>
     <button data-act="menu">Zpět do menu</button>`;
+}
+function renderVictory() {
+  const score = run ? run.score || 0 : 0;
+  ovContent.innerHTML = `
+    <h2>👑 ZVÍTĚZIL JSI! 👑</h2>
+    <p>Prošel jsi všech <b>${NUM_MAPS}</b> map a v pekle jsi porazil <b>Pekelného pána</b>!
+    Nemrtví jsou zahnáni a brána stojí.</p>
+    <div class="wallet">Finální skóre: <b>${score}</b> · třída ${players.map(p => p.class.name).join(' + ')}</div>
+    <div class="board"><h3>NEJLEPŠÍ SKÓRE</h3>${scoreBoardHtml()}</div>
+    <button data-act="menu">Do menu</button>`;
 }
 
 // Delegované klikání v overlay
@@ -363,11 +381,25 @@ function buyBuild(id) {
    ========================================================================== */
 let buildSel = null;   // vybraná položka z palety
 function startBuildPhase() {
+  // postup na další mapu po dokončení bossovské (map-end) vlny
+  if (run.wave > 0 && isMapEndWave(run.wave) && run.wave < FINAL_WAVE) {
+    const nextMap = mapForWave(run.wave + 1);
+    if (nextMap !== currentMap) advanceToMap(nextMap);
+  }
   // vyléčit a oživit hráče na začátku přípravy
   for (const p of players) { p.hp = p.hpMax; p.downed = false; p.inv = 0; }
   buildSel = null;
   readyHost = false; readyGuest = false;
   setState('build');
+}
+function advanceToMap(i) {
+  loadMap(i);
+  walls = []; turrets = []; traps = []; warriors = [];
+  enemies = []; bullets = []; eBullets = []; groundFx = []; pickups = []; decals = []; particles = [];
+  const cx = (CORE.tx + CORE.w / 2) * TILE;
+  players.forEach((p, idx) => { p.x = cx + (idx === 0 ? -20 : 20); p.y = (CORE.ty - 1) * TILE; });
+  if (players[0]) updateCamera(players[0].x, players[0].y, 1, true);
+  banner = { text: '🗺 MAPA ' + (i + 1) + '/' + NUM_MAPS + ': ' + MAPS[i].name, t: 150 };
 }
 function paletteItems() {
   return Object.keys(run.owned).filter(id => run.owned[id] > 0);
@@ -460,7 +492,7 @@ function spawnEnemy(typeId) {
   const sc = enemyScale(run.wave);
   const s = SPAWNS[(Math.random() * SPAWNS.length) | 0];
   const bossNum = Math.max(1, Math.floor(run.wave / 5));
-  let hpMul = base.arch === 'BOSS' ? (1 + 0.25 * (bossNum - 1)) : sc.hp;
+  let hpMul = base.arch === 'BOSS' ? (base.final ? 1 : Math.min(3, 1 + 0.2 * (bossNum - 1))) : sc.hp;
   let spdMul = base.arch === 'BOSS' ? 1 : sc.spd;
   let dmgMul = sc.dmg;
   // elitní přídomek (jen běžní nepřátelé)
@@ -803,11 +835,20 @@ function updateCombat(dt) {
 }
 
 function endWave() {
-  wave.reward.gems = waveReward(run.wave) + Math.round(run.gems * 0); // bonus
+  wave.reward.gems = waveReward(run.wave);
   run.gems += wave.reward.gems;
   wave.reward.xp = wave.kills * 3;
+  if (isFinalWave(run.wave)) return doVictory();   // poražen Pekelný pán → vítězství
   setState('roundEnd');
   sfx.waveWin();
+}
+function doVictory() {
+  run.won = true;
+  const name = profile.settings.name || 'Rytíř';
+  addScore(name, run.wave, run.score || 0);
+  saveProfile(profile);
+  sfx.waveWin(); setTimeout(() => { try { sfx.levelUp(); } catch {} }, 300);
+  setState('victory');
 }
 function doGameOver() {
   const name = (profile.settings.name) || 'Rytíř';
@@ -1260,7 +1301,9 @@ function updateEffects(dt) {
    ========================================================================== */
 function render() {
   ctx.clearRect(0, 0, W, H);
-  if (state === 'menu' || state === 'class' || state === 'host' || state === 'join') { drawMenuBg(); return; }
+  if (state === 'menu' || state === 'class' || state === 'host' || state === 'join' || state === 'gameOver' || state === 'victory') { drawMenuBg(); return; }
+  const cp = localPlayer();
+  if (cp) updateCamera(cp.x, cp.y, 1);
   ctx.save();
   if (shake > 0.2) ctx.translate((Math.random() - 0.5) * shake * 2, (Math.random() - 0.5) * shake * 2);
   applyCamera();
@@ -1278,22 +1321,22 @@ function render() {
   if (state === 'build') drawBuildGhost();
   drawParticles();
   drawFloaters();
-  if (freezeTimer > 0) { ctx.fillStyle = 'rgba(140,220,255,0.12)'; ctx.fillRect(0, 0, ARENA_W, ARENA_H); }
-  drawVignette();
   ctx.restore();
 
-  // HUD (bez otřesu)
+  // překryvy v prostoru obrazovky
+  if (freezeTimer > 0) { ctx.fillStyle = 'rgba(140,220,255,0.12)'; ctx.fillRect(0, 0, VIEWW, VIEWH); }
+  drawVignette();
   if (state === 'combat' || state === 'build') drawHud();
   if (banner) drawBanner();
-  if (flash > 0.01) { ctx.fillStyle = `rgba(255,40,40,${flash})`; ctx.fillRect(0, 0, W, ARENA_H); }
+  if (flash > 0.01) { ctx.fillStyle = `rgba(255,40,40,${flash})`; ctx.fillRect(0, 0, W, VIEWH); }
 }
 function drawVignette() {
   if (!vignetteCache) {
-    vignetteCache = document.createElement('canvas'); vignetteCache.width = ARENA_W; vignetteCache.height = ARENA_H;
+    vignetteCache = document.createElement('canvas'); vignetteCache.width = VIEWW; vignetteCache.height = VIEWH;
     const g = vignetteCache.getContext('2d');
-    const rg = g.createRadialGradient(ARENA_W / 2, ARENA_H / 2, ARENA_H * 0.35, ARENA_W / 2, ARENA_H / 2, ARENA_H * 0.72);
+    const rg = g.createRadialGradient(VIEWW / 2, VIEWH / 2, VIEWH * 0.35, VIEWW / 2, VIEWH / 2, VIEWH * 0.72);
     rg.addColorStop(0, 'rgba(0,0,0,0)'); rg.addColorStop(1, 'rgba(0,0,0,0.42)');
-    g.fillStyle = rg; g.fillRect(0, 0, ARENA_W, ARENA_H);
+    g.fillStyle = rg; g.fillRect(0, 0, VIEWW, VIEWH);
   }
   ctx.drawImage(vignetteCache, 0, 0);
 }
@@ -1357,7 +1400,7 @@ function drawTorch(x, y) {
   ctx.fillStyle = '#fff0a0'; ctx.beginPath(); ctx.ellipse(x, y - 2, fl * 0.3, fl * 0.5, 0, 0, Math.PI * 2); ctx.fill();
 }
 function drawDecals() {
-  for (const d of decals) { ctx.fillStyle = `rgba(90,20,20,${d.a})`; ctx.beginPath(); ctx.ellipse(d.x, d.y, d.r, d.r * 0.6, 0, 0, Math.PI * 2); ctx.fill(); }
+  for (const d of decals) { if (!onScreen(d.x, d.y, d.r + 10)) continue; ctx.fillStyle = `rgba(90,20,20,${d.a})`; ctx.beginPath(); ctx.ellipse(d.x, d.y, d.r, d.r * 0.6, 0, 0, Math.PI * 2); ctx.fill(); }
 }
 function drawPickups() {
   for (const pu of pickups) {
@@ -1442,6 +1485,7 @@ function drawWarriors() {
 }
 function drawEnemies() {
   for (const e of enemies) {
+    if (!onScreen(e.x, e.y, e.r + 30)) continue;
     const bob = Math.sin(animClock * 0.18 + e.x * 0.1) * (e.arch === 'RUNNER' ? 2.2 : 1.2);
     drawShadow(e.x, e.y, e.r);
     // elitní / mražená záře
@@ -1490,6 +1534,7 @@ function shade(hex, amt) {
 }
 function drawBullets() {
   for (const b of bullets) {
+    if (!onScreen(b.x, b.y, 20)) continue;
     const col = b.color || '#ffe08a';
     if (b.thrown) {
       b.spin = (b.spin || 0) + 0.3;
@@ -1637,6 +1682,7 @@ function drawBuildGhost() {
 }
 function drawParticles() {
   for (const p of particles) {
+    if (!onScreen(p.x, p.y, 30)) continue;
     ctx.globalAlpha = Math.max(0, p.life);
     if (p.ring) { ctx.strokeStyle = p.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.stroke(); }
     else { ctx.fillStyle = p.color; const s = p.size || 3; ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s); }
@@ -1684,9 +1730,9 @@ function drawHud() {
     ctx.fillText('☠ ' + boss.def.name.toUpperCase(), W / 2, by + 7.5); ctx.textAlign = 'left';
   }
   // HUD pás pozadí
-  ctx.fillStyle = '#12160e'; ctx.fillRect(0, ARENA_H, W, HUD_H);
-  ctx.fillStyle = '#1a2010'; ctx.fillRect(0, ARENA_H, W, 2);
-  ctx.strokeStyle = '#2a331f'; ctx.beginPath(); ctx.moveTo(0, ARENA_H); ctx.lineTo(W, ARENA_H); ctx.stroke();
+  ctx.fillStyle = '#12160e'; ctx.fillRect(0, VIEWH, W, HUD_H);
+  ctx.fillStyle = '#1a2010'; ctx.fillRect(0, VIEWH, W, 2);
+  ctx.strokeStyle = '#2a331f'; ctx.beginPath(); ctx.moveTo(0, VIEWH); ctx.lineTo(W, VIEWH); ctx.stroke();
 
   if (state === 'combat') {
     const w = activeWeapon(me);
@@ -1702,8 +1748,8 @@ function drawHud() {
     drawAbilityButton(me);
     if (w.ammo === 'mana') { ctx.fillStyle = 'rgba(120,180,255,.3)'; ctx.fillRect(BTN.weapon.x, BTN.weapon.y - 5, BTN.weapon.w, 3); ctx.fillStyle = '#8fbaff'; ctx.fillRect(BTN.weapon.x, BTN.weapon.y - 5, BTN.weapon.w * (me.mana / me.manaMax), 3); }
     // HP hráče
-    ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.fillRect(8, ARENA_H - 10, W - 16, 5);
-    ctx.fillStyle = me.hp < me.hpMax * 0.3 ? '#ff3a3a' : '#ff6a6a'; ctx.fillRect(8, ARENA_H - 10, (W - 16) * clamp(me.hp / me.hpMax, 0, 1), 5);
+    ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.fillRect(8, VIEWH - 10, W - 16, 5);
+    ctx.fillStyle = me.hp < me.hpMax * 0.3 ? '#ff3a3a' : '#ff6a6a'; ctx.fillRect(8, VIEWH - 10, (W - 16) * clamp(me.hp / me.hpMax, 0, 1), 5);
     drawStick(moveStick, '#8fd08f'); drawStick(aimStick, '#f0c060');
   } else if (state === 'build') {
     drawBuildBar();
@@ -1733,8 +1779,8 @@ function drawStick(s, color) {
 function drawBuildBar() {
   const items = paletteItems();
   ctx.fillStyle = '#e8ecd8'; ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'left';
-  ctx.fillText('💎 ' + run.gems + '  ·  Klepni na položku, pak na mapu. (Klepni na hotovou stavbu = prodej)', 8, ARENA_H + 20);
-  const size = 40, gap = 6; let x = 8, y = ARENA_H + 28;
+  ctx.fillText('💎 ' + run.gems + '  ·  Klepni na položku, pak na mapu. (Klepni na hotovou stavbu = prodej)', 8, VIEWH + 20);
+  const size = 40, gap = 6; let x = 8, y = VIEWH + 28;
   paletteRects = [];
   for (const id of items) {
     const def = defOf(id);
@@ -1749,21 +1795,21 @@ function drawBuildBar() {
     x += size + gap;
     if (x + size > W - 140) { x = 8; y += size + gap; }
   }
-  if (!items.length) { ctx.fillStyle = '#8a9070'; ctx.font = '12px system-ui'; ctx.fillText('Nemáš co stavět — nakup v obchodu.', 8, ARENA_H + 50); }
+  if (!items.length) { ctx.fillStyle = '#8a9070'; ctx.font = '12px system-ui'; ctx.fillText('Nemáš co stavět — nakup v obchodu.', 8, VIEWH + 50); }
   const meReady = net.role === 'guest' ? readyGuest : readyHost;
   const label = !isCoop() ? '▶ START VLNY' : (meReady ? '✔ PŘIPRAVEN' : '▶ PŘIPRAVEN?');
   drawButton(BTN.start, label, meReady);
   if (isCoop()) {
     const other = net.role === 'guest' ? readyHost : readyGuest;
     ctx.fillStyle = other ? '#8fd08f' : '#c0a060'; ctx.font = '11px system-ui'; ctx.textAlign = 'right';
-    ctx.fillText(other ? 'spoluhráč připraven ✔' : 'spoluhráč staví…', W - 6, ARENA_H + 46); ctx.textAlign = 'left';
+    ctx.fillText(other ? 'spoluhráč připraven ✔' : 'spoluhráč staví…', W - 6, VIEWH + 46); ctx.textAlign = 'left';
   }
 }
 let paletteRects = [];
 function drawBanner() {
   ctx.globalAlpha = clamp(banner.t / 40, 0, 1); ctx.textAlign = 'center';
-  ctx.fillStyle = banner.warn ? '#ff5c8a' : '#f0e0a0'; ctx.font = 'bold 28px system-ui';
-  ctx.fillText(banner.text, W / 2, ARENA_H / 2);
+  ctx.fillStyle = banner.warn ? '#ff5c8a' : '#f0e0a0'; ctx.font = 'bold 26px system-ui';
+  ctx.fillText(banner.text, W / 2, VIEWH * 0.42);
   ctx.globalAlpha = 1; ctx.textAlign = 'left';
 }
 
@@ -1834,7 +1880,7 @@ canvas.addEventListener('touchstart', e => {
     const pos = evtPos(t.clientX, t.clientY);
     if (state === 'paused') { togglePause(); continue; }
     if (!inArena(pos.y)) { hudTap(pos.x, pos.y); continue; }
-    if (state === 'build') { handleBuildTap(pos.x, pos.y); continue; }
+    if (state === 'build') { const wp = screenToWorld(pos.x, pos.y); handleBuildTap(wp.x, wp.y); continue; }
     if (state === 'combat') {
       if (pos.x < W / 2 && !moveStick.active) startStick(moveStick, t.identifier, pos);
       else startStick(aimStick, t.identifier, pos);
@@ -1847,7 +1893,7 @@ canvas.addEventListener('touchmove', e => {
     const pos = evtPos(t.clientX, t.clientY);
     if (moveStick.id === t.identifier) moveStickUpdate(moveStick, pos);
     else if (aimStick.id === t.identifier) moveStickUpdate(aimStick, pos);
-    else if (state === 'build') buildHover = tileOf(pos.x, pos.y);
+    else if (state === 'build') { const wp = screenToWorld(pos.x, pos.y); buildHover = tileOf(wp.x, wp.y); }
   }
 }, { passive: false });
 canvas.addEventListener('touchend', e => {
@@ -1904,14 +1950,15 @@ window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 canvas.addEventListener('mousemove', e => {
   const pos = evtPos(e.clientX, e.clientY);
   const lp = localPlayer();
-  if (state === 'combat' && lp) { myInput.aimAngle = Math.atan2(pos.y - lp.y, pos.x - lp.x); if (mouseDown) myInput.aiming = true; }
-  if (state === 'build') buildHover = tileOf(pos.x, pos.y);
+  const wp = screenToWorld(pos.x, pos.y);
+  if (state === 'combat' && lp) { myInput.aimAngle = Math.atan2(wp.y - lp.y, wp.x - lp.x); if (mouseDown) myInput.aiming = true; }
+  if (state === 'build') buildHover = tileOf(wp.x, wp.y);
 });
 canvas.addEventListener('mousedown', e => {
   initAudio(); const pos = evtPos(e.clientX, e.clientY);
   if (state === 'paused') { togglePause(); return; }
   if (!inArena(pos.y)) { hudTap(pos.x, pos.y); return; }
-  if (state === 'build') { handleBuildTap(pos.x, pos.y); return; }
+  if (state === 'build') { const wp = screenToWorld(pos.x, pos.y); handleBuildTap(wp.x, wp.y); return; }
   if (state === 'combat') myInput.aiming = true;
 });
 canvas.addEventListener('mouseup', () => { myInput.aiming = false; });
@@ -1959,7 +2006,7 @@ function loop(now) {
 }
 
 /* ---------- Boot ---------- */
-buildArena();
+loadMap(0);
 fitCanvas();
 setState('menu');
 requestAnimationFrame(loop);

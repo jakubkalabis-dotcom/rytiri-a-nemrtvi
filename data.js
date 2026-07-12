@@ -6,32 +6,58 @@
 
 /* ---------- Mapa / aréna ---------- */
 const TILE = 32;
-const COLS = 15;
-const ROWS = 22;                 // herní pole 480 × 704 px
-const ARENA_W = COLS * TILE;     // 480
-const ARENA_H = ROWS * TILE;     // 704
-const HUD_H = 96;                // spodní pás s ovládáním
-const VIEW_W = ARENA_W;          // 480
-const VIEW_H = ARENA_H + HUD_H;  // 800
+const HUD_H = 96;                 // spodní pás s ovládáním
+const VIEWW = 480;               // viditelné okno (šířka obrazovky)
+const VIEWH = 704;               // viditelné okno (výška nad HUD)
+// Rozměry AKTUÁLNÍ mapy (nastavuje applyMapDims / loadMap). Mohou být větší než okno → kamera scrolluje.
+let COLS = 16, ROWS = 24;
+let ARENA_W = COLS * TILE, ARENA_H = ROWS * TILE;
+let CORE = { tx: 6, ty: 21, w: 3, h: 2 };
+let SPAWNS = [];
+let OBSTACLES = [];
+let currentMap = 0;
 
-// Jádro (brána hradu), které se brání — 3×2 dlaždice dole uprostřed.
-const CORE = { tx: 6, ty: 19, w: 3, h: 2 };
-// Spawn brány nemrtvých (horní hrana + rohy). Souřadnice ve světových px.
-const SPAWNS = [
-  { x: TILE * 2.5,  y: -20 },
-  { x: TILE * 7.5,  y: -20 },
-  { x: TILE * 12.5, y: -20 },
-  { x: -20,         y: TILE * 4 },
-  { x: ARENA_W + 20, y: TILE * 4 },
+/* ---------- 15 map / biomů (poslední = peklo s finálním bossem) ---------- */
+// pal: [tráva1, tráva2, skála, akcent, mlha/overlay], fog = průhledná barva navrch
+const MAPS = [
+  { name: 'Zelená louka',    cols: 16, rows: 24, seed: 101, pal: ['#284020', '#2c4224', '#5a5f66', '#3f7030'], fog: null },
+  { name: 'Temný les',       cols: 16, rows: 26, seed: 202, pal: ['#1f3018', '#24381c', '#4a4f46', '#2c5024'], fog: 'rgba(10,20,10,0.18)' },
+  { name: 'Starý hřbitov',   cols: 17, rows: 26, seed: 303, pal: ['#2a2e28', '#30352d', '#6a6f78', '#4a5a4a'], fog: 'rgba(30,30,40,0.2)' },
+  { name: 'Hnilobná bažina', cols: 17, rows: 27, seed: 404, pal: ['#24301e', '#2a3820', '#4a4a3a', '#3a5a2a'], fog: 'rgba(40,50,20,0.22)' },
+  { name: 'Zříceniny',       cols: 18, rows: 27, seed: 505, pal: ['#3a3630', '#403c34', '#7a756a', '#5a5040'], fog: null },
+  { name: 'Zamrzlá pláň',    cols: 18, rows: 28, seed: 606, pal: ['#a8c0d0', '#b8ccda', '#8a98a6', '#cfe0ec'], fog: 'rgba(200,225,245,0.15)' },
+  { name: 'Spálená poušť',   cols: 19, rows: 28, seed: 707, pal: ['#b89a5a', '#c2a666', '#9a7a4a', '#d8bc7a'], fog: 'rgba(230,200,120,0.12)' },
+  { name: 'Temná jeskyně',   cols: 19, rows: 29, seed: 808, pal: ['#20242a', '#262b32', '#3a4048', '#4a4050'], fog: 'rgba(0,0,10,0.32)' },
+  { name: 'Prokleté pole',   cols: 20, rows: 29, seed: 909, pal: ['#2a2420', '#302a24', '#5a504a', '#5a3a5a'], fog: 'rgba(40,20,40,0.22)' },
+  { name: 'Sopečná stráň',   cols: 20, rows: 30, seed: 111, pal: ['#3a2620', '#42281f', '#5a4038', '#8a3a20'], fog: 'rgba(60,20,10,0.2)' },
+  { name: 'Kostěná pustina', cols: 21, rows: 30, seed: 121, pal: ['#3a3830', '#403e36', '#c8c0a8', '#8a8270'], fog: 'rgba(50,45,35,0.18)' },
+  { name: 'Stínový hvozd',   cols: 21, rows: 31, seed: 131, pal: ['#181c20', '#1e2228', '#3a3040', '#40206a'], fog: 'rgba(20,10,40,0.3)' },
+  { name: 'Krvavé bažiny',   cols: 22, rows: 31, seed: 141, pal: ['#2a1a1a', '#301e1e', '#5a3a3a', '#7a2020'], fog: 'rgba(60,10,10,0.24)' },
+  { name: 'Brána podsvětí',  cols: 22, rows: 32, seed: 151, pal: ['#241820', '#2a1c26', '#4a3040', '#6a2050'], fog: 'rgba(50,10,40,0.28)' },
+  { name: 'Peklo',           cols: 23, rows: 34, seed: 161, pal: ['#3a1410', '#461812', '#6a2a1a', '#ff5a20'], fog: 'rgba(90,15,5,0.26)', hell: true },
 ];
-// Statické překážky (skály/stromy) — dlaždice [tx,ty], neprůchodné, nedají se stavět.
-const OBSTACLES = [
-  [3,5],[4,5],[10,5],[11,5],
-  [1,9],[2,9],[12,9],[13,9],
-  [6,8],[7,8],[8,8],
-  [4,13],[5,13],[9,13],[10,13],
-  [2,15],[12,15],
-];
+const NUM_MAPS = MAPS.length;
+const WAVES_PER_MAP = 5;                 // každá mapa = 5 vln, 5. vlna = boss = konec mapy
+const FINAL_WAVE = NUM_MAPS * WAVES_PER_MAP;  // 75
+function mapForWave(wave) { return Math.min(NUM_MAPS - 1, Math.floor((Math.max(1, wave) - 1) / WAVES_PER_MAP)); }
+function isMapEndWave(wave) { return wave % WAVES_PER_MAP === 0; }   // boss vlna = konec mapy
+function isFinalWave(wave) { return wave >= FINAL_WAVE; }
+
+// Nastaví rozměry, jádro a spawny podle mapy (bez generování překážek – to dělá loadMap v engine).
+function applyMapDims(i) {
+  const m = MAPS[clampIdx(i)];
+  COLS = m.cols; ROWS = m.rows;
+  ARENA_W = COLS * TILE; ARENA_H = ROWS * TILE;
+  CORE = { tx: Math.floor(COLS / 2) - 1, ty: ROWS - 3, w: 3, h: 2 };   // dolní střed
+  // spawny: horní hrana (3 body) + boky
+  SPAWNS = [
+    { x: COLS * TILE * 0.2, y: -20 }, { x: COLS * TILE * 0.5, y: -20 }, { x: COLS * TILE * 0.8, y: -20 },
+    { x: -20, y: ROWS * TILE * 0.25 }, { x: ARENA_W + 20, y: ROWS * TILE * 0.25 },
+    { x: -20, y: ROWS * TILE * 0.5 }, { x: ARENA_W + 20, y: ROWS * TILE * 0.5 },
+  ];
+}
+function clampIdx(i) { return Math.max(0, Math.min(NUM_MAPS - 1, i)); }
+applyMapDims(0);
 
 /* ---------- Munice (nakupuje se ve shopu; 'melee' a 'mana' se neřeší) ---------- */
 const AMMO = {
@@ -99,9 +125,13 @@ const ENEMIES = {
   nekromant: { name:'Nekromant', arch:'BOSS',     hp:650, speed:0.55,dmg:24, atkRate:70, size:52, bounty:140,score:600, leak:5, color:'#7a3a9a', summon:'chodec', summonRate:200 },
   abominace: { name:'Abominace', arch:'BOSS',     hp:1100,speed:0.4, dmg:34, atkRate:60, size:66, bounty:200,score:800, leak:6, color:'#6a4a2a', enrage:true },
   lich:      { name:'Lich',      arch:'BOSS',     hp:820, speed:0.5, dmg:20, atkRate:55, size:50, bounty:220,score:900, leak:5, color:'#3a6a8a', summon:'behac', summonRate:170, volley:true },
+  pekelny_pan:{name:'Pekelný pán',arch:'BOSS',    hp:3200,speed:0.5, dmg:44, atkRate:45, size:80, bounty:1000,score:5000,leak:20,color:'#ff3a10', summon:'vybusny', summonRate:120, volley:true, enrage:true, final:true },
 };
 const BOSS_CYCLE = ['nekromant', 'abominace', 'lich'];
-function bossForWave(wave) { return BOSS_CYCLE[(Math.floor(wave / 5) - 1) % BOSS_CYCLE.length]; }
+function bossForWave(wave) {
+  if (isFinalWave(wave)) return 'pekelny_pan';
+  return BOSS_CYCLE[(Math.floor(wave / 5) - 1) % BOSS_CYCLE.length];
+}
 
 /* ---------- Elitní přídomky (náhodně na běžných nepřátelích od pozdějších vln) ---------- */
 const ELITES = {
@@ -121,12 +151,12 @@ const DROPS = {
   truhla: { name:'Truhla',      icon:'💰', color:'#ffd35c', kind:'gems', gems:40 },
 };
 const DROP_WEIGHTS = { rapid: 5, power: 5, freeze: 3, heal: 4, truhla: 3 };
-// Škálování dle čísla vlny (wave = 1,2,3…):
+// Škálování dle čísla vlny (kampaň má 75 vln přes 15 map → mírnější + stropy):
 function enemyScale(wave) {
   return {
-    hp:  1 + 0.16 * (wave - 1),
-    spd: Math.min(1.6, 1 + 0.025 * (wave - 1)),
-    dmg: 1 + 0.10 * (wave - 1),
+    hp:  Math.min(9, 1 + 0.09 * (wave - 1)),
+    spd: Math.min(1.7, 1 + 0.02 * (wave - 1)),
+    dmg: Math.min(4, 1 + 0.05 * (wave - 1)),
   };
 }
 // Váhy výskytu typů podle vlny (boss řešen zvlášť: každá 5. vlna).
@@ -141,8 +171,8 @@ function waveComposition(wave) {
   return w;
 }
 function isBossWave(wave) { return wave % 5 === 0; }
-// Kolik nepřátel v dané vlně
-function waveCount(wave) { return 8 + Math.floor(wave * 2.2); }
+// Kolik nepřátel v dané vlně (se stropem, ať se to dá zvládnout)
+function waveCount(wave) { return Math.min(36, 8 + Math.floor(wave * 1.3)); }
 
 /* ---------- Pasti ---------- */
 /* Archetypy: ONESHOT | SLOW | DOT_AOE | EMITTER */

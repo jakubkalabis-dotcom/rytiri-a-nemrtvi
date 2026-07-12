@@ -174,7 +174,7 @@ function netHandleCmd(m) {
    ========================================================================== */
 function serializeState() {
   const snap = {
-    st: state,
+    st: state, map: currentMap,
     run: run && { gems: run.gems, lives: run.lives, wave: run.wave, score: run.score || 0, ownedWeapons: run.ownedWeapons, ammo: run.ammo, owned: run.owned, upgrades: run.upgrades, wUpgrades: run.wUpgrades, combo: run.combo || 0, comboT: run.comboT || 0 },
     wave: wave && { boss: wave.boss, spawned: wave.spawned, total: wave.total, reward: wave.reward },
     banner: banner && { text: banner.text, t: banner.t, warn: banner.warn },
@@ -201,6 +201,8 @@ function shopSig(r) { return r ? r.gems + '|' + r.lives + '|' + (r.ownedWeapons 
 let lastShopSig = '';
 
 function applyState(s) {
+  // změna mapy → guest přenačte arénu (stejný seed = stejný terén)
+  if (s.map != null && s.map !== currentMap) loadMap(s.map);
   // ekonomika / run
   if (s.run) { if (!run) run = {}; Object.assign(run, s.run); if (!run.class && players[0]) run.class = players[0].class; }
   readyHost = s.readyHost; readyGuest = s.readyGuest;
