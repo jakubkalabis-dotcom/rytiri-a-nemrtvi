@@ -188,7 +188,7 @@ function shopCard(id, name, cost, cat, extra, act, disabled, costLabel) {
   </div>`;
 }
 let shopTab = 'weapons';
-const SHOP_TABS = [['weapons', '🗡 Zbraně'], ['traps', '🪤 Pasti'], ['walls', '🧱 Zdi'], ['warriors', '🛡 Spojenci'], ['ammo', '🎯 Munice'], ['char', '🧙 Postava']];
+const SHOP_TABS = [['weapons', '🗡 Zbraně'], ['traps', '🪤 Pasti'], ['walls', '🧱 Zdi'], ['warriors', '🛡 Spojenci'], ['ammo', '🎯 Munice'], ['char', '🧙 Postava'], ['bestiary', '📖 Bestiář']];
 function refreshShop() { if (state === 'shop') renderShop(); lastShopSig = typeof shopSig === 'function' ? shopSig(run) : ''; }
 function shopHeader() {
   return `<h2>Obchod · vlna ${run.wave + 1}</h2>
@@ -205,8 +205,53 @@ function renderShop() {
   paintShopIcons();
 }
 function shopGrid(cards, empty) { return `<div class="grid">${cards || '<div class="empty">' + (empty || '—') + '</div>'}</div>`; }
+// Krátký popis účinku pasti/věže do karty obchodu.
+function trapInfo(t) {
+  if (t.arch === 'ONESHOT') return `⚔ ${t.dmg}${t.charges > 1 ? ' ×' + t.charges : ''} zásah`;
+  if (t.arch === 'DOT_AOE') return `🔥 ${t.dps}/s v okolí`;
+  if (t.arch === 'SLOW') return `🐌 −${Math.round((1 - t.slow.mul) * 100)}% rychlost`;
+  if (t.arch === 'EMITTER') return `🏹 ${t.dmg} dmg · dosah ${Math.round(t.range / 24)}`;
+  return '';
+}
+// Popis chování nepřítele pro bestiář.
+function enemyDesc(id, e) {
+  const parts = [];
+  const A = { WALKER: 'Základní pomalý nemrtvý.', RUNNER: 'Rychlý, ale křehký — dožene hráče.',
+    TANK: 'Spousta HP, velmi pomalý. Prokousává zdi.', RANGED: 'Plive kyselinu z dálky, drží si odstup.',
+    EXPLODER: 'Při kontaktu vybuchne — plošné poškození!', BOSS: 'Boss.' };
+  parts.push(A[e.arch] || '');
+  if (e.armored) parts.push('Brnění: sníženému poškození odolává.');
+  if (e.arch === 'BOSS') {
+    if (e.summon) parts.push('Přivolává další nemrtvé (' + (ENEMIES[e.summon] ? ENEMIES[e.summon].name : e.summon) + ').');
+    if (e.volley) parts.push('Střílí vějíř projektilů.');
+    if (e.enrage) parts.push('V nízkém HP se rozzuří (zrychlí).');
+    if (e.final) parts.push('Finální boss celé hry.');
+  }
+  return parts.filter(Boolean).join(' ');
+}
+function renderBestiaryCard(id) {
+  const e = ENEMIES[id];
+  const dps = e.atkRate ? (e.dmg / (e.atkRate / 60)).toFixed(0) : e.dmg;
+  const spd = e.speed >= 1.5 ? 'rychlý' : e.speed >= 0.8 ? 'střední' : 'pomalý';
+  return `<div class="bcard">
+    <canvas class="ico benemy" width="40" height="40" data-k="enemy" data-id="${id}"></canvas>
+    <div class="binfo">
+      <div class="bname">${e.name}${e.arch === 'BOSS' ? ' <span class="bboss">BOSS</span>' : ''}</div>
+      <div class="bstats">❤ ${e.hp} · ⚔ ${e.dmg} dmg · 🏃 ${spd} · 💎 ${e.bounty}</div>
+      <div class="bdesc">${enemyDesc(id, e)}</div>
+    </div></div>`;
+}
+function renderBestiary() {
+  const normal = Object.keys(ENEMIES).filter(id => ENEMIES[id].arch !== 'BOSS');
+  const bosses = Object.keys(ENEMIES).filter(id => ENEMIES[id].arch === 'BOSS');
+  return `<div class="shop bestiary">
+    <p style="font-size:12px;color:#9aa87e">Přehled nepřátel — jejich životy, poškození a schopnosti.</p>
+    <h3>Nemrtví</h3>${normal.map(renderBestiaryCard).join('')}
+    <h3>Bossové</h3>${bosses.map(renderBestiaryCard).join('')}</div>`;
+}
 function renderShopCat(tab) {
   if (tab === 'char') return renderCharTab();
+  if (tab === 'bestiary') return renderBestiary();
   if (tab === 'weapons') {
     const lvl = profile.playerLevel;
     const owned = run.ownedWeapons.map(id => { const w = WEAPONS[id], wl = run.wUpgrades[id] || 0, maxed = wl >= WEAPON_UP_MAX, c = weaponUpMat(wl), afford = (run.wood || 0) >= c.wood && (run.steel || 0) >= c.steel;
@@ -216,8 +261,8 @@ function renderShopCat(tab) {
     return `<div class="shop">${owned ? '<h3>Vylepšit vlastní zbraně</h3>' + shopGrid(owned) : ''}<h3>Koupit nové zbraně</h3>${shopGrid(buy, 'Vše koupeno')}</div>`;
   }
   if (tab === 'traps') {
-    const cards = Object.keys(TRAPS).map(id => { const t = TRAPS[id], cost = costOf(t.cost, 'trap'); return shopCard(id, `${ico('trap', id)} ${t.name}`, cost, 'trap', `máš ${run.owned[id] || 0}`, 'buybuild', meGems() < cost ? 'málo 💎' : null); }).join('');
-    return `<div class="shop"><p style="font-size:12px;color:#9aa87e">Pasti i věže jsou <b>trvalé</b> — zůstávají i po přechodu na další mapu.</p><h3>Pasti a věže (${Object.keys(TRAPS).length})</h3>${shopGrid(cards)}</div>`;
+    const cards = Object.keys(TRAPS).map(id => { const t = TRAPS[id], cost = costOf(t.cost, 'trap'); return shopCard(id, `${ico('trap', id)} ${t.name}`, cost, 'trap', `${trapInfo(t)} · máš ${run.owned[id] || 0}`, 'buybuild', meGems() < cost ? 'málo 💎' : null); }).join('');
+    return `<div class="shop"><p style="font-size:12px;color:#9aa87e"><b>Pasti</b> jsou v rámci mapy trvalé (nemizí mezi vlnami), ale při přechodu na další mapu se zničí. <b>Věže</b> (samostříl, tesla, plamenomet, balista) a zdi se přenášejí dál.</p><h3>Pasti a věže (${Object.keys(TRAPS).length})</h3>${shopGrid(cards)}</div>`;
   }
   if (tab === 'walls') {
     const cards = Object.keys(STRUCTURES).map(id => { const s = STRUCTURES[id], cost = costOf(s.cost, 'wall'); return shopCard(id, `${ico('wall', id)} ${s.name}`, cost, 'wall', `HP ${Math.round(s.hp * (teamMax('wallHp') || 1))} · máš ${run.owned[id] || 0}`, 'buybuild', meGems() < cost ? 'málo 💎' : null); }).join('');
@@ -425,9 +470,10 @@ function startBuildPhase() {
   const me = localPlayer(); if (me) updateCamera(me.x, me.y, 1, true);   // kamera k jádru
 }
 function advanceToMap(i) {
-  // trvalé obrany PŘENESEME na novou mapu — když padne pozice do překážky/hráče,
-  // přesuneme je na nejbližší volné místo (nic nezmizí).
-  const keepW = walls.slice(), keepT = turrets.slice(), keepTr = traps.slice(), keepWa = warriors.slice();
+  // Zdi a věže PŘENESEME na novou mapu — když padne pozice do překážky/hráče,
+  // přesuneme je na nejbližší volné místo. POZEMNÍ PASTI se přechodem NIČÍ
+  // (v rámci jedné mapy jsou ale trvalé — nemizí mezi vlnami).
+  const keepW = walls.slice(), keepT = turrets.slice(), keepWa = warriors.slice();
   loadMap(i);
   enemies = []; bullets = []; eBullets = []; groundFx = []; pickups = []; decals = []; particles = [];
   walls = []; turrets = []; traps = []; warriors = [];
@@ -440,7 +486,6 @@ function advanceToMap(i) {
   const setPos = (o, p) => { o.tx = p[0]; o.ty = p[1]; o.x = (p[0] + 0.5) * TILE; o.y = (p[1] + 0.5) * TILE; };
   for (const s of keepW) { const p = relocate(s.tx, s.ty, freeStruct); if (p) { setPos(s, p); s.hp = s.hpMax; grid.structures[tileIndex(p[0], p[1])] = s; walls.push(s); } }
   for (const s of keepT) { if (s.temp != null) continue; const p = relocate(s.tx, s.ty, freeStruct); if (p) { setPos(s, p); s.hp = s.hpMax; s.fireCool = 0; grid.structures[tileIndex(p[0], p[1])] = s; turrets.push(s); } }
-  for (const t of keepTr) { const p = relocate(t.tx, t.ty, (x, y) => walkable(x, y) && !traps.some(tt => tt.tx === x && tt.ty === y)); if (p) { setPos(t, p); traps.push(t); } }
   for (const w of keepWa) { w.hp = w.hpMax; w.x = cx + (Math.random() - 0.5) * TILE * 3; w.y = (CORE.ty - 3) * TILE; w.homeX = w.x; w.homeY = w.y; warriors.push(w); }
   flowDirty = true;
   players.forEach((p, idx) => { p.x = spawnPos[idx].x; p.y = spawnPos[idx].y; });
@@ -1036,10 +1081,13 @@ function circleBlocked(x, y, r) {
 }
 function moveEntity(e, nx, ny) {
   const r = e.r;
-  const wantX = nx - e.x, wantY = ny - e.y;
-  const blockedX = circleBlocked(nx, e.y, r);
-  const blockedY = circleBlocked(e.x, ny, r);
+  const ox = e.x, oy = e.y;
+  const wantX = nx - ox, wantY = ny - oy;
+  // Sekvenční řešení os: nejdřív X, pak Y S JIŽ NOVÝM X. Tím se otestuje i
+  // diagonální roh (nx,ny) jako celek → entita nikdy neproklouzne skrz roh zdi.
+  const blockedX = circleBlocked(nx, oy, r);
   if (!blockedX) e.x = nx;
+  const blockedY = circleBlocked(e.x, ny, r);
   if (!blockedY) e.y = ny;
   // Odseknutí rohu: pokud je HLAVNÍ směr pohybu (podle flow-fieldu) zablokovaný
   // kvůli tomu, že kruh zavadil o roh překážky ve vedlejší dlaždici, srovnej
@@ -1071,6 +1119,7 @@ function escapeStuck(e) {
   if (bx === null) { by = Math.min(ROWS - 1, ty + 1); bx = tx; }   // fallback: dolů
   const cx = (bx + 0.5) * TILE, cy = (by + 0.5) * TILE;
   const a = Math.atan2(cy - e.y, cx - e.x);
+  // Vyprošťuje SMĚREM k volné (walkable) sousední dlaždici → nikdy ne skrz zeď.
   e.x += Math.cos(a) * 3; e.y += Math.sin(a) * 3;
 }
 
@@ -1952,7 +2001,37 @@ function paintIcon(g, k, id, S) {
   } else if (k === 'wall') drawWallIcon(g, id, S);
   else if (k === 'trap') drawTrapIcon(g, id, S);
   else if (k === 'warrior') drawWarriorIcon(g, (WARRIORS[id] || {}).color, (WARRIORS[id] || {}).arch === 'RANGED', S);
+  else if (k === 'enemy') drawEnemyIcon(g, id, S);
   g.restore();
+}
+// Ikona nepřítele do bestiáře — stylizované tělo v jeho barvě + rys archetypu.
+function drawEnemyIcon(g, id, S) {
+  const e = ENEMIES[id] || {}, col = e.color || '#86c15a', c = S / 2;
+  const boss = e.arch === 'BOSS';
+  const rad = boss ? S * 0.42 : (e.arch === 'TANK' ? S * 0.38 : S * 0.32);
+  // tělo (oblý obdélník kreslený přímo na lokální kontext g)
+  const bx = c - rad, by = c - rad * 0.9, bw = rad * 2, bh = rad * 1.9, br = rad * 0.5;
+  g.fillStyle = col;
+  g.beginPath();
+  g.moveTo(bx + br, by);
+  g.arcTo(bx + bw, by, bx + bw, by + bh, br);
+  g.arcTo(bx + bw, by + bh, bx, by + bh, br);
+  g.arcTo(bx, by + bh, bx, by, br);
+  g.arcTo(bx, by, bx + bw, by, br);
+  g.fill();
+  // stín/kontura
+  g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(c - rad, c + rad * 0.55, rad * 2, rad * 0.35);
+  // oči
+  g.fillStyle = boss ? '#ffef8a' : '#f4f4e0';
+  const ey = c - rad * 0.15, ex = rad * 0.42;
+  g.beginPath(); g.arc(c - ex, ey, S * 0.07, 0, 7); g.arc(c + ex, ey, S * 0.07, 0, 7); g.fill();
+  g.fillStyle = '#201812';
+  g.beginPath(); g.arc(c - ex, ey, S * 0.035, 0, 7); g.arc(c + ex, ey, S * 0.035, 0, 7); g.fill();
+  // archetyp: brnění/koruna/výbuch
+  if (e.armored) { g.fillStyle = '#c8ccd4'; g.fillRect(c - rad * 0.7, c - rad * 0.1, rad * 1.4, S * 0.06); }
+  if (boss) { g.fillStyle = '#ffd24a'; g.beginPath(); for (let i = -1; i <= 1; i++) { const x = c + i * rad * 0.5; g.moveTo(x - S * 0.05, c - rad * 0.85); g.lineTo(x, c - rad * 1.15); g.lineTo(x + S * 0.05, c - rad * 0.85); } g.fill(); }
+  if (e.arch === 'EXPLODER') { g.strokeStyle = '#ff5a2a'; g.lineWidth = 2; g.beginPath(); g.arc(c, c, rad + 3, 0, 7); g.stroke(); }
+  if (e.arch === 'RANGED') { g.fillStyle = '#8affb0'; g.beginPath(); g.arc(c + rad * 0.7, c - rad * 0.5, S * 0.06, 0, 7); g.fill(); }
 }
 function drawWallIcon(g, id, S) {
   const p = S * 0.12, w = S - p * 2;

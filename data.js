@@ -210,10 +210,10 @@ const TRAPS = {
   dehet:      { name:'Dehtová jáma', arch:'SLOW',    slow:{mul:0.55}, hp:90,  cost:130, color:'#20201a', cat:'trap' },
   mrazova:    { name:'Mrazivá past', arch:'SLOW',    slow:{mul:0.25}, hp:80,  cost:190, color:'#8fe0ff', cat:'trap' },
   // plošné poškození v čase (trvalé)
-  ohniste:    { name:'Ohniště',      arch:'DOT_AOE', dps:12, radius:52, cost:120, color:'#ff7b3a', cat:'trap' },
-  jed:        { name:'Jedový plyn',  arch:'DOT_AOE', dps:9,  radius:64, cost:150, color:'#7ad06a', cat:'trap' },
-  kyselina:   { name:'Kyselá louže', arch:'DOT_AOE', dps:22, radius:42, cost:170, color:'#c8e030', cat:'trap' },
-  svaty_kruh: { name:'Svatý kruh',   arch:'DOT_AOE', dps:16, radius:56, cost:220, color:'#f0e0a0', cat:'trap' },
+  ohniste:    { name:'Ohniště',      arch:'DOT_AOE', dps:6,  radius:52, cost:120, color:'#ff7b3a', cat:'trap' },
+  jed:        { name:'Jedový plyn',  arch:'DOT_AOE', dps:5,  radius:64, cost:150, color:'#7ad06a', cat:'trap' },
+  kyselina:   { name:'Kyselá louže', arch:'DOT_AOE', dps:10, radius:42, cost:170, color:'#c8e030', cat:'trap' },
+  svaty_kruh: { name:'Svatý kruh',   arch:'DOT_AOE', dps:8,  radius:56, cost:220, color:'#f0e0a0', cat:'trap' },
   // věže (automatické, blokující, trvalé)
   samostril:  { name:'Samostříl',    arch:'EMITTER', dmg:11, range:210, rate:38, projSpeed:10, hp:90,  cost:200, color:'#8a7a5a', cat:'trap' },
   tesla:      { name:'Teslova věž',  arch:'EMITTER', dmg:7,  range:190, rate:14, projSpeed:13, hp:80,  cost:250, color:'#8fbaff', cat:'trap' },
