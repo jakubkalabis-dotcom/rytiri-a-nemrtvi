@@ -10,6 +10,26 @@ muted = profile.settings.muted;
 let run = null;       // aktuální hra (viz newRun)
 const players = [];
 let enemies = [], walls = [], turrets = [], traps = [], warriors = [];
+
+/* ---------- Co-op / síť ---------- */
+// role: null = solo; 'host' = hostitel (počítá simulaci); 'guest' = připojený druhý hráč (jen vykresluje)
+const net = { mode: 'solo', role: null, connected: false, dc: null, pc: null, hostClass: null, guestClass: null };
+let readyHost = false, readyGuest = false;
+// Lokální vstup tohoto zařízení (ovládací prvky píšou sem; loop ho aplikuje/odešle).
+const myInput = { mx: 0, my: 0, aiming: false, aimAngle: -Math.PI / 2 };
+function localPlayer() { return net.role === 'guest' ? players[1] : players[0]; }
+function isCoop() { return net.role === 'host' || net.role === 'guest'; }
+// Nejlepší pasiva napříč týmem (vyšší = lepší, např. warriorBuff)
+function teamMax(key) { let m = 0; for (const p of players) { const v = (p.passive && p.passive[key]) || 0; if (v > m) m = v; } return m; }
+// Nejlepší „rate" pasiva (nižší = rychlejší, např. emitterRate)
+function teamRate(key) { let m = 1; for (const p of players) { const v = p.passive && p.passive[key]; if (v != null && v < m) m = v; } return m; }
+// Aplikuj lokální vstup na vlastního hráče (host/solo). Guest vstup jen odesílá.
+function applyLocalInput() {
+  if (net.role === 'guest') return;
+  const p = players[0]; if (!p) return;
+  p.input.mx = myInput.mx; p.input.my = myInput.my; p.input.aiming = myInput.aiming;
+  if (myInput.aiming) p.aimAngle = myInput.aimAngle;
+}
 let bullets = [], eBullets = [], groundFx = [], particles = [], effects = [];
 let lastTime = performance.now();
 let shake = 0, flash = 0, banner = null;
@@ -31,34 +51,45 @@ const BTN = {
 function inRect(px, py, r) { return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h; }
 
 /* ---------- Nová hra / třída ---------- */
-function newRun(classId) {
-  const cls = CLASSES[classId];
+// classIds: string (solo) nebo pole tříd (co-op, index 0 = hostitel).
+function newRun(classIds) {
+  if (typeof classIds === 'string') classIds = [classIds];
+  const first = CLASSES[classIds[0]];
   run = {
-    classId, class: cls,
-    gems: cls.startGems,
+    classId: classIds[0], class: first,
+    gems: classIds.reduce((s, cid) => s + CLASSES[cid].startGems, 0), // sdílený rozpočet
     lives: 20,
     wave: 0,
-    ownedWeapons: cls.start.slice(),
+    ownedWeapons: [],
     ammo: {},
     owned: {},          // stavební inventář: id -> počet
+    score: 0,
   };
   for (const k in AMMO) run.ammo[k] = 0;
-  // startovní munice pro vlastněné dálkové zbraně
+  // sdílené vlastněné zbraně = sjednocení startovních zbraní hráčů
+  for (const cid of classIds) for (const wid of CLASSES[cid].start) if (!run.ownedWeapons.includes(wid)) run.ownedWeapons.push(wid);
   for (const wid of run.ownedWeapons) grantAmmoFor(wid, 2);
   enemies = []; walls = []; turrets = []; traps = []; warriors = [];
   bullets = []; eBullets = []; groundFx = []; particles = []; effects = [];
   buildArena();
   flowDirty = true;
   players.length = 0;
-  players.push(makePlayer(cls));
+  const cx = (CORE.tx + CORE.w / 2) * TILE;
+  classIds.forEach((cid, i) => {
+    const p = makePlayer(CLASSES[cid], cid);
+    p.x = cx + (i === 0 ? -20 : 20);
+    players.push(p);
+  });
+  readyHost = false; readyGuest = false;
 }
-function makePlayer(cls) {
+function makePlayer(cls, classId) {
   const pas = cls.passive || {};
   return {
+    classId, class: cls, color: cls.color,
     x: (CORE.tx + CORE.w / 2) * TILE, y: (CORE.ty - 1) * TILE, r: 12,
     hpMax: Math.round(120 * cls.hpMod), hp: Math.round(120 * cls.hpMod),
     baseSpeed: 2.6 * cls.spdMod * (pas.moveSpeed || 1),
-    weaponId: cls.start[0], cool: 0, aimAngle: -Math.PI / 2, inv: 0,
+    weaponId: cls.start[0], cool: 0, aimAngle: -Math.PI / 2, inv: 0, downed: false,
     manaMax: Math.round(100 * (pas.manaMax || 1)), mana: Math.round(100 * (pas.manaMax || 1)),
     manaRegen: 0.28 * (pas.manaRegen || 1),
     passive: pas,
@@ -73,7 +104,10 @@ function grantAmmoFor(wid, bundles) {
 
 /* ---------- Cena s třídním násobičem ---------- */
 function costOf(cost, cat) {
-  const mul = (run.class.costMul && run.class.costMul[cat]) || 1;
+  // nejlepší (nejnižší) sleva napříč týmem
+  let mul = 1;
+  const src = players.length ? players.map(p => p.class) : [run.class];
+  for (const c of src) { const m = c.costMul && c.costMul[cat]; if (m != null && m < mul) mul = m; }
   return Math.max(1, Math.round(cost * mul));
 }
 
@@ -82,7 +116,7 @@ function costOf(cost, cat) {
    ========================================================================== */
 function setState(s) {
   state = s;
-  if (s === 'menu' || s === 'class' || s === 'shop' || s === 'roundEnd' || s === 'gameOver') {
+  if (s === 'menu' || s === 'class' || s === 'shop' || s === 'roundEnd' || s === 'gameOver' || s === 'host' || s === 'join') {
     overlay.classList.remove('hidden');
   } else {
     overlay.classList.add('hidden');
@@ -92,7 +126,11 @@ function setState(s) {
   else if (s === 'shop') renderShop();
   else if (s === 'roundEnd') renderRoundEnd();
   else if (s === 'gameOver') renderGameOver();
+  else if (s === 'host' && typeof renderHostLobby === 'function') renderHostLobby();
+  else if (s === 'join' && typeof renderJoinLobby === 'function') renderJoinLobby();
   else if (s === 'build') { banner = { text: 'FÁZE STAVĚNÍ', t: 90 }; }
+  // hostitel po každém přechodu okamžitě sesynchronizuje guesta
+  if (typeof netPush === 'function' && net.role === 'host' && net.connected) netPush();
 }
 
 function renderMenu() {
@@ -105,7 +143,9 @@ function renderMenu() {
     <p>Braň hradní bránu před vlnami nemrtvých. Nakupuj zbraně, stav pasti, zdi a věže,
     najmi spojence a přežij co nejdéle. Úroveň profilu: <b>${profile.playerLevel}</b> (odemyká zbraně).</p>
     <div class="board"><h3>NEJLEPŠÍ SKÓRE</h3>${board}</div>
-    <button data-act="play">Hrát</button>`;
+    <button data-act="play">Hrát sám</button>
+    <button data-act="hostgame" class="ghost">Hostovat co-op (2 hráči)</button>
+    <button data-act="joingame" class="ghost">Připojit se ke hře</button>`;
 }
 
 function renderClassSelect() {
@@ -156,7 +196,7 @@ function renderShop() {
   const wallCards = Object.keys(STRUCTURES).map(id => {
     const s = STRUCTURES[id];
     const cost = costOf(s.cost, 'wall');
-    return shopCard(id, `🧱 ${s.name}`, cost, 'wall', `HP ${Math.round(s.hp * (run.class.passive.wallHp || 1))} · máš ${run.owned[id] || 0}`, 'buybuild', run.gems < cost ? 'málo 💎' : null);
+    return shopCard(id, `🧱 ${s.name}`, cost, 'wall', `HP ${Math.round(s.hp * (teamMax('wallHp') || 1))} · máš ${run.owned[id] || 0}`, 'buybuild', run.gems < cost ? 'málo 💎' : null);
   }).join('');
   // Válečníci
   const warCards = Object.keys(WARRIORS).map(id => {
@@ -170,7 +210,7 @@ function renderShop() {
 
   ovContent.innerHTML = `
     <h2>Obchod · vlna ${run.wave + 1}</h2>
-    <div class="wallet">💎 ${run.gems} &nbsp; ❤ ${run.lives} &nbsp; 🏰 ${run.class.name}</div>
+    <div class="wallet">💎 ${run.gems} &nbsp; ❤ ${run.lives} &nbsp; 🏰 ${players.map(p => p.class.name).join(' + ')}</div>
     <div class="shop">
       <h3>Zbraně</h3><div class="grid">${weaponCards || '<div class="empty">Vše koupeno</div>'}</div>
       <h3>Munice a život</h3><div class="grid">${ammoCards}${lifeCard}</div>
@@ -205,16 +245,48 @@ overlay.addEventListener('click', e => {
   if (!el) return;
   const act = el.dataset.act, id = el.dataset.id;
   initAudio();
-  if (act === 'play') { setState('class'); }
-  else if (act === 'menu') { setState('menu'); }
-  else if (act === 'pickclass') { newRun(id); run.score = 0; setState('shop'); }
-  else if (act === 'buyweapon') buyWeapon(id);
+  // --- lobby / co-op ---
+  if (act === 'play') { net.role = null; net.mode = 'solo'; setState('class'); return; }
+  if (act === 'hostgame') { net.role = 'host'; net.mode = 'coop'; setState('host'); if (typeof netHost === 'function') netHost(); return; }
+  if (act === 'joingame') { net.role = 'guest'; net.mode = 'coop'; setState('join'); return; }
+  if (act === 'menu') { if (typeof netClose === 'function') netClose(); net.role = null; net.mode = 'solo'; setState('menu'); return; }
+  if (act === 'copycode') { if (typeof netCopy === 'function') netCopy(el.dataset.which, el); return; }
+  if (act === 'genanswer') { if (typeof netJoinAccept === 'function') netJoinAccept(); return; }
+  if (act === 'hostaccept') { if (typeof netHostAccept === 'function') netHostAccept(); return; }
+  if (act === 'pickclass') { pickClass(id); return; }
+  // --- guest: ekonomika a tok = příkazy hostiteli ---
+  if (net.role === 'guest') {
+    if (['buyweapon', 'buyammo', 'buybuild', 'buylife', 'tobuild', 'toshop'].includes(act)) { netSend({ t: 'cmd', act, id }); return; }
+    return;
+  }
+  // --- host / solo ---
+  if (act === 'buyweapon') buyWeapon(id);
   else if (act === 'buyammo') buyAmmo(id);
   else if (act === 'buybuild') buyBuild(id);
   else if (act === 'buylife') { if (run.gems >= 40) { run.gems -= 40; run.lives += 5; sfx.buy(); renderShop(); } }
   else if (act === 'tobuild') { startBuildPhase(); }
   else if (act === 'toshop') { setState('shop'); }
 });
+
+// Výběr třídy (solo i co-op)
+function pickClass(id) {
+  if (!isCoop()) { newRun(id); setState('shop'); return; }
+  if (net.role === 'host') {
+    net.hostClass = id;
+    if (net.guestClass) startCoop();
+    else ovContent.innerHTML = `<h2>Volba třídy</h2><p>Vybráno: <b>${CLASSES[id].name}</b>.<br>Čekání na volbu spoluhráče…</p><button data-act="menu" class="ghost">Zrušit</button>`;
+  } else {
+    net.guestClass = id;
+    netSend({ t: 'class', classId: id });
+    ovContent.innerHTML = `<h2>Volba třídy</h2><p>Vybráno: <b>${CLASSES[id].name}</b>.<br>Čekání na hostitele…</p><button data-act="menu" class="ghost">Zrušit</button>`;
+  }
+}
+// Host spustí sdílený běh a rozešle stav (guest ho zrcadlí přes snímky).
+function startCoop() {
+  newRun([net.hostClass, net.guestClass]);
+  setState('shop');
+  if (typeof netPush === 'function') netPush();
+}
 
 function buyWeapon(id) {
   const w = WEAPONS[id];
@@ -241,9 +313,10 @@ function buyBuild(id) {
    ========================================================================== */
 let buildSel = null;   // vybraná položka z palety
 function startBuildPhase() {
-  // vyléčit hráče na začátku přípravy
-  for (const p of players) p.hp = p.hpMax;
+  // vyléčit a oživit hráče na začátku přípravy
+  for (const p of players) { p.hp = p.hpMax; p.downed = false; p.inv = 0; }
   buildSel = null;
+  readyHost = false; readyGuest = false;
   setState('build');
 }
 function paletteItems() {
@@ -261,7 +334,7 @@ function placeAt(tx, ty) {
     // blokující stavba — nesmí být obsazená a nesmí zapečetit jádro
     if (grid.structures[i] !== null) return;
     if (!pathExistsWith(tx, ty)) { banner = { text: 'ZAPEČETILO BY JÁDRO!', t: 60, warn: true }; return; }
-    const hp = Math.round(def.hp * (STRUCTURES[buildSel] ? (run.class.passive.wallHp || 1) : 1));
+    const hp = Math.round(def.hp * (STRUCTURES[buildSel] ? (teamMax('wallHp') || 1) : 1));
     const obj = { def, defId: buildSel, tx, ty, x, y, r: 15, hp, hpMax: hp, wallCool: 0, fireCool: 0, flash: 0 };
     grid.structures[i] = obj;
     (STRUCTURES[buildSel] ? walls : turrets).push(obj);
@@ -599,8 +672,8 @@ function updateCombat(dt) {
   // konec vlny
   enemies = enemies.filter(e => !e.dead);
   if (wave.spawned >= wave.total && enemies.length === 0) return endWave();
-  // fail podmínky
-  if (run.lives <= 0 || players.every(p => p.hp <= 0)) return doGameOver();
+  // konec hry jen když padne brána (padlí hráči se oživí další vlnu)
+  if (run.lives <= 0) return doGameOver();
 }
 
 function endWave() {
@@ -621,6 +694,7 @@ function doGameOver() {
 /* ---------- Hráč ---------- */
 function updatePlayers(dt) {
   for (const p of players) {
+    if (p.downed) continue;   // padlý hráč čeká na oživení (další fáze stavění)
     if (p.inv > 0) p.inv -= dt;
     if (p.mana < p.manaMax) p.mana = Math.min(p.manaMax, p.mana + p.manaRegen * dt);
     // léčivá aura (kněz)
@@ -659,7 +733,12 @@ function damagePlayer(p, amount) {
   flash = 0.5; shake = Math.min(9, shake + 5); sfx.hurt();
   burst(p.x, p.y, '#ff6a6a', 12);
   if (navigator.vibrate && profile.settings.haptics) navigator.vibrate(40);
-  if (p.hp <= 0) p.hp = 0;
+  if (p.hp <= 0) {
+    p.hp = 0; p.downed = true;
+    p.input.mx = 0; p.input.my = 0; p.input.aiming = false;
+    explode(p.x, p.y, p.color, 20);
+    banner = { text: (isCoop() ? (p === players[0] ? 'Hostitel padl!' : 'Spoluhráč padl!') : 'Padl jsi!') + ' Oživení další vlnu.', t: 90, warn: true };
+  }
 }
 
 /* ---------- Kolize s dlaždicemi ---------- */
@@ -856,7 +935,7 @@ function updateWarriors(dt) {
   for (const wr of warriors) {
     if (wr.flash > 0) wr.flash -= dt;
     const def = wr.def;
-    const buff = (players[0] && players[0].passive.warriorBuff) || 1;
+    const buff = teamMax('warriorBuff') || 1;
     const tgt = nearestEnemy(wr.x, wr.y, def.seek);
     if (tgt) {
       const d = dist(wr.x, wr.y, tgt.x, tgt.y);
@@ -885,7 +964,7 @@ function updateTurrets(dt) {
     if (t.flash > 0) t.flash -= dt;
     t.fireCool -= dt;
     const def = t.def;
-    const rate = def.rate * ((players[0] && players[0].passive.emitterRate) || 1);
+    const rate = def.rate * teamRate('emitterRate');
     if (t.fireCool <= 0) {
       const tgt = nearestEnemy(t.x, t.y, def.range);
       if (tgt) {
@@ -1146,11 +1225,26 @@ function drawEffects() {
   }
 }
 function drawPlayers() {
+  const lp = localPlayer();
   for (const p of players) {
-    if (p.hp <= 0) continue;
+    // padlý hráč = poloprůhledný duch (čeká na oživení)
+    if (p.downed) {
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#fff'; ctx.font = '12px system-ui'; ctx.textAlign = 'center';
+      ctx.fillText('✝', p.x, p.y - p.r - 4); ctx.textAlign = 'left';
+      continue;
+    }
     if (p.inv > 0 && Math.floor(p.inv / 5) % 2) continue;
+    // označení vlastního hráče (kroužek)
+    if (isCoop() && p === lp) {
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r + 5, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    }
     // tělo
-    ctx.fillStyle = run.class.color;
+    ctx.fillStyle = p.color;
     ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = '#ffffffaa'; ctx.lineWidth = 2; ctx.stroke();
     // směr / zbraň
@@ -1252,7 +1346,14 @@ function drawBuildBar() {
     if (x + size > W - 140) { x = 8; y += size + gap; }
   }
   if (!items.length) { ctx.fillStyle = '#8a9070'; ctx.font = '12px system-ui'; ctx.fillText('Nemáš co stavět — nakup v obchodu.', 8, ARENA_H + 50); }
-  drawButton(BTN.start, '▶ START VLNY', true);
+  const meReady = net.role === 'guest' ? readyGuest : readyHost;
+  const label = !isCoop() ? '▶ START VLNY' : (meReady ? '✔ PŘIPRAVEN' : '▶ PŘIPRAVEN?');
+  drawButton(BTN.start, label, meReady);
+  if (isCoop()) {
+    const other = net.role === 'guest' ? readyHost : readyGuest;
+    ctx.fillStyle = other ? '#8fd08f' : '#c0a060'; ctx.font = '11px system-ui'; ctx.textAlign = 'right';
+    ctx.fillText(other ? 'spoluhráč připraven ✔' : 'spoluhráč staví…', W - 6, ARENA_H + 46); ctx.textAlign = 'left';
+  }
 }
 let paletteRects = [];
 function drawBanner() {
@@ -1277,22 +1378,40 @@ function hudTap(x, y) {
   if (state === 'combat') {
     if (inRect(x, y, BTN.pause)) { togglePause(); return true; }
     if (inRect(x, y, BTN.autofire)) { profile.settings.autofire = !profile.settings.autofire; saveProfile(profile); return true; }
-    if (inRect(x, y, BTN.weapon) || inRect(x, y, BTN.switch2)) { cycleWeapon(); return true; }
+    if (inRect(x, y, BTN.weapon) || inRect(x, y, BTN.switch2)) { localCycleWeapon(); return true; }
     return true; // klik do HUD pásu neřeší stick
   }
   if (state === 'build') {
-    if (inRect(x, y, BTN.start)) { startWave(); return true; }
+    if (inRect(x, y, BTN.start)) { toggleReady(); return true; }
     for (const r of paletteRects) if (inRect(x, y, r)) { buildSel = (buildSel === r.id ? null : r.id); return true; }
     return true;
   }
   return true;
 }
-function cycleWeapon() {
-  const p = players[0];
+function cycleWeapon(p) {
+  p = p || localPlayer();
+  if (!p) return;
   const list = run.ownedWeapons;
   const i = list.indexOf(p.weaponId);
   p.weaponId = list[(i + 1) % list.length];
   sfx.place();
+}
+function localCycleWeapon() {
+  if (net.role === 'guest') { netSend({ t: 'cmd', act: 'cycle' }); return; }
+  cycleWeapon(players[0]);
+}
+// „START VLNY" = potvrzení připravenosti; v co-op se čeká na oba.
+function toggleReady() {
+  if (!isCoop()) { startWave(); return; }
+  if (net.role === 'guest') {
+    readyGuest = !readyGuest;
+    netSend({ t: 'cmd', act: readyGuest ? 'ready' : 'unready' });
+    banner = { text: readyGuest ? 'Připraven — čekáš na hostitele' : 'Připravenost zrušena', t: 60 };
+    return;
+  }
+  readyHost = !readyHost;
+  if (readyHost && readyGuest) startWave();
+  else banner = { text: readyHost ? 'Připraven — čekáš na spoluhráče' : 'Připravenost zrušena', t: 60 };
 }
 function togglePause() {
   if (state === 'combat') { state = 'paused'; }
@@ -1340,24 +1459,25 @@ function moveStickUpdate(s, pos) {
 }
 function endStick(s) {
   s.active = false; s.id = null; s.dx = 0; s.dy = 0;
-  const p = players[0]; if (!p) return;
-  if (s === moveStick) { p.input.mx = 0; p.input.my = 0; }
-  else { p.input.aiming = false; }
+  if (s === moveStick) { myInput.mx = 0; myInput.my = 0; }
+  else { myInput.aiming = false; }
 }
 function applyStick(s) {
-  const p = players[0]; if (!p) return;
-  if (s === moveStick) { p.input.mx = s.dx / STICK_R; p.input.my = s.dy / STICK_R; }
-  else {
-    if (Math.hypot(s.dx, s.dy) > 8) { p.aimAngle = Math.atan2(s.dy, s.dx); p.input.aiming = true; }
-  }
+  if (s === moveStick) { myInput.mx = s.dx / STICK_R; myInput.my = s.dy / STICK_R; }
+  else if (Math.hypot(s.dx, s.dy) > 8) { myInput.aimAngle = Math.atan2(s.dy, s.dx); myInput.aiming = true; }
 }
 function handleBuildTap(x, y) {
   const { tx, ty } = tileOf(x, y);
   buildHover = { tx, ty };
-  // pokud je na dlaždici hotová stavba a nemám nic vybráno → prodej
+  if (net.role === 'guest') {
+    // guest neřeší lokálně — pošle příkaz hostiteli
+    if (buildSel) netSend({ t: 'cmd', act: 'place', sel: buildSel, tx, ty });
+    else netSend({ t: 'cmd', act: 'sell', tx, ty });
+    return;
+  }
   if (!buildSel && sellAt(tx, ty)) return;
   if (buildSel) placeAt(tx, ty);
-  else { const s = sellAt(tx, ty); if (!s) { /* nic */ } }
+  else sellAt(tx, ty);
 }
 
 /* ---------- Klávesnice + myš (desktop) ---------- */
@@ -1367,12 +1487,13 @@ window.addEventListener('keydown', e => {
   if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault();
   if (k === 'p') togglePause();
   if (k === 'm') { muted = !muted; profile.settings.muted = muted; saveProfile(profile); if (!muted) initAudio(); }
-  if (k === 'q' && run) cycleWeapon();
+  if (k === 'q' && run) localCycleWeapon();
 });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 canvas.addEventListener('mousemove', e => {
   const pos = evtPos(e.clientX, e.clientY);
-  if (state === 'combat' && players[0]) players[0].aimAngle = Math.atan2(pos.y - players[0].y, pos.x - players[0].x);
+  const lp = localPlayer();
+  if (state === 'combat' && lp) { myInput.aimAngle = Math.atan2(pos.y - lp.y, pos.x - lp.x); if (mouseDown) myInput.aiming = true; }
   if (state === 'build') buildHover = tileOf(pos.x, pos.y);
 });
 canvas.addEventListener('mousedown', e => {
@@ -1380,19 +1501,20 @@ canvas.addEventListener('mousedown', e => {
   if (state === 'paused') { togglePause(); return; }
   if (!inArena(pos.y)) { hudTap(pos.x, pos.y); return; }
   if (state === 'build') { handleBuildTap(pos.x, pos.y); return; }
-  if (state === 'combat' && players[0]) players[0].input.aiming = true;
+  if (state === 'combat') myInput.aiming = true;
 });
-canvas.addEventListener('mouseup', () => { if (players[0]) players[0].input.aiming = false; });
+canvas.addEventListener('mouseup', () => { myInput.aiming = false; });
+// Klávesnicový pohyb píše do myInput (host/solo ho aplikuje, guest odesílá).
 function keyboardMove() {
-  const p = players[0]; if (!p || state !== 'combat') return;
+  if (state !== 'combat') return;
   let mx = 0, my = 0;
   if (keys['a'] || keys['arrowleft']) mx -= 1;
   if (keys['d'] || keys['arrowright']) mx += 1;
   if (keys['w'] || keys['arrowup']) my -= 1;
   if (keys['s'] || keys['arrowdown']) my += 1;
-  if (mx || my) { const d = Math.hypot(mx, my); p.input.mx = mx / d; p.input.my = my / d; }
-  else if (!moveStick.active) { p.input.mx = 0; p.input.my = 0; }
-  if (keys[' ']) p.input.aiming = true; else if (!aimStick.active && !mouseDown) { /* ponech */ }
+  if (mx || my) { const d = Math.hypot(mx, my); myInput.mx = mx / d; myInput.my = my / d; }
+  else if (!moveStick.active) { myInput.mx = 0; myInput.my = 0; }
+  if (keys[' ']) myInput.aiming = true;
 }
 let mouseDown = false;
 canvas.addEventListener('mousedown', () => mouseDown = true);
@@ -1405,9 +1527,17 @@ function loop(now) {
   try {
     const dt = Math.min(3, (now - lastTime) / 16.67);
     lastTime = now;
-    if (state === 'combat') keyboardMove();
-    if (state !== 'paused') update(dt);
-    render();
+    if (net.role === 'guest') {
+      // guest nepočítá simulaci — jen posílá vstup a vykresluje poslední přijatý snímek
+      if (state === 'combat') keyboardMove();
+      if (typeof netSendInput === 'function') netSendInput();
+      render();
+    } else {
+      if (state === 'combat') { keyboardMove(); applyLocalInput(); }
+      if (state !== 'paused') update(dt);
+      render();
+      if (net.role === 'host' && net.connected && typeof netSendState === 'function') netSendState();
+    }
     if (state === 'paused') { ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(0, 0, W, H); ctx.fillStyle = '#fff'; ctx.font = 'bold 26px system-ui'; ctx.textAlign = 'center'; ctx.fillText('PAUZA', W / 2, H / 2); ctx.font = '13px system-ui'; ctx.fillStyle = '#b0c090'; ctx.fillText('Klepni pro pokračování', W / 2, H / 2 + 26); ctx.textAlign = 'left'; }
   } catch (err) {
     showFatal((err && err.message) || String(err));
