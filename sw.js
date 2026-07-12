@@ -1,5 +1,5 @@
 /* Service worker – offline cache pro PWA „Rytíři a Nemrtví" */
-const CACHE = 'rytiri-v13';
+const CACHE = 'rytiri-v14';
 const SHELL = [
   './',
   './index.html',

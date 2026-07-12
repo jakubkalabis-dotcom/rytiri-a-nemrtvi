@@ -143,7 +143,7 @@ function netDispatch(m) {
     if (m.t === 'class') { net.guestClass = m.classId; if (net.hostClass) startCoop(); }
     else if (m.t === 'input') {
       const p = players[1];
-      if (p) { p.input.mx = m.mx; p.input.my = m.my; p.input.aiming = m.aiming; p.aimAngle = m.aimAngle; }
+      if (p) { p.input.mx = m.mx; p.input.my = m.my; p.input.aiming = m.aiming; p.aimAngle = m.aimAngle; p.autoaim = !!m.aa; p.autofire = !!m.af; }
     } else if (m.t === 'cmd') netHandleCmd(m);
   } else if (net.role === 'guest') {
     if (m.t === 'state') applyState(m.s);
@@ -157,8 +157,9 @@ function netHandleCmd(m) {
     case 'upstat': buyUpgrade(m.id, players[1]); break;
     case 'upweapon': buyWeaponUp(m.id, players[1]); break;
     case 'buylife': buyLife(players[1]); break;
-    case 'tobuild': startBuildPhase(); break;
     case 'toshop': setState('shop'); break;
+    case 'sready': readyGuest = true; if (readyHost) startBuildPhase(); break;
+    case 'sunready': readyGuest = false; break;
     case 'cycle': cycleWeapon(players[1]); break;
     case 'ability': useAbility(players[1]); break;
     case 'ready': readyGuest = true; if (readyHost) { startWave(); } break;
@@ -176,7 +177,7 @@ function netHandleCmd(m) {
 function serializeState() {
   const snap = {
     st: state, map: currentMap,
-    run: run && { lives: run.lives, wave: run.wave, score: run.score || 0, ownedWeapons: run.ownedWeapons, ammo: run.ammo, owned: run.owned, upgrades: run.upgrades, wUpgrades: run.wUpgrades, combo: run.combo || 0, comboT: run.comboT || 0 },
+    run: run && { lives: run.lives, wave: run.wave, score: run.score || 0, ownedWeapons: run.ownedWeapons, ammo: run.ammo, owned: run.owned, upgrades: run.upgrades, wUpgrades: run.wUpgrades, wood: run.wood || 0, steel: run.steel || 0, combo: run.combo || 0, comboT: run.comboT || 0 },
     wave: wave && { boss: wave.boss, spawned: wave.spawned, total: wave.total, reward: wave.reward },
     banner: banner && { text: banner.text, t: banner.t, warn: banner.warn },
     readyHost, readyGuest, freezeTimer,
@@ -198,7 +199,7 @@ function serializeState() {
 }
 
 // Podpis ekonomiky pro rozhodnutí, kdy překreslit obchod na guestovi.
-function shopSig(r) { return r ? meGems() + '|' + r.lives + '|' + (r.ownedWeapons ? r.ownedWeapons.length : 0) + '|' + JSON.stringify(r.owned) + '|' + JSON.stringify(r.ammo) + '|' + JSON.stringify(r.upgrades) + '|' + JSON.stringify(r.wUpgrades) : ''; }
+function shopSig(r) { return r ? meGems() + '|' + r.lives + '|' + (r.ownedWeapons ? r.ownedWeapons.length : 0) + '|' + JSON.stringify(r.owned) + '|' + JSON.stringify(r.ammo) + '|' + JSON.stringify(r.upgrades) + '|' + JSON.stringify(r.wUpgrades) + '|' + (r.wood || 0) + '|' + (r.steel || 0) + '|' + readyHost + readyGuest : ''; }
 let lastShopSig = '';
 
 function applyState(s) {
@@ -262,5 +263,5 @@ function netSendInput() {
   if (net.role !== 'guest' || !net.connected) return;
   inputFrame++;
   if (inputFrame % 2 !== 0) return;   // ~30/s
-  netSend({ t: 'input', mx: myInput.mx, my: myInput.my, aiming: myInput.aiming, aimAngle: myInput.aimAngle });
+  netSend({ t: 'input', mx: myInput.mx, my: myInput.my, aiming: myInput.aiming, aimAngle: myInput.aimAngle, aa: profile.settings.autoaim, af: profile.settings.autofire });
 }

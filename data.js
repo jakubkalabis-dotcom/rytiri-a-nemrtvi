@@ -20,21 +20,21 @@ let currentMap = 0;
 /* ---------- 15 map / biomů (poslední = peklo s finálním bossem) ---------- */
 // pal: [tráva1, tráva2, skála, akcent, mlha/overlay], fog = průhledná barva navrch
 const MAPS = [
-  { name: 'Zelená louka',    cols: 16, rows: 24, seed: 101, pal: ['#3f7a2e', '#4a8a33', '#8a9098', '#6fc23e'], fog: null },
-  { name: 'Temný les',       cols: 16, rows: 26, seed: 202, pal: ['#2c5424', '#33632a', '#6a7060', '#4aa036'], fog: 'rgba(10,30,10,0.14)' },
-  { name: 'Starý hřbitov',   cols: 17, rows: 26, seed: 303, pal: ['#48504a', '#525c54', '#aab0ba', '#7a9a6a'], fog: 'rgba(40,45,60,0.16)' },
-  { name: 'Hnilobná bažina', cols: 17, rows: 27, seed: 404, pal: ['#3a5228', '#42602c', '#6a6a4a', '#7aa838'], fog: 'rgba(60,80,20,0.16)' },
-  { name: 'Zříceniny',       cols: 18, rows: 27, seed: 505, pal: ['#5e584c', '#6a6254', '#b0a890', '#8a7a56'], fog: null },
-  { name: 'Zamrzlá pláň',    cols: 18, rows: 28, seed: 606, pal: ['#c2d8e6', '#d2e4ee', '#9aa8b6', '#eaf4ff'], fog: 'rgba(210,235,255,0.12)' },
-  { name: 'Spálená poušť',   cols: 19, rows: 28, seed: 707, pal: ['#d6b566', '#e2c274', '#b09258', '#f0d488'], fog: 'rgba(255,220,140,0.1)' },
-  { name: 'Temná jeskyně',   cols: 19, rows: 29, seed: 808, pal: ['#3a4048', '#434b54', '#5a6470', '#6a5a80'], fog: 'rgba(0,0,15,0.28)' },
-  { name: 'Prokleté pole',   cols: 20, rows: 29, seed: 909, pal: ['#4a4038', '#544840', '#7a6e64', '#9a5a9a'], fog: 'rgba(60,25,60,0.18)' },
-  { name: 'Sopečná stráň',   cols: 20, rows: 30, seed: 111, pal: ['#5a382a', '#663e2c', '#7a5648', '#ff6a30'], fog: 'rgba(90,30,10,0.16)' },
-  { name: 'Kostěná pustina', cols: 21, rows: 30, seed: 121, pal: ['#5a564a', '#645e50', '#e0d8bc', '#b0a684'], fog: 'rgba(70,60,45,0.14)' },
-  { name: 'Stínový hvozd',   cols: 21, rows: 31, seed: 131, pal: ['#2a2e3c', '#333850', '#5a4a70', '#7a3adf'], fog: 'rgba(30,15,60,0.26)' },
-  { name: 'Krvavé bažiny',   cols: 22, rows: 31, seed: 141, pal: ['#4a2626', '#582c2c', '#7a4a4a', '#c02828'], fog: 'rgba(90,15,15,0.2)' },
-  { name: 'Brána podsvětí',  cols: 22, rows: 32, seed: 151, pal: ['#3c2436', '#482940', '#6a4864', '#b0308a'], fog: 'rgba(80,15,60,0.24)' },
-  { name: 'Peklo',           cols: 23, rows: 34, seed: 161, pal: ['#6a1e14', '#7c261a', '#a04030', '#ff7a20'], fog: 'rgba(120,25,5,0.22)', hell: true },
+  { name: 'Zelená louka',    cols: 22, rows: 30, seed: 101, pal: ['#3f7a2e', '#4a8a33', '#8a9098', '#6fc23e'], fog: null },
+  { name: 'Temný les',       cols: 22, rows: 31, seed: 202, pal: ['#2c5424', '#33632a', '#6a7060', '#4aa036'], fog: 'rgba(10,30,10,0.14)' },
+  { name: 'Starý hřbitov',   cols: 23, rows: 32, seed: 303, pal: ['#48504a', '#525c54', '#aab0ba', '#7a9a6a'], fog: 'rgba(40,45,60,0.16)' },
+  { name: 'Hnilobná bažina', cols: 23, rows: 33, seed: 404, pal: ['#3a5228', '#42602c', '#6a6a4a', '#7aa838'], fog: 'rgba(60,80,20,0.16)' },
+  { name: 'Zříceniny',       cols: 24, rows: 34, seed: 505, pal: ['#5e584c', '#6a6254', '#b0a890', '#8a7a56'], fog: null },
+  { name: 'Zamrzlá pláň',    cols: 24, rows: 35, seed: 606, pal: ['#c2d8e6', '#d2e4ee', '#9aa8b6', '#eaf4ff'], fog: 'rgba(210,235,255,0.12)' },
+  { name: 'Spálená poušť',   cols: 25, rows: 36, seed: 707, pal: ['#d6b566', '#e2c274', '#b09258', '#f0d488'], fog: 'rgba(255,220,140,0.1)' },
+  { name: 'Temná jeskyně',   cols: 25, rows: 37, seed: 808, pal: ['#3a4048', '#434b54', '#5a6470', '#6a5a80'], fog: 'rgba(0,0,15,0.28)' },
+  { name: 'Prokleté pole',   cols: 26, rows: 38, seed: 909, pal: ['#4a4038', '#544840', '#7a6e64', '#9a5a9a'], fog: 'rgba(60,25,60,0.18)' },
+  { name: 'Sopečná stráň',   cols: 26, rows: 39, seed: 111, pal: ['#5a382a', '#663e2c', '#7a5648', '#ff6a30'], fog: 'rgba(90,30,10,0.16)' },
+  { name: 'Kostěná pustina', cols: 27, rows: 40, seed: 121, pal: ['#5a564a', '#645e50', '#e0d8bc', '#b0a684'], fog: 'rgba(70,60,45,0.14)' },
+  { name: 'Stínový hvozd',   cols: 27, rows: 41, seed: 131, pal: ['#2a2e3c', '#333850', '#5a4a70', '#7a3adf'], fog: 'rgba(30,15,60,0.26)' },
+  { name: 'Krvavé bažiny',   cols: 28, rows: 42, seed: 141, pal: ['#4a2626', '#582c2c', '#7a4a4a', '#c02828'], fog: 'rgba(90,15,15,0.2)' },
+  { name: 'Brána podsvětí',  cols: 28, rows: 43, seed: 151, pal: ['#3c2436', '#482940', '#6a4864', '#b0308a'], fog: 'rgba(80,15,60,0.24)' },
+  { name: 'Peklo',           cols: 30, rows: 46, seed: 161, pal: ['#6a1e14', '#7c261a', '#a04030', '#ff7a20'], fog: 'rgba(120,25,5,0.22)', hell: true },
 ];
 const NUM_MAPS = MAPS.length;
 const WAVES_PER_MAP = 5;                 // každá mapa = 5 vln, 5. vlna = boss = konec mapy
@@ -53,12 +53,12 @@ function applyMapDims(i) {
   const side = corridorSide();
   const x0 = side * TILE, x1 = (COLS - side) * TILE;
   SPAWNS = [
-    { x: x0 + (x1 - x0) * 0.12, y: -20 }, { x: x0 + (x1 - x0) * 0.34, y: -20 }, { x: x0 + (x1 - x0) * 0.5, y: -20 },
-    { x: x0 + (x1 - x0) * 0.66, y: -20 }, { x: x0 + (x1 - x0) * 0.88, y: -20 },
+    { x: x0 + (x1 - x0) * 0.22, y: -20 }, { x: x0 + (x1 - x0) * 0.4, y: -20 }, { x: x0 + (x1 - x0) * 0.5, y: -20 },
+    { x: x0 + (x1 - x0) * 0.6, y: -20 }, { x: x0 + (x1 - x0) * 0.78, y: -20 },
   ];
 }
-// šířka boční barikády (v dlaždicích) na každé straně
-function corridorSide() { return Math.max(2, Math.floor(COLS * 0.25)); }
+// šířka boční barikády (v dlaždicích) na každé straně — tenká, jen naznačuje okraj
+function corridorSide() { return Math.max(1, Math.floor(COLS * 0.11)); }
 function clampIdx(i) { return Math.max(0, Math.min(NUM_MAPS - 1, i)); }
 applyMapDims(0);
 
@@ -108,9 +108,9 @@ const WEAPONS = {
   musketa:       { name:'Ruční mušketa', arch:'HITSCAN',    dmg:36, range:380, rate:70, knockback:5, ammo:'prach', ammoPerShot:1, tier:3, unlock:7, cost:240, cat:'ranged', color:'#6a6a6a' },
   bomba:         { name:'Bomba',         arch:'THROWN_AOE', dmg:42, range:220, rate:80, projSpeed:6.5, aoeRadius:66, ammo:'bomba', ammoPerShot:1, tier:2, unlock:4, cost:160, cat:'ranged', color:'#d05050' },
   recky_ohen:    { name:'Řecký oheň',    arch:'THROWN_AOE', dmg:14, range:210, rate:90, projSpeed:6,   aoeRadius:74, dot:{dps:16,dur:180}, ammo:'bomba', ammoPerShot:1, tier:3, unlock:6, cost:225, cat:'ranged', color:'#ff6a2a' },
-  blesk_hul:     { name:'Blesková hůl',  arch:'HITSCAN',    dmg:18, range:320, rate:40, chain:3, ammo:'mana', ammoPerShot:8,  tier:3, unlock:5, cost:230, cat:'ranged', color:'#9ad0ff' },
-  ohniva_hul:    { name:'Ohnivá hůl',    arch:'THROWN_AOE', dmg:22, range:240, rate:56, projSpeed:7, aoeRadius:70, dot:{dps:10,dur:120}, ammo:'mana', ammoPerShot:12, tier:3, unlock:6, cost:260, cat:'ranged', color:'#ff7b3a' },
-  mraziva_hul:   { name:'Mrazivá hůl',   arch:'PROJECTILE', dmg:12, range:300, rate:30, projSpeed:10, pierce:1, slow:{mul:0.45,dur:120}, ammo:'mana', ammoPerShot:6, tier:3, unlock:5, cost:240, cat:'ranged', color:'#8fe0ff' },
+  blesk_hul:     { name:'Blesková hůl',  arch:'HITSCAN',    dmg:18, range:320, rate:40, chain:3, ammo:'mana', ammoPerShot:24, tier:3, unlock:5, cost:230, cat:'ranged', color:'#9ad0ff' },
+  ohniva_hul:    { name:'Ohnivá hůl',    arch:'THROWN_AOE', dmg:22, range:240, rate:56, projSpeed:7, aoeRadius:70, dot:{dps:10,dur:120}, ammo:'mana', ammoPerShot:34, tier:3, unlock:6, cost:260, cat:'ranged', color:'#ff7b3a' },
+  mraziva_hul:   { name:'Mrazivá hůl',   arch:'PROJECTILE', dmg:12, range:300, rate:30, projSpeed:10, pierce:1, slow:{mul:0.45,dur:120}, ammo:'mana', ammoPerShot:18, tier:3, unlock:5, cost:240, cat:'ranged', color:'#8fe0ff' },
 };
 
 // Vizuální tvar každé zbraně (kreslí se blokově, viz drawWeaponBlocky).
@@ -163,9 +163,12 @@ const DROPS = {
   power:  { name:'Síla',        icon:'★', color:'#ff7be5', dur:480, kind:'buff' },
   freeze: { name:'Mráz',        icon:'❄', color:'#8fe0ff', kind:'freeze' },
   heal:   { name:'Léčení',      icon:'✚', color:'#5cff8a', kind:'heal' },
-  truhla: { name:'Truhla',      icon:'💰', color:'#ffd35c', kind:'gems', gems:40 },
+  truhla: { name:'Truhla',      icon:'💰', color:'#ffd35c', kind:'gems', gems:20 },
+  wood:   { name:'Dřevo',       icon:'🪵', color:'#8a5c30', kind:'mat', mat:'wood',  amt:2 },
+  steel:  { name:'Ocel',        icon:'⛓', color:'#b8bcc4', kind:'mat', mat:'steel', amt:1 },
 };
-const DROP_WEIGHTS = { rapid: 5, power: 5, freeze: 3, heal: 4, truhla: 3 };
+// materiály na vylepšování zbraní padají často (aby se dalo craftit)
+const DROP_WEIGHTS = { rapid: 3, power: 3, freeze: 2, heal: 3, truhla: 2, wood: 7, steel: 4 };
 // Škálování dle čísla vlny (kampaň má 75 vln přes 15 map → mírnější + stropy):
 function enemyScale(wave) {
   return {
@@ -311,13 +314,16 @@ const UPGRADES = {
 };
 const UPGRADE_MAX = 10;
 function upgradeCost(def, lvl) { return Math.round(def.base * Math.pow(1.55, lvl)); }
-// vylepšení konkrétní zbraně (+% poškození, -% prodleva na úroveň)
+
+// Vylepšení zbraní se platí MATERIÁLY (dřevo + ocel, drop z nepřátel), ne gemy.
 const WEAPON_UP_MAX = 6;
-function weaponUpCost(w, lvl) { return Math.round((w.cost * 0.5 + 40) * Math.pow(1.6, lvl)); }
+function weaponUpMat(lvl) { return { wood: 2 + lvl * 2, steel: 1 + lvl }; }   // cena na další úroveň
+const MATERIALS = { wood: { name: 'Dřevo', icon: '🪵', color: '#8a5c30' }, steel: { name: 'Ocel', icon: '⛓', color: '#b8bcc4' } };
+const MAX_WARRIORS = 8;   // limit spojenců na mapě
 
 /* ---------- Odměny a progrese ---------- */
-const GEMS_PER_KILL_MUL = 1;          // × bounty nepřítele
-function waveReward(wave) { return 60 + wave * 18; }   // bonus gemů za dokončení vlny
+const GEMS_PER_KILL_MUL = 0.4;        // × bounty nepřítele (razantně sníženo)
+function waveReward(wave) { return 25 + wave * 6; }   // bonus gemů za dokončení vlny
 function xpForKill(e) { return Math.round((e.score || 10) / 5); }
 function xpToLevel(level) { return 100 + (level - 1) * 60; } // XP na další úroveň profilu
 
