@@ -29,8 +29,6 @@
     display: block;
     touch-action: none;
     box-shadow: 0 0 40px rgba(0,0,0,.6);
-    image-rendering: pixelated;            /* ostré pixely při zvětšení (Minecraft styl) */
-    image-rendering: crisp-edges;
   }
   /* ---- Overlay (menu / výběr třídy / obchod / konec) ---- */
   #overlay {
@@ -84,6 +82,8 @@
   .statname { font-weight: 700; font-size: 16px; margin-bottom: 6px; }
   .statrow { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); color: #b6c098; }
   .statrow b { color: #e8ecd8; }
+  .ico { vertical-align: middle; margin-right: 5px; }
+  .scn { display: flex; align-items: center; }
   .up-card { align-items: flex-start; gap: 3px; }
   .upbar { font-size: 10px; color: #8fb070; letter-spacing: 1px; }
   .lbl { color: #8fb070; font-size: 12px; align-self: flex-start; margin-top: 4px; }

@@ -194,6 +194,7 @@ function shopHeader() {
 function renderShop() {
   ovContent.innerHTML = shopHeader() + (shopTab === 'char' ? renderCharTab() : renderShopTab())
     + `<button data-act="tobuild">Dál → stavění ▶</button>`;
+  paintShopIcons();
 }
 function renderShopTab() {
   const lvl = profile.playerLevel;
@@ -202,21 +203,21 @@ function renderShopTab() {
     const locked = lvl < w.unlock;
     const cost = costOf(w.cost, w.cat === 'melee' ? 'melee' : 'ranged');
     const cant = locked ? `🔒 úroveň ${w.unlock}` : (run.gems < cost ? 'málo 💎' : null);
-    return shopCard(id, `${w.cat === 'melee' ? '🗡' : '🏹'} ${w.name}`, cost, null, `dmg ${w.dmg} · ${w.cat === 'melee' ? 'zblízka' : 'dálka'}`, 'buyweapon', cant);
+    return shopCard(id, `${ico('weapon', id)} ${w.name}`, cost, null, `dmg ${w.dmg} · ${w.cat === 'melee' ? 'zblízka' : 'dálka'}`, 'buyweapon', cant);
   }).join('');
   // Vlastněné zbraně + vylepšení
   const ownedCards = run.ownedWeapons.map(id => {
     const w = WEAPONS[id]; const wl = run.wUpgrades[id] || 0;
     const maxed = wl >= WEAPON_UP_MAX; const cost = weaponUpCost(w, wl);
     const extra = `Lv.${wl} · dmg ${Math.round(w.dmg * (1 + 0.1 * wl))}`;
-    return shopCard(id, `${w.cat === 'melee' ? '🗡' : '🏹'} ${w.name}`, cost, null, extra, 'upweapon', maxed ? 'MAX' : (run.gems < cost ? 'málo 💎' : '⬆ ' + cost));
+    return shopCard(id, `${ico('weapon', id)} ${w.name}`, cost, null, extra, 'upweapon', maxed ? 'MAX' : (run.gems < cost ? 'málo 💎' : '⬆ ' + cost));
   }).join('');
   const ammoCards = Object.keys(AMMO).map(id => { const a = AMMO[id], cost = costOf(a.cost, 'ammo'); return shopCard(id, `🎯 ${a.name}`, cost, 'ammo', `+${a.bundle} · máš ${run.ammo[id] || 0}`, 'buyammo', run.gems < cost ? 'málo 💎' : null); }).join('');
   const lifeCost = 40;
   const lifeCard = shopCard('life', '❤ Život brány (+5)', lifeCost, 'ammo', `jádro: ${run.lives}`, 'buylife', run.gems < lifeCost ? 'málo 💎' : null);
-  const trapCards = Object.keys(TRAPS).map(id => { const t = TRAPS[id], cost = costOf(t.cost, 'trap'); return shopCard(id, `🪤 ${t.name}`, cost, 'trap', `máš ${run.owned[id] || 0}`, 'buybuild', run.gems < cost ? 'málo 💎' : null); }).join('');
-  const wallCards = Object.keys(STRUCTURES).map(id => { const s = STRUCTURES[id], cost = costOf(s.cost, 'wall'); return shopCard(id, `🧱 ${s.name}`, cost, 'wall', `HP ${Math.round(s.hp * (teamMax('wallHp') || 1))} · máš ${run.owned[id] || 0}`, 'buybuild', run.gems < cost ? 'málo 💎' : null); }).join('');
-  const warCards = Object.keys(WARRIORS).map(id => { const w = WARRIORS[id], cost = costOf(w.cost, 'warrior'); return shopCard(id, `🛡 ${w.name}`, cost, 'warrior', `HP ${w.hp} · máš ${run.owned[id] || 0}`, 'buybuild', run.gems < cost ? 'málo 💎' : null); }).join('');
+  const trapCards = Object.keys(TRAPS).map(id => { const t = TRAPS[id], cost = costOf(t.cost, 'trap'); return shopCard(id, `${ico('trap', id)} ${t.name}`, cost, 'trap', `máš ${run.owned[id] || 0}`, 'buybuild', run.gems < cost ? 'málo 💎' : null); }).join('');
+  const wallCards = Object.keys(STRUCTURES).map(id => { const s = STRUCTURES[id], cost = costOf(s.cost, 'wall'); return shopCard(id, `${ico('wall', id)} ${s.name}`, cost, 'wall', `HP ${Math.round(s.hp * (teamMax('wallHp') || 1))} · máš ${run.owned[id] || 0}`, 'buybuild', run.gems < cost ? 'málo 💎' : null); }).join('');
+  const warCards = Object.keys(WARRIORS).map(id => { const w = WARRIORS[id], cost = costOf(w.cost, 'warrior'); return shopCard(id, `${ico('warrior', id)} ${w.name}`, cost, 'warrior', `HP ${w.hp} · máš ${run.owned[id] || 0}`, 'buybuild', run.gems < cost ? 'málo 💎' : null); }).join('');
   return `<div class="shop">
       ${ownedCards ? `<h3>Vylepšit zbraně</h3><div class="grid">${ownedCards}</div>` : ''}
       <h3>Nové zbraně</h3><div class="grid">${weaponCards || '<div class="empty">Vše koupeno</div>'}</div>
@@ -1558,7 +1559,7 @@ function drawEnemies() {
     const walkPh = animClock * (e.arch === 'RUNNER' ? 0.4 : 0.25) + e.x * 0.1;
     const bob = Math.sin(walkPh) * (e.arch === 'RUNNER' ? 1.6 : 1.0);
     drawShadow(e.x, e.y, e.r);
-    if (e.elite) { const g = ELITES[e.elite].glow; ctx.fillStyle = g; ctx.globalAlpha = 0.25 + Math.sin(animClock * 0.2) * 0.1; ctx.fillRect(e.x - e.r - 3, e.y + bob - e.r - 3, e.r * 2 + 6, e.r * 2 + 6); ctx.globalAlpha = 1; }
+    if (e.elite) { const g = ELITES[e.elite].glow; ctx.fillStyle = g; ctx.globalAlpha = 0.25 + Math.sin(animClock * 0.2) * 0.1; ctx.beginPath(); ctx.arc(e.x, e.y + bob, e.r + 5, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; }
     // směr „obličeje" = k jádru (zombie se šourají dolů)
     const cx = (CORE.tx + CORE.w / 2) * TILE, cy = (CORE.ty + CORE.h / 2) * TILE;
     const fa = Math.atan2(cy - e.y, cx - e.x);
@@ -1572,7 +1573,7 @@ function drawEnemies() {
     else if (e.typeId === 'ohar') drawHound(e, col, dark, walkPh);
     else drawZombie(e, col, dark, lite, walkPh);
     ctx.restore(); ctx.globalAlpha = 1;
-    if (freezeTimer > 0) { ctx.strokeStyle = '#bfefff'; ctx.lineWidth = 1.5; ctx.strokeRect(e.x - e.r, e.y + bob - e.r, e.r * 2, e.r * 2); }
+    if (freezeTimer > 0) { ctx.strokeStyle = '#bfefff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(e.x, e.y + bob, e.r + 2, 0, Math.PI * 2); ctx.stroke(); }
     // HP proužek
     if (e.hp < e.hpMax && e.arch !== 'BOSS') {
       ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(e.x - e.r, e.y - e.r - 8, e.r * 2, 3);
@@ -1580,74 +1581,73 @@ function drawEnemies() {
     }
   }
 }
-// --- Blokové (Minecraft) mob figury (kreslí se v rotovaném rámci, +x = obličej) ---
+// --- Oblé mob figury (rotovaný rámec, +x = obličej) ---
 function drawZombie(e, col, dark, lite, ph) {
   const R = e.r, lp = Math.sin(ph);
-  ctx.fillStyle = dark;
-  ctx.fillRect(-R * 0.7 + lp * R * 0.3, -R * 0.5, R * 0.45, R * 0.4);
-  ctx.fillRect(-R * 0.7 - lp * R * 0.3, R * 0.1, R * 0.45, R * 0.4);
-  ctx.fillStyle = dark; ctx.fillRect(-R * 0.5, -R * 0.6, R, R * 1.2);
-  ctx.fillStyle = col; ctx.fillRect(-R * 0.42, -R * 0.52, R * 0.84, R * 1.04);
-  // ruce natažené dopředu (klasická zombie)
-  const reach = R * 0.7 + Math.sin(ph) * R * 0.06;
-  ctx.fillStyle = col; ctx.fillRect(R * 0.3, -R * 0.6, reach, R * 0.3); ctx.fillRect(R * 0.3, R * 0.3, reach, R * 0.3);
-  ctx.fillStyle = lite; ctx.fillRect(R * 0.3 + reach, -R * 0.6, R * 0.18, R * 0.3); ctx.fillRect(R * 0.3 + reach, R * 0.3, R * 0.18, R * 0.3);
+  // nohy (capsule)
+  rrect(-R * 0.62 + lp * R * 0.24, -R * 0.46, R * 0.4, R * 0.34, R * 0.15, dark);
+  rrect(-R * 0.62 - lp * R * 0.24, R * 0.12, R * 0.4, R * 0.34, R * 0.15, dark);
+  // trup
+  rrect(-R * 0.46, -R * 0.55, R * 0.92, R * 1.1, R * 0.34, dark);
+  rrect(-R * 0.38, -R * 0.47, R * 0.76, R * 0.94, R * 0.28, col);
+  // ruce natažené dopředu
+  const reach = R * 0.72 + Math.sin(ph) * R * 0.06;
+  rrect(R * 0.28, -R * 0.5, reach, R * 0.26, R * 0.12, col); rrect(R * 0.28, R * 0.24, reach, R * 0.26, R * 0.12, col);
+  ctx.fillStyle = lite; ctx.beginPath(); ctx.arc(R * 0.28 + reach, -R * 0.37, R * 0.15, 0, Math.PI * 2); ctx.arc(R * 0.28 + reach, R * 0.37, R * 0.15, 0, Math.PI * 2); ctx.fill();
   // hlava
-  ctx.fillStyle = dark; ctx.fillRect(-R * 0.45, -R * 0.45, R * 0.9, R * 0.9);
-  ctx.fillStyle = lite; ctx.fillRect(-R * 0.38, -R * 0.38, R * 0.76, R * 0.76);
-  ctx.fillStyle = e.arch === 'RANGED' ? '#8affb0' : '#241a10';
-  ctx.fillRect(R * 0.16, -R * 0.3, R * 0.18, R * 0.22); ctx.fillRect(R * 0.16, R * 0.08, R * 0.18, R * 0.22);
-  if (e.arch === 'RANGED') { ctx.fillStyle = '#2a4a1a'; ctx.fillRect(R * 0.3, -R * 0.08, R * 0.14, R * 0.16); }
-  if (e.def && e.def.armored) { ctx.fillStyle = 'rgba(200,210,220,0.35)'; ctx.fillRect(-R * 0.42, -R * 0.52, R * 0.84, R * 0.5); ctx.strokeStyle = '#c0c8d0'; ctx.lineWidth = 2; ctx.strokeRect(-R * 0.5, -R * 0.6, R, R * 1.2); }
+  ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0, 0, R * 0.5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = lite; ctx.beginPath(); ctx.arc(-R * 0.1, -R * 0.1, R * 0.34, 0, Math.PI * 2); ctx.fill();
+  if (e.def && e.def.armored) { ctx.strokeStyle = '#d0d8e0'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, R * 0.5, -0.9, 0.9); ctx.stroke(); }
+  ctx.fillStyle = e.arch === 'RANGED' ? '#9dffc0' : '#20140a';
+  ctx.beginPath(); ctx.arc(R * 0.24, -R * 0.15, R * 0.1, 0, Math.PI * 2); ctx.arc(R * 0.24, R * 0.15, R * 0.1, 0, Math.PI * 2); ctx.fill();
+  if (e.arch === 'RANGED') { ctx.fillStyle = '#2a4a1a'; ctx.beginPath(); ctx.arc(R * 0.38, 0, R * 0.08, 0, Math.PI * 2); ctx.fill(); }
 }
 function drawCreeper(e, col, dark, ph) {
   const R = e.r, lp = Math.sin(ph * 1.4);
-  const green = e.flash > 0 ? '#ffffff' : '#54a83f', gd = e.flash > 0 ? '#ffffff' : '#3c7c2e';
-  ctx.fillStyle = gd;
-  ctx.fillRect(-R * 0.6 + lp * R * 0.2, -R * 0.55, R * 0.35, R * 0.35);
-  ctx.fillRect(-R * 0.6 - lp * R * 0.2, R * 0.2, R * 0.35, R * 0.35);
-  ctx.fillRect(R * 0.3 - lp * R * 0.2, -R * 0.55, R * 0.35, R * 0.35);
-  ctx.fillRect(R * 0.3 + lp * R * 0.2, R * 0.2, R * 0.35, R * 0.35);
-  ctx.fillStyle = gd; ctx.fillRect(-R * 0.5, -R * 0.55, R, R * 1.1);
-  ctx.fillStyle = green; ctx.fillRect(-R * 0.42, -R * 0.47, R * 0.84, R * 0.94);
-  ctx.fillStyle = '#0f1a0c';
-  ctx.fillRect(R * 0.03, -R * 0.34, R * 0.2, R * 0.24); ctx.fillRect(R * 0.03, R * 0.1, R * 0.2, R * 0.24);
-  ctx.fillRect(R * 0.28, -R * 0.14, R * 0.14, R * 0.28);
+  const green = e.flash > 0 ? '#ffffff' : '#5fbf47', gd = e.flash > 0 ? '#ffffff' : '#3f8a30';
+  rrect(-R * 0.58 + lp * R * 0.18, -R * 0.55, R * 0.34, R * 0.34, R * 0.12, gd);
+  rrect(-R * 0.58 - lp * R * 0.18, R * 0.22, R * 0.34, R * 0.34, R * 0.12, gd);
+  rrect(R * 0.28 - lp * R * 0.18, -R * 0.55, R * 0.34, R * 0.34, R * 0.12, gd);
+  rrect(R * 0.28 + lp * R * 0.18, R * 0.22, R * 0.34, R * 0.34, R * 0.12, gd);
+  rrect(-R * 0.5, -R * 0.55, R, R * 1.1, R * 0.26, gd);
+  rrect(-R * 0.42, -R * 0.47, R * 0.84, R * 0.94, R * 0.2, green);
+  ctx.fillStyle = '#12210d';
+  rrect(R * 0.03, -R * 0.34, R * 0.2, R * 0.24, R * 0.05); rrect(R * 0.03, R * 0.1, R * 0.2, R * 0.24, R * 0.05);
+  rrect(R * 0.26, -R * 0.14, R * 0.15, R * 0.28, R * 0.05);
   const pz = 0.35 + Math.sin(animClock * 0.5) * 0.35;
-  ctx.strokeStyle = `rgba(255,110,40,${pz})`; ctx.lineWidth = 2; ctx.strokeRect(-R * 0.5, -R * 0.55, R, R * 1.1);
+  ctx.strokeStyle = `rgba(255,120,40,${pz})`; ctx.lineWidth = 2; roundRect(-R * 0.5, -R * 0.55, R, R * 1.1, R * 0.26); ctx.stroke();
 }
 function drawHound(e, col, dark, ph) {
   const R = e.r, lp = Math.sin(ph);
-  const body = e.flash > 0 ? '#ffffff' : '#8a4a3a', bd = e.flash > 0 ? '#ffffff' : '#5e3226';
-  ctx.fillStyle = bd;
-  ctx.fillRect(-R * 0.3 + lp * R * 0.4, -R * 0.55, R * 0.24, R * 0.4);
-  ctx.fillRect(-R * 0.3 - lp * R * 0.4, R * 0.15, R * 0.24, R * 0.4);
-  ctx.fillRect(R * 0.35 - lp * R * 0.4, -R * 0.55, R * 0.24, R * 0.4);
-  ctx.fillRect(R * 0.35 + lp * R * 0.4, R * 0.15, R * 0.24, R * 0.4);
-  ctx.fillRect(-R * 0.95, -R * 0.12, R * 0.36, R * 0.24);
-  ctx.fillStyle = bd; ctx.fillRect(-R * 0.6, -R * 0.4, R * 1.2, R * 0.8);
-  ctx.fillStyle = body; ctx.fillRect(-R * 0.55, -R * 0.33, R * 1.05, R * 0.66);
-  ctx.fillStyle = body; ctx.fillRect(R * 0.45, -R * 0.4, R * 0.5, R * 0.8);
-  ctx.fillStyle = bd; ctx.fillRect(R * 0.5, -R * 0.58, R * 0.16, R * 0.2); ctx.fillRect(R * 0.5, R * 0.38, R * 0.16, R * 0.2);
-  ctx.fillStyle = bd; ctx.fillRect(R * 0.9, -R * 0.18, R * 0.3, R * 0.36);
-  ctx.fillStyle = '#ff3a2a'; ctx.fillRect(R * 0.58, -R * 0.24, R * 0.12, R * 0.14); ctx.fillRect(R * 0.58, R * 0.1, R * 0.12, R * 0.14);
+  const body = e.flash > 0 ? '#ffffff' : '#a05442', bd = e.flash > 0 ? '#ffffff' : '#6e3c2c';
+  rrect(-R * 0.3 + lp * R * 0.4, -R * 0.55, R * 0.24, R * 0.4, R * 0.1, bd);
+  rrect(-R * 0.3 - lp * R * 0.4, R * 0.15, R * 0.24, R * 0.4, R * 0.1, bd);
+  rrect(R * 0.35 - lp * R * 0.4, -R * 0.55, R * 0.24, R * 0.4, R * 0.1, bd);
+  rrect(R * 0.35 + lp * R * 0.4, R * 0.15, R * 0.24, R * 0.4, R * 0.1, bd);
+  rrect(-R * 0.98, -R * 0.12, R * 0.4, R * 0.24, R * 0.1, bd);           // ocas
+  rrect(-R * 0.62, -R * 0.4, R * 1.2, R * 0.8, R * 0.3, bd);            // tělo
+  rrect(-R * 0.56, -R * 0.32, R * 1.05, R * 0.64, R * 0.26, body);
+  ctx.fillStyle = body; ctx.beginPath(); ctx.arc(R * 0.62, 0, R * 0.42, 0, Math.PI * 2); ctx.fill();  // hlava
+  rrect(R * 0.46, -R * 0.62, R * 0.16, R * 0.22, R * 0.05, bd); rrect(R * 0.46, R * 0.4, R * 0.16, R * 0.22, R * 0.05, bd); // uši
+  rrect(R * 0.86, -R * 0.16, R * 0.34, R * 0.32, R * 0.1, bd);          // čenich
+  ctx.fillStyle = '#ff3a2a'; ctx.beginPath(); ctx.arc(R * 0.6, -R * 0.16, R * 0.08, 0, Math.PI * 2); ctx.arc(R * 0.6, R * 0.16, R * 0.08, 0, Math.PI * 2); ctx.fill();
 }
 function drawBossMob(e, col, dark, lite, ph) {
   const R = e.r, lp = Math.sin(ph * 0.8), fade = e.spawnT > 0 ? 1 - e.spawnT / 30 : 1;
-  ctx.globalAlpha = (0.16 + Math.sin(animClock * 0.1) * 0.06) * fade;
-  ctx.fillStyle = col; ctx.fillRect(-R * 1.15, -R * 1.15, R * 2.3, R * 2.3); ctx.globalAlpha = fade;
-  ctx.fillStyle = dark; ctx.fillRect(-R * 0.6 + lp * R * 0.18, -R * 0.5, R * 0.5, R * 0.5); ctx.fillRect(-R * 0.6 - lp * R * 0.18, R * 0.0, R * 0.5, R * 0.5);
-  ctx.fillStyle = dark; ctx.fillRect(-R * 0.72, -R * 0.72, R * 1.44, R * 1.5);
-  ctx.fillStyle = col; ctx.fillRect(-R * 0.6, -R * 0.6, R * 1.2, R * 1.3);
+  ctx.globalAlpha = (0.18 + Math.sin(animClock * 0.1) * 0.07) * fade;
+  ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0, 0, R * 1.2, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = fade;
+  rrect(-R * 0.6 + lp * R * 0.18, -R * 0.5, R * 0.5, R * 0.5, R * 0.18, dark); rrect(-R * 0.6 - lp * R * 0.18, R * 0.0, R * 0.5, R * 0.5, R * 0.18, dark);
+  rrect(-R * 0.72, -R * 0.72, R * 1.44, R * 1.5, R * 0.4, dark);
+  rrect(-R * 0.6, -R * 0.6, R * 1.2, R * 1.3, R * 0.34, col);
   const reach = R * 0.8 + Math.sin(animClock * 0.15) * R * 0.1;
-  ctx.fillStyle = col; ctx.fillRect(R * 0.3, -R * 0.9, reach, R * 0.42); ctx.fillRect(R * 0.3, R * 0.48, reach, R * 0.42);
-  ctx.fillStyle = dark; ctx.fillRect(R * 0.3 + reach, -R * 0.9, R * 0.26, R * 0.42); ctx.fillRect(R * 0.3 + reach, R * 0.48, R * 0.26, R * 0.42);
-  ctx.fillStyle = dark; ctx.fillRect(-R * 0.5, -R * 0.55, R, R);
-  ctx.fillStyle = lite; ctx.fillRect(-R * 0.42, -R * 0.47, R * 0.84, R * 0.84);
+  rrect(R * 0.3, -R * 0.9, reach, R * 0.42, R * 0.16, col); rrect(R * 0.3, R * 0.48, reach, R * 0.42, R * 0.16, col);
+  ctx.fillStyle = dark; ctx.beginPath(); ctx.arc(R * 0.3 + reach, -R * 0.69, R * 0.2, 0, Math.PI * 2); ctx.arc(R * 0.3 + reach, R * 0.69, R * 0.2, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = lite; ctx.beginPath(); ctx.arc(0, 0, R * 0.5, 0, Math.PI * 2); ctx.fill();
   // rohy
-  ctx.fillStyle = dark; ctx.fillRect(-R * 0.52, -R * 0.66, R * 0.22, R * 0.22); ctx.fillRect(R * 0.3, -R * 0.66, R * 0.22, R * 0.22);
-  ctx.fillStyle = e.def && e.def.final ? '#ffdd33' : '#ff2a1a';
-  ctx.fillRect(R * 0.14, -R * 0.3, R * 0.2, R * 0.22); ctx.fillRect(R * 0.14, R * 0.08, R * 0.2, R * 0.22);
+  ctx.fillStyle = dark; ctx.beginPath(); ctx.moveTo(-R * 0.5, -R * 0.4); ctx.lineTo(-R * 0.66, -R * 0.66); ctx.lineTo(-R * 0.34, -R * 0.5); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-R * 0.5, R * 0.4); ctx.lineTo(-R * 0.66, R * 0.66); ctx.lineTo(-R * 0.34, R * 0.5); ctx.fill();
+  ctx.fillStyle = e.def && e.def.final ? '#ffdd33' : '#ff2a1a'; ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 8;
+  ctx.beginPath(); ctx.arc(R * 0.22, -R * 0.18, R * 0.11, 0, Math.PI * 2); ctx.arc(R * 0.22, R * 0.18, R * 0.11, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
 }
 // ztmavení/zesvětlení hex barvy
 function shade(hex, amt) {
@@ -1690,13 +1690,16 @@ function drawBullets() {
 function drawEffects() {
   for (const e of effects) {
     if (e.type === 'swing') {
+      // mávnutý klín od postavy (jasně melee, ne projektil)
       const prog = 1 - e.t / 8;
-      ctx.globalAlpha = clamp(e.t / 8, 0, 0.85);
-      ctx.strokeStyle = e.color || '#fff'; ctx.lineWidth = 5; ctx.lineCap = 'round';
-      const a0 = e.aim - e.spread, a1 = e.aim + e.spread;
-      ctx.beginPath(); ctx.arc(e.x, e.y, e.range * (0.6 + prog * 0.3), a0, a1); ctx.stroke();
-      ctx.globalAlpha = clamp(e.t / 8, 0, 0.35); ctx.lineWidth = 10;
-      ctx.beginPath(); ctx.arc(e.x, e.y, e.range * (0.6 + prog * 0.3), a0, a1); ctx.stroke();
+      const a = e.aim - e.spread + prog * 2 * e.spread;   // ostří přejíždí obloukem
+      const rad = e.range * 0.9;
+      ctx.globalAlpha = clamp(e.t / 8, 0, 0.5);
+      ctx.fillStyle = e.color || '#dfe4ec';
+      ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.arc(e.x, e.y, rad, e.aim - e.spread, a); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = clamp(e.t / 8, 0, 0.95);
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(e.x, e.y, rad, a - 0.18, a + 0.05); ctx.stroke();
       ctx.lineWidth = 1; ctx.lineCap = 'butt'; ctx.globalAlpha = 1;
     } else if (e.type === 'beam') {
       ctx.globalAlpha = clamp(e.t / 6, 0, 0.4); ctx.strokeStyle = e.color || '#9ad0ff'; ctx.lineWidth = 8;
@@ -1748,129 +1751,182 @@ function drawPlayers() {
     });
   }
 }
-// Hranatá „Minecraft" postava shora, natočená ve směru míření (ang).
-// Rozvržení: trup uprostřed, hlava nahoře (menší), 2 ruce po stranách, 2 nohy vzadu.
+// Oblá postava shora, natočená ve směru míření (ang): trup, hlava, 2 ruce, 2 nohy.
 function drawBlockyHumanoid(x, y, r, ang, walk, atk, pal) {
-  const R = r * 1.15; const lp = Math.sin(walk || 0); const sw = atk ? Math.sin(atk * Math.PI) : 0;
-  ctx.save(); ctx.translate(Math.round(x), Math.round(y)); ctx.rotate(ang);
-  const outline = 'rgba(0,0,0,0.35)';
-  // NOHY (za tělem = směr -x), střídavě dopředu/dozadu
-  for (const s of [-1, 1]) {
-    const ly = s * R * 0.28, lx = -R * 0.55 + lp * s * R * 0.32;
-    ctx.fillStyle = outline; ctx.fillRect(lx - 1, ly - R * 0.2 - 1, R * 0.42 + 2, R * 0.4 + 2);
-    ctx.fillStyle = pal.pants; ctx.fillRect(lx, ly - R * 0.2, R * 0.42, R * 0.4);
-    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(lx, ly - R * 0.2, R * 0.14, R * 0.4);  // bota
-  }
+  const R = r * 1.12; const lp = Math.sin(walk || 0); const sw = atk ? Math.sin(atk * Math.PI) : 0;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
+  // NOHY (capsule) — střídavě dopředu/dozadu
+  for (const s of [-1, 1]) { const ly = s * R * 0.26, lx = -R * 0.5 + lp * s * R * 0.3; rrect(lx, ly - R * 0.18, R * 0.44, R * 0.36, R * 0.16, pal.pants); }
   // TRUP
-  ctx.fillStyle = outline; ctx.fillRect(-R * 0.4 - 1, -R * 0.5 - 1, R * 0.8 + 2, R + 2);
-  ctx.fillStyle = pal.dark; ctx.fillRect(-R * 0.4, -R * 0.5, R * 0.8, R);
-  ctx.fillStyle = pal.shirt; ctx.fillRect(-R * 0.32, -R * 0.42, R * 0.64, R * 0.84);
-  // RUCE po stranách (pravá = spodní, s útokem se napřáhne dopředu)
+  rrect(-R * 0.42, -R * 0.5, R * 0.84, R * 1.0, R * 0.3, pal.dark);
+  rrect(-R * 0.34, -R * 0.42, R * 0.68, R * 0.84, R * 0.26, pal.shirt);
+  // RUCE (pravá se s útokem napřáhne dopředu)
   const armF = sw * R * 0.55;
-  // levá ruka (horní strana)
-  ctx.fillStyle = outline; ctx.fillRect(-R * 0.15 - 1, -R * 0.86 - 1, R * 0.34 + 2, R * 0.34 + 2);
-  ctx.fillStyle = pal.shirt; ctx.fillRect(-R * 0.15, -R * 0.86, R * 0.34, R * 0.34);
-  ctx.fillStyle = pal.skin; ctx.fillRect(R * 0.05, -R * 0.86, R * 0.14, R * 0.34);
-  // pravá ruka (dolní strana)
-  ctx.fillStyle = outline; ctx.fillRect(-R * 0.15 + armF - 1, R * 0.52 - 1, R * 0.34 + 2, R * 0.34 + 2);
-  ctx.fillStyle = pal.shirt; ctx.fillRect(-R * 0.15 + armF, R * 0.52, R * 0.34, R * 0.34);
-  ctx.fillStyle = pal.skin; ctx.fillRect(R * 0.05 + armF, R * 0.52, R * 0.14, R * 0.34);
-  // HLAVA (nahoře, menší, s helmou a obličejem)
-  ctx.fillStyle = outline; ctx.fillRect(-R * 0.44 - 1, -R * 0.44 - 1, R * 0.88 + 2, R * 0.88 + 2);
-  ctx.fillStyle = pal.skin; ctx.fillRect(-R * 0.42, -R * 0.42, R * 0.84, R * 0.84);
-  ctx.fillStyle = pal.hat; ctx.fillRect(-R * 0.44, -R * 0.44, R * 0.88, R * 0.4);           // helma horní pruh
-  ctx.fillStyle = pal.hat; ctx.fillRect(-R * 0.44, -R * 0.44, R * 0.18, R * 0.88);          // helma boční
-  ctx.fillStyle = '#1c1f26';
-  ctx.fillRect(R * 0.22, -R * 0.28, R * 0.16, R * 0.2); ctx.fillRect(R * 0.22, R * 0.08, R * 0.16, R * 0.2);
-  // ZBRAŇ v pravé ruce (dopředu = +x)
+  rrect(-R * 0.12, -R * 0.86, R * 0.3, R * 0.34, R * 0.14, pal.shirt); rrect(R * 0.06, -R * 0.86, R * 0.13, R * 0.34, R * 0.1, pal.skin);
+  rrect(-R * 0.12 + armF, R * 0.52, R * 0.3, R * 0.34, R * 0.14, pal.shirt); rrect(R * 0.06 + armF, R * 0.52, R * 0.13, R * 0.34, R * 0.1, pal.skin);
+  // HLAVA (kruh) + helma (zadní polokoule) + obličej
+  ctx.fillStyle = pal.skin; ctx.beginPath(); ctx.arc(0, 0, R * 0.46, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = pal.hat; ctx.beginPath(); ctx.arc(0, 0, R * 0.46, Math.PI * 0.5, Math.PI * 1.5); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.beginPath(); ctx.arc(-R * 0.12, -R * 0.14, R * 0.12, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#1c1f26'; ctx.beginPath(); ctx.arc(R * 0.25, -R * 0.16, R * 0.08, 0, Math.PI * 2); ctx.arc(R * 0.25, R * 0.16, R * 0.08, 0, Math.PI * 2); ctx.fill();
   drawWeaponBlocky(pal.weaponShape, R, atk, armF, pal.weaponColor);
   ctx.restore();
 }
-// Blokový design zbraně podle tvaru (kreslí se od ruky dopředu = +x).
-function drawWeaponBlocky(shape, R, atk, armF, wcol) {
+// Design zbraně podle tvaru (od ruky dopředu = +x). g = cílové plátno (default hlavní ctx).
+function drawWeaponBlocky(shape, R, atk, armF, wcol, g) {
+  g = g || ctx;
   const thrust = sinP(atk) * R * 0.55;
-  ctx.save(); ctx.translate(R * 0.35 + armF, R * 0.68);
+  g.save(); g.translate(R * 0.35 + armF, R * 0.68);
   const wood = '#6a4a2a', dark = '#3a2a1a', steel = '#c8ccd4', steelL = '#eef0f4', gold = '#c8a45c';
-  const F = (x) => x + thrust;   // melee zbraně se napřahují dopředu
+  const F = (x) => x + thrust;
+  const tri = (x1, y1, x2, y2, x3, y3) => { g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.lineTo(x3, y3); g.fill(); };
   if (shape === 'sword' || shape === 'greatsword') {
     const len = shape === 'greatsword' ? 1.5 : 1.05, wid = shape === 'greatsword' ? 0.26 : 0.18;
-    ctx.fillStyle = wood; ctx.fillRect(F(-0.15) * R, -R * 0.09, R * 0.28, R * 0.18);
-    ctx.fillStyle = gold; ctx.fillRect(F(0.08) * R, -R * 0.24, R * 0.1, R * 0.48);            // záštita
-    ctx.fillStyle = steel; ctx.fillRect(F(0.16) * R, -R * wid / 2, R * len, R * wid);
-    ctx.fillStyle = steelL; ctx.fillRect(F(0.16) * R, -R * wid / 2, R * len, R * wid * 0.4);
-    ctx.fillStyle = steel; ctx.beginPath(); ctx.moveTo(F(0.16 + len) * R, -R * wid / 2); ctx.lineTo(F(0.16 + len + 0.18) * R, 0); ctx.lineTo(F(0.16 + len) * R, R * wid / 2); ctx.fill();
+    g.fillStyle = wood; g.fillRect(F(-0.15) * R, -R * 0.09, R * 0.28, R * 0.18);
+    g.fillStyle = gold; g.fillRect(F(0.08) * R, -R * 0.24, R * 0.1, R * 0.48);
+    g.fillStyle = steel; g.fillRect(F(0.16) * R, -R * wid / 2, R * len, R * wid);
+    g.fillStyle = steelL; g.fillRect(F(0.16) * R, -R * wid / 2, R * len, R * wid * 0.4);
+    g.fillStyle = steel; tri(F(0.16 + len) * R, -R * wid / 2, F(0.16 + len + 0.18) * R, 0, F(0.16 + len) * R, R * wid / 2);
   } else if (shape === 'dagger') {
-    ctx.fillStyle = wood; ctx.fillRect(F(-0.12) * R, -R * 0.08, R * 0.22, R * 0.16);
-    ctx.fillStyle = gold; ctx.fillRect(F(0.08) * R, -R * 0.16, R * 0.08, R * 0.32);
-    ctx.fillStyle = steelL; ctx.fillRect(F(0.14) * R, -R * 0.07, R * 0.5, R * 0.14);
-    ctx.fillStyle = steel; ctx.beginPath(); ctx.moveTo(F(0.64) * R, -R * 0.07); ctx.lineTo(F(0.82) * R, 0); ctx.lineTo(F(0.64) * R, R * 0.07); ctx.fill();
+    g.fillStyle = wood; g.fillRect(F(-0.12) * R, -R * 0.08, R * 0.22, R * 0.16);
+    g.fillStyle = gold; g.fillRect(F(0.08) * R, -R * 0.16, R * 0.08, R * 0.32);
+    g.fillStyle = steelL; g.fillRect(F(0.14) * R, -R * 0.07, R * 0.5, R * 0.14);
+    g.fillStyle = steel; tri(F(0.64) * R, -R * 0.07, F(0.82) * R, 0, F(0.64) * R, R * 0.07);
   } else if (shape === 'axe') {
-    ctx.fillStyle = wood; ctx.fillRect(F(-0.1) * R, -R * 0.08, R * 1.0, R * 0.16);            // topůrko
-    ctx.fillStyle = steel; ctx.fillRect(F(0.62) * R, -R * 0.42, R * 0.34, R * 0.84);          // hlava
-    ctx.fillStyle = steelL; ctx.fillRect(F(0.62) * R, -R * 0.42, R * 0.12, R * 0.84);
-    ctx.fillStyle = dark; ctx.fillRect(F(0.9) * R, -R * 0.2, R * 0.08, R * 0.4);
+    g.fillStyle = wood; g.fillRect(F(-0.1) * R, -R * 0.08, R * 1.0, R * 0.16);
+    g.fillStyle = steel; g.fillRect(F(0.62) * R, -R * 0.42, R * 0.34, R * 0.84);
+    g.fillStyle = steelL; g.fillRect(F(0.62) * R, -R * 0.42, R * 0.12, R * 0.84);
+    g.fillStyle = dark; g.fillRect(F(0.9) * R, -R * 0.2, R * 0.08, R * 0.4);
   } else if (shape === 'spear') {
-    ctx.fillStyle = wood; ctx.fillRect(F(-0.2) * R, -R * 0.06, R * 1.5, R * 0.12);            // dlouhé ratiště
-    ctx.fillStyle = steel; ctx.beginPath(); ctx.moveTo(F(1.3) * R, -R * 0.16); ctx.lineTo(F(1.7) * R, 0); ctx.lineTo(F(1.3) * R, R * 0.16); ctx.fill();
-    ctx.fillStyle = steelL; ctx.fillRect(F(1.3) * R, -R * 0.05, R * 0.3, R * 0.05);
+    g.fillStyle = wood; g.fillRect(F(-0.2) * R, -R * 0.06, R * 1.5, R * 0.12);
+    g.fillStyle = steel; tri(F(1.3) * R, -R * 0.16, F(1.7) * R, 0, F(1.3) * R, R * 0.16);
+    g.fillStyle = steelL; g.fillRect(F(1.3) * R, -R * 0.05, R * 0.3, R * 0.05);
   } else if (shape === 'halberd') {
-    ctx.fillStyle = wood; ctx.fillRect(F(-0.2) * R, -R * 0.06, R * 1.5, R * 0.12);
-    ctx.fillStyle = steel; ctx.beginPath(); ctx.moveTo(F(1.3) * R, -R * 0.14); ctx.lineTo(F(1.66) * R, 0); ctx.lineTo(F(1.3) * R, R * 0.14); ctx.fill();
-    ctx.fillStyle = steel; ctx.fillRect(F(1.0) * R, -R * 0.5, R * 0.32, R * 0.42);            // sekera na boku
-    ctx.fillStyle = steelL; ctx.fillRect(F(1.0) * R, -R * 0.5, R * 0.1, R * 0.42);
+    g.fillStyle = wood; g.fillRect(F(-0.2) * R, -R * 0.06, R * 1.5, R * 0.12);
+    g.fillStyle = steel; tri(F(1.3) * R, -R * 0.14, F(1.66) * R, 0, F(1.3) * R, R * 0.14);
+    g.fillStyle = steel; g.fillRect(F(1.0) * R, -R * 0.5, R * 0.32, R * 0.42);
+    g.fillStyle = steelL; g.fillRect(F(1.0) * R, -R * 0.5, R * 0.1, R * 0.42);
   } else if (shape === 'scythe') {
-    ctx.fillStyle = wood; ctx.fillRect(F(-0.15) * R, -R * 0.07, R * 1.25, R * 0.14);          // násada
-    ctx.fillStyle = steel; ctx.fillRect(F(1.0) * R, -R * 0.7, R * 0.14, R * 0.7);             // svislá čepel
-    ctx.fillStyle = steelL; ctx.fillRect(F(0.55) * R, -R * 0.7, R * 0.6, R * 0.14);           // vodorovné ostří
+    g.fillStyle = wood; g.fillRect(F(-0.15) * R, -R * 0.07, R * 1.25, R * 0.14);
+    g.fillStyle = steel; g.fillRect(F(1.0) * R, -R * 0.7, R * 0.14, R * 0.7);
+    g.fillStyle = steelL; g.fillRect(F(0.55) * R, -R * 0.7, R * 0.6, R * 0.14);
   } else if (shape === 'mace') {
-    ctx.fillStyle = wood; ctx.fillRect(F(-0.1) * R, -R * 0.08, R * 0.85, R * 0.16);
-    ctx.fillStyle = steel; ctx.fillRect(F(0.66) * R, -R * 0.3, R * 0.44, R * 0.6);            // hlavice
-    ctx.fillStyle = dark; ctx.fillRect(F(0.6) * R, -R * 0.12, R * 0.12, R * 0.24);            // hroty
-    ctx.fillRect(F(1.06) * R, -R * 0.12, R * 0.12, R * 0.24); ctx.fillRect(F(0.82) * R, -R * 0.42, R * 0.14, R * 0.12); ctx.fillRect(F(0.82) * R, R * 0.3, R * 0.14, R * 0.12);
+    g.fillStyle = wood; g.fillRect(F(-0.1) * R, -R * 0.08, R * 0.85, R * 0.16);
+    g.fillStyle = steel; g.fillRect(F(0.66) * R, -R * 0.3, R * 0.44, R * 0.6);
+    g.fillStyle = dark; g.fillRect(F(0.6) * R, -R * 0.12, R * 0.12, R * 0.24);
+    g.fillRect(F(1.06) * R, -R * 0.12, R * 0.12, R * 0.24); g.fillRect(F(0.82) * R, -R * 0.42, R * 0.14, R * 0.12); g.fillRect(F(0.82) * R, R * 0.3, R * 0.14, R * 0.12);
   } else if (shape === 'hammer') {
-    ctx.fillStyle = wood; ctx.fillRect(F(-0.1) * R, -R * 0.08, R * 0.9, R * 0.16);
-    ctx.fillStyle = steel; ctx.fillRect(F(0.68) * R, -R * 0.44, R * 0.5, R * 0.88);           // velká hlava
-    ctx.fillStyle = steelL; ctx.fillRect(F(0.68) * R, -R * 0.44, R * 0.16, R * 0.88);
+    g.fillStyle = wood; g.fillRect(F(-0.1) * R, -R * 0.08, R * 0.9, R * 0.16);
+    g.fillStyle = steel; g.fillRect(F(0.68) * R, -R * 0.44, R * 0.5, R * 0.88);
+    g.fillStyle = steelL; g.fillRect(F(0.68) * R, -R * 0.44, R * 0.16, R * 0.88);
   } else if (shape === 'flail') {
-    ctx.fillStyle = wood; ctx.fillRect(F(-0.1) * R, -R * 0.08, R * 0.6, R * 0.16);
-    ctx.fillStyle = '#8a8f96'; for (let k = 0; k < 3; k++) ctx.fillRect(F(0.5 + k * 0.12) * R, -R * 0.05, R * 0.08, R * 0.1);  // řetěz
-    ctx.fillStyle = steel; ctx.fillRect(F(0.86) * R, -R * 0.26, R * 0.42, R * 0.52);          // ostnatá koule
-    ctx.fillStyle = dark; ctx.fillRect(F(0.8) * R, -R * 0.08, R * 0.1, R * 0.16); ctx.fillRect(F(1.24) * R, -R * 0.08, R * 0.1, R * 0.16);
+    g.fillStyle = wood; g.fillRect(F(-0.1) * R, -R * 0.08, R * 0.6, R * 0.16);
+    g.fillStyle = '#8a8f96'; for (let k = 0; k < 3; k++) g.fillRect(F(0.5 + k * 0.12) * R, -R * 0.05, R * 0.08, R * 0.1);
+    g.fillStyle = steel; g.fillRect(F(0.86) * R, -R * 0.26, R * 0.42, R * 0.52);
+    g.fillStyle = dark; g.fillRect(F(0.8) * R, -R * 0.08, R * 0.1, R * 0.16); g.fillRect(F(1.24) * R, -R * 0.08, R * 0.1, R * 0.16);
   } else if (shape === 'club') {
-    ctx.fillStyle = dark; ctx.fillRect(F(-0.15) * R, -R * 0.12, R * 0.5, R * 0.24);
-    ctx.fillStyle = wood; ctx.fillRect(F(0.35) * R, -R * 0.26, R * 0.7, R * 0.52);            // kyj se rozšiřuje
-    ctx.fillStyle = '#5a3a20'; ctx.fillRect(F(0.6) * R, -R * 0.2, R * 0.1, R * 0.1); ctx.fillRect(F(0.85) * R, R * 0.05, R * 0.1, R * 0.1);
+    g.fillStyle = dark; g.fillRect(F(-0.15) * R, -R * 0.12, R * 0.5, R * 0.24);
+    g.fillStyle = wood; g.fillRect(F(0.35) * R, -R * 0.26, R * 0.7, R * 0.52);
+    g.fillStyle = '#5a3a20'; g.fillRect(F(0.6) * R, -R * 0.2, R * 0.1, R * 0.1); g.fillRect(F(0.85) * R, R * 0.05, R * 0.1, R * 0.1);
   } else if (shape === 'bow') {
-    ctx.fillStyle = wood; ctx.fillRect(R * 0.25, -R * 0.6, R * 0.14, R * 1.2);                // oblouk (svislý)
-    ctx.fillStyle = wood; ctx.fillRect(R * 0.15, -R * 0.6, R * 0.14, R * 0.2); ctx.fillRect(R * 0.15, R * 0.4, R * 0.14, R * 0.2);
-    ctx.strokeStyle = 'rgba(235,235,235,0.85)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(R * 0.2, -R * 0.55); ctx.lineTo(R * 0.32, 0); ctx.lineTo(R * 0.2, R * 0.55); ctx.stroke();
-    ctx.fillStyle = steel; ctx.fillRect(R * 0.32, -R * 0.03, R * 0.5, R * 0.06);              // šíp
+    g.fillStyle = wood; g.fillRect(R * 0.25, -R * 0.6, R * 0.14, R * 1.2);
+    g.fillStyle = wood; g.fillRect(R * 0.15, -R * 0.6, R * 0.14, R * 0.2); g.fillRect(R * 0.15, R * 0.4, R * 0.14, R * 0.2);
+    g.strokeStyle = 'rgba(235,235,235,0.85)'; g.lineWidth = 1; g.beginPath(); g.moveTo(R * 0.2, -R * 0.55); g.lineTo(R * 0.32, 0); g.lineTo(R * 0.2, R * 0.55); g.stroke();
+    g.fillStyle = steel; g.fillRect(R * 0.32, -R * 0.03, R * 0.5, R * 0.06);
   } else if (shape === 'crossbow') {
-    ctx.fillStyle = wood; ctx.fillRect(-R * 0.05, -R * 0.1, R * 1.0, R * 0.2);                // lůžko
-    ctx.fillStyle = dark; ctx.fillRect(R * 0.5, -R * 0.5, R * 0.12, R * 1.0);                 // příčné rameno
-    ctx.fillStyle = steel; ctx.fillRect(R * 0.6, -R * 0.03, R * 0.5, R * 0.06);               // šipka
+    g.fillStyle = wood; g.fillRect(-R * 0.05, -R * 0.1, R * 1.0, R * 0.2);
+    g.fillStyle = dark; g.fillRect(R * 0.5, -R * 0.5, R * 0.12, R * 1.0);
+    g.fillStyle = steel; g.fillRect(R * 0.6, -R * 0.03, R * 0.5, R * 0.06);
   } else if (shape === 'sling') {
-    ctx.fillStyle = dark; ctx.fillRect(R * 0.1, -R * 0.4, R * 0.05, R * 0.35); ctx.fillRect(R * 0.1, R * 0.05, R * 0.05, R * 0.35);
-    ctx.fillStyle = wood; ctx.fillRect(R * 0.05, -R * 0.12, R * 0.22, R * 0.24);              // kapsa
-    ctx.fillStyle = '#9a9a9a'; ctx.fillRect(R * 0.1, -R * 0.06, R * 0.12, R * 0.12);          // kámen
+    g.fillStyle = dark; g.fillRect(R * 0.1, -R * 0.4, R * 0.05, R * 0.35); g.fillRect(R * 0.1, R * 0.05, R * 0.05, R * 0.35);
+    g.fillStyle = wood; g.fillRect(R * 0.05, -R * 0.12, R * 0.22, R * 0.24);
+    g.fillStyle = '#9a9a9a'; g.fillRect(R * 0.1, -R * 0.06, R * 0.12, R * 0.12);
   } else if (shape === 'musket') {
-    ctx.fillStyle = wood; ctx.fillRect(-R * 0.25, -R * 0.14, R * 0.6, R * 0.28);              // pažba
-    ctx.fillStyle = '#4a4f55'; ctx.fillRect(R * 0.3, -R * 0.09, R * 1.05, R * 0.18);          // hlaveň
-    ctx.fillStyle = dark; ctx.fillRect(R * 1.3, -R * 0.11, R * 0.1, R * 0.22);                // ústí
+    g.fillStyle = wood; g.fillRect(-R * 0.25, -R * 0.14, R * 0.6, R * 0.28);
+    g.fillStyle = '#4a4f55'; g.fillRect(R * 0.3, -R * 0.09, R * 1.05, R * 0.18);
+    g.fillStyle = dark; g.fillRect(R * 1.3, -R * 0.11, R * 0.1, R * 0.22);
   } else if (shape === 'bomb') {
-    ctx.fillStyle = '#20242c'; ctx.fillRect(R * 0.3, -R * 0.3, R * 0.6, R * 0.6);             // koule
-    ctx.fillStyle = '#4a4f55'; ctx.fillRect(R * 0.36, -R * 0.24, R * 0.2, R * 0.2);           // lesk
-    ctx.fillStyle = '#6a4a2a'; ctx.fillRect(R * 0.55, -R * 0.44, R * 0.08, R * 0.18);         // knot
-    ctx.fillStyle = '#ffd35c'; ctx.fillRect(R * 0.54, -R * 0.5, R * 0.1, R * 0.08);           // jiskra
+    g.fillStyle = '#20242c'; g.beginPath(); g.arc(R * 0.6, 0, R * 0.32, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#4a4f55'; g.beginPath(); g.arc(R * 0.5, -R * 0.12, R * 0.1, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#6a4a2a'; g.fillRect(R * 0.55, -R * 0.44, R * 0.08, R * 0.18);
+    g.fillStyle = '#ffd35c'; g.fillRect(R * 0.54, -R * 0.52, R * 0.1, R * 0.1);
   } else { // staff
-    ctx.fillStyle = wood; ctx.fillRect(-R * 0.1, -R * 0.08, R * 0.95, R * 0.16);
-    const c = wcol || '#9ad0ff'; ctx.fillStyle = c; ctx.globalAlpha = 0.5; ctx.fillRect(R * 0.62, -R * 0.34, R * 0.5, R * 0.68); ctx.globalAlpha = 1;
-    ctx.fillStyle = c; ctx.fillRect(R * 0.72, -R * 0.22, R * 0.32, R * 0.44);
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(R * 0.8, -R * 0.12, R * 0.14, R * 0.14);
+    g.fillStyle = wood; g.fillRect(-R * 0.1, -R * 0.08, R * 0.95, R * 0.16);
+    const c = wcol || '#9ad0ff'; g.fillStyle = c; g.globalAlpha = 0.4; g.beginPath(); g.arc(R * 0.88, 0, R * 0.3, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
+    g.beginPath(); g.arc(R * 0.88, 0, R * 0.2, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#ffffff'; g.beginPath(); g.arc(R * 0.82, -R * 0.06, R * 0.08, 0, Math.PI * 2); g.fill();
   }
-  ctx.restore();
+  g.restore();
 }
 function sinP(a) { return Math.sin((a || 0) * Math.PI); }
+
+/* ---------- Ikony podle skutečných designů (obchod + stavění) ---------- */
+function paintIcon(g, k, id, S) {
+  g.save();
+  if (k === 'weapon') {
+    const shape = WEAPON_SHAPE[id] || 'sword', R = S * 0.24;
+    g.translate(S * 0.14, S * 0.5 - R * 0.68);
+    drawWeaponBlocky(shape, R, 0, 0, (WEAPONS[id] || {}).color, g);
+  } else if (k === 'wall') drawWallIcon(g, id, S);
+  else if (k === 'trap') drawTrapIcon(g, id, S);
+  else if (k === 'warrior') drawWarriorIcon(g, (WARRIORS[id] || {}).color, (WARRIORS[id] || {}).arch === 'RANGED', S);
+  g.restore();
+}
+function drawWallIcon(g, id, S) {
+  const p = S * 0.12, w = S - p * 2;
+  if (id === 'drevena_barikada') {
+    g.fillStyle = '#7a4f28'; g.fillRect(p, p, w, w);
+    g.fillStyle = '#8a5c30'; for (let i = 0; i < 3; i++) g.fillRect(p + 1, p + 2 + i * (w / 3), w - 2, w / 3 - 2);
+    g.fillStyle = '#2a1c0e'; [[p + 3, p + 3], [p + w - 5, p + 3], [p + 3, p + w - 5], [p + w - 5, p + w - 5]].forEach(n => g.fillRect(n[0], n[1], 2, 2));
+  } else if (id === 'kamenna_zed') {
+    g.fillStyle = '#4a4f56'; g.fillRect(p, p, w, w);
+    g.fillStyle = '#8a9098'; g.fillRect(p + 1, p + 1, w * 0.5, w * 0.4); g.fillRect(p + w * 0.55, p + 2, w * 0.42, w * 0.34);
+    g.fillStyle = '#767c84'; g.fillRect(p + 1, p + w * 0.46, w * 0.4, w * 0.32); g.fillRect(p + w * 0.46, p + w * 0.44, w * 0.5, w * 0.4);
+  } else if (id === 'zelezna_brana') {
+    g.fillStyle = '#2f343a'; g.fillRect(p, p, w, w);
+    g.fillStyle = '#6a7078'; for (let b = 0; b < 3; b++) g.fillRect(p + 2 + b * (w / 3), p + 1, w * 0.16, w);
+    g.fillStyle = '#c8ccd4'; [[p + 3, p + 4], [p + w - 5, p + 4], [p + 3, p + w - 6], [p + w - 5, p + w - 6]].forEach(n => g.fillRect(n[0], n[1], 2, 2));
+  } else { // bodcova_zed
+    g.fillStyle = '#6a4530'; g.fillRect(p + 3, p + 3, w - 6, w - 6);
+    g.fillStyle = '#c0c6ce'; for (let k = 0; k < 3; k++) { const t = p + 5 + k * (w - 10) / 2; g.beginPath(); g.moveTo(t, p); g.lineTo(t + 3, p + 5); g.lineTo(t + 6, p); g.fill(); g.beginPath(); g.moveTo(t, p + w); g.lineTo(t + 3, p + w - 5); g.lineTo(t + 6, p + w); g.fill(); }
+  }
+}
+function drawTrapIcon(g, id, S) {
+  const c = S / 2;
+  if (id === 'bodce') {
+    g.fillStyle = '#2a2018'; g.fillRect(S * 0.15, S * 0.15, S * 0.7, S * 0.7);
+    g.fillStyle = '#c8ccd4'; for (let k = 0; k < 3; k++) { const x = S * 0.24 + k * S * 0.22; g.beginPath(); g.moveTo(x, S * 0.75); g.lineTo(x + S * 0.08, S * 0.22); g.lineTo(x + S * 0.16, S * 0.75); g.fill(); }
+  } else if (id === 'smola') {
+    g.fillStyle = '#1a160c'; g.beginPath(); g.ellipse(c, c, S * 0.36, S * 0.3, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = 'rgba(180,150,90,0.5)'; g.beginPath(); g.arc(c - 4, c - 3, 3, 0, Math.PI * 2); g.arc(c + 4, c + 2, 2, 0, Math.PI * 2); g.fill();
+  } else if (id === 'ohniste') {
+    g.fillStyle = '#5a5f66'; for (let k = 0; k < 6; k++) { const a = k / 6 * Math.PI * 2; g.fillRect(c + Math.cos(a) * S * 0.3 - 2, c + Math.sin(a) * S * 0.3 - 2, 4, 4); }
+    g.fillStyle = '#ff5a10'; g.beginPath(); g.moveTo(c - 7, c + 6); g.lineTo(c, c - 10); g.lineTo(c + 7, c + 6); g.fill();
+    g.fillStyle = '#ffc030'; g.beginPath(); g.moveTo(c - 4, c + 6); g.lineTo(c, c - 4); g.lineTo(c + 4, c + 6); g.fill();
+  } else { // samostril / balista_v (věž)
+    g.fillStyle = '#5a4326'; g.fillRect(S * 0.2, S * 0.2, S * 0.6, S * 0.6);
+    g.fillStyle = '#6e5230'; g.fillRect(S * 0.28, S * 0.28, S * 0.44, S * 0.44);
+    g.fillStyle = '#8a6a3a'; g.fillRect(c - 2, c - 8, 4, 16); g.fillStyle = '#c8ccd4'; g.fillRect(c - 8, c - 1, 16, 3);
+  }
+}
+function drawWarriorIcon(g, color, ranged, S) {
+  const c = S / 2;
+  g.fillStyle = '#3a3444'; g.fillRect(c - S * 0.16, c - S * 0.05, S * 0.14, S * 0.3); g.fillRect(c + S * 0.02, c - S * 0.05, S * 0.14, S * 0.3); // nohy
+  g.fillStyle = shade(color || '#5c78c8', -0.35); roundRect(c - S * 0.2, c - S * 0.28, S * 0.4, S * 0.42, S * 0.12); g.fill();
+  g.fillStyle = color || '#5c78c8'; roundRect(c - S * 0.14, c - S * 0.22, S * 0.28, S * 0.32, S * 0.1); g.fill();
+  g.fillStyle = '#d8a878'; g.beginPath(); g.arc(c, c - S * 0.18, S * 0.16, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#c8ccd4'; g.beginPath(); g.arc(c, c - S * 0.18, S * 0.16, Math.PI, Math.PI * 2); g.fill(); // helma
+  g.fillStyle = ranged ? '#8a6a3a' : '#c8ccd4';
+  if (ranged) { g.fillRect(c + S * 0.18, c - S * 0.24, S * 0.05, S * 0.4); }
+  else { g.fillRect(c + S * 0.16, c - S * 0.04, S * 0.22, S * 0.06); g.fillStyle = '#6a4a2a'; g.fillRect(c + S * 0.12, c - S * 0.06, S * 0.06, S * 0.1); }
+}
+// překreslí <canvas class="ico"> v obchodě podle designů
+function paintShopIcons() {
+  const list = ovContent.querySelectorAll('canvas.ico');
+  list.forEach(cv => { const g = cv.getContext('2d'); g.clearRect(0, 0, cv.width, cv.height); try { paintIcon(g, cv.dataset.k, cv.dataset.id, cv.width); } catch {} });
+}
+function ico(k, id) { return `<canvas class="ico" width="34" height="34" data-k="${k}" data-id="${id}"></canvas>`; }
+
 function drawBuildGhost() {
   if (!buildSel) return;
   // ghost pod „posledním dotykem" — použijeme uložený hover
@@ -1879,8 +1935,11 @@ function drawBuildGhost() {
     const i = tileIndex(tx, ty);
     let ok = inBounds(tx, ty) && grid.tiles[i] !== 1 && !grid.coreTiles.includes(i);
     if (STRUCTURES[buildSel] || (TRAPS[buildSel] && TRAPS[buildSel].arch === 'EMITTER')) ok = ok && grid.structures[i] === null && pathExistsWith(tx, ty);
-    ctx.globalAlpha = 0.5; ctx.fillStyle = ok ? '#5cff8a' : '#ff5c5c';
-    roundRect(tx * TILE + 2, ty * TILE + 2, TILE - 4, TILE - 4, 5); ctx.fill();
+    ctx.globalAlpha = 0.35; ctx.fillStyle = ok ? '#5cff8a' : '#ff5c5c';
+    roundRect(tx * TILE + 1, ty * TILE + 1, TILE - 2, TILE - 2, 5); ctx.fill();
+    ctx.globalAlpha = 0.9;
+    const kind = STRUCTURES[buildSel] ? 'wall' : (WARRIORS[buildSel] ? 'warrior' : 'trap');
+    ctx.save(); ctx.translate(tx * TILE, ty * TILE); paintIcon(ctx, kind, buildSel, TILE); ctx.restore();
     ctx.globalAlpha = 1;
   }
 }
@@ -1993,7 +2052,8 @@ function drawBuildBar() {
     ctx.fillStyle = buildSel === id ? '#3a5a34' : '#20261c';
     roundRect(x, y, size, size, 6); ctx.fill();
     ctx.strokeStyle = buildSel === id ? '#8fd08f' : '#3a442c'; ctx.lineWidth = 2; roundRect(x, y, size, size, 6); ctx.stroke();
-    ctx.fillStyle = def.color; roundRect(x + 8, y + 6, size - 16, size - 20, 3); ctx.fill();
+    const kind = STRUCTURES[id] ? 'wall' : (WARRIORS[id] ? 'warrior' : 'trap');
+    ctx.save(); ctx.translate(x + 3, y + 2); paintIcon(ctx, kind, id, size - 6); ctx.restore();
     ctx.fillStyle = '#fff'; ctx.font = 'bold 11px system-ui'; ctx.textAlign = 'right';
     ctx.fillText('×' + run.owned[id], x + size - 3, y + size - 3);
     x += size + gap;

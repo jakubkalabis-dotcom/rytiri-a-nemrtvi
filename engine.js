@@ -8,9 +8,8 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height;   // 480 × 800
-try { ctx.imageSmoothingEnabled = false; } catch {}   // ostré pixely (Minecraft styl)
-// blokový obdélník (bez zaoblení) = pixelový vzhled
-function px(x, y, w, h, col) { ctx.fillStyle = col; ctx.fillRect(x | 0, y | 0, Math.ceil(w), Math.ceil(h)); }
+// zaoblený obdélník + výplň (helper pro hladké tvary entit)
+function rrect(x, y, w, h, r, col) { if (col) ctx.fillStyle = col; roundRect(x, y, w, h, Math.min(r, w / 2, h / 2)); ctx.fill(); }
 
 /* ---------- Viditelné hlášení chyb (diagnostika na mobilu) ---------- */
 function showFatal(msg) {

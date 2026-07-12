@@ -20,21 +20,21 @@ let currentMap = 0;
 /* ---------- 15 map / biomů (poslední = peklo s finálním bossem) ---------- */
 // pal: [tráva1, tráva2, skála, akcent, mlha/overlay], fog = průhledná barva navrch
 const MAPS = [
-  { name: 'Zelená louka',    cols: 16, rows: 24, seed: 101, pal: ['#284020', '#2c4224', '#5a5f66', '#3f7030'], fog: null },
-  { name: 'Temný les',       cols: 16, rows: 26, seed: 202, pal: ['#1f3018', '#24381c', '#4a4f46', '#2c5024'], fog: 'rgba(10,20,10,0.18)' },
-  { name: 'Starý hřbitov',   cols: 17, rows: 26, seed: 303, pal: ['#2a2e28', '#30352d', '#6a6f78', '#4a5a4a'], fog: 'rgba(30,30,40,0.2)' },
-  { name: 'Hnilobná bažina', cols: 17, rows: 27, seed: 404, pal: ['#24301e', '#2a3820', '#4a4a3a', '#3a5a2a'], fog: 'rgba(40,50,20,0.22)' },
-  { name: 'Zříceniny',       cols: 18, rows: 27, seed: 505, pal: ['#3a3630', '#403c34', '#7a756a', '#5a5040'], fog: null },
-  { name: 'Zamrzlá pláň',    cols: 18, rows: 28, seed: 606, pal: ['#a8c0d0', '#b8ccda', '#8a98a6', '#cfe0ec'], fog: 'rgba(200,225,245,0.15)' },
-  { name: 'Spálená poušť',   cols: 19, rows: 28, seed: 707, pal: ['#b89a5a', '#c2a666', '#9a7a4a', '#d8bc7a'], fog: 'rgba(230,200,120,0.12)' },
-  { name: 'Temná jeskyně',   cols: 19, rows: 29, seed: 808, pal: ['#20242a', '#262b32', '#3a4048', '#4a4050'], fog: 'rgba(0,0,10,0.32)' },
-  { name: 'Prokleté pole',   cols: 20, rows: 29, seed: 909, pal: ['#2a2420', '#302a24', '#5a504a', '#5a3a5a'], fog: 'rgba(40,20,40,0.22)' },
-  { name: 'Sopečná stráň',   cols: 20, rows: 30, seed: 111, pal: ['#3a2620', '#42281f', '#5a4038', '#8a3a20'], fog: 'rgba(60,20,10,0.2)' },
-  { name: 'Kostěná pustina', cols: 21, rows: 30, seed: 121, pal: ['#3a3830', '#403e36', '#c8c0a8', '#8a8270'], fog: 'rgba(50,45,35,0.18)' },
-  { name: 'Stínový hvozd',   cols: 21, rows: 31, seed: 131, pal: ['#181c20', '#1e2228', '#3a3040', '#40206a'], fog: 'rgba(20,10,40,0.3)' },
-  { name: 'Krvavé bažiny',   cols: 22, rows: 31, seed: 141, pal: ['#2a1a1a', '#301e1e', '#5a3a3a', '#7a2020'], fog: 'rgba(60,10,10,0.24)' },
-  { name: 'Brána podsvětí',  cols: 22, rows: 32, seed: 151, pal: ['#241820', '#2a1c26', '#4a3040', '#6a2050'], fog: 'rgba(50,10,40,0.28)' },
-  { name: 'Peklo',           cols: 23, rows: 34, seed: 161, pal: ['#3a1410', '#461812', '#6a2a1a', '#ff5a20'], fog: 'rgba(90,15,5,0.26)', hell: true },
+  { name: 'Zelená louka',    cols: 16, rows: 24, seed: 101, pal: ['#3f7a2e', '#4a8a33', '#8a9098', '#6fc23e'], fog: null },
+  { name: 'Temný les',       cols: 16, rows: 26, seed: 202, pal: ['#2c5424', '#33632a', '#6a7060', '#4aa036'], fog: 'rgba(10,30,10,0.14)' },
+  { name: 'Starý hřbitov',   cols: 17, rows: 26, seed: 303, pal: ['#48504a', '#525c54', '#aab0ba', '#7a9a6a'], fog: 'rgba(40,45,60,0.16)' },
+  { name: 'Hnilobná bažina', cols: 17, rows: 27, seed: 404, pal: ['#3a5228', '#42602c', '#6a6a4a', '#7aa838'], fog: 'rgba(60,80,20,0.16)' },
+  { name: 'Zříceniny',       cols: 18, rows: 27, seed: 505, pal: ['#5e584c', '#6a6254', '#b0a890', '#8a7a56'], fog: null },
+  { name: 'Zamrzlá pláň',    cols: 18, rows: 28, seed: 606, pal: ['#c2d8e6', '#d2e4ee', '#9aa8b6', '#eaf4ff'], fog: 'rgba(210,235,255,0.12)' },
+  { name: 'Spálená poušť',   cols: 19, rows: 28, seed: 707, pal: ['#d6b566', '#e2c274', '#b09258', '#f0d488'], fog: 'rgba(255,220,140,0.1)' },
+  { name: 'Temná jeskyně',   cols: 19, rows: 29, seed: 808, pal: ['#3a4048', '#434b54', '#5a6470', '#6a5a80'], fog: 'rgba(0,0,15,0.28)' },
+  { name: 'Prokleté pole',   cols: 20, rows: 29, seed: 909, pal: ['#4a4038', '#544840', '#7a6e64', '#9a5a9a'], fog: 'rgba(60,25,60,0.18)' },
+  { name: 'Sopečná stráň',   cols: 20, rows: 30, seed: 111, pal: ['#5a382a', '#663e2c', '#7a5648', '#ff6a30'], fog: 'rgba(90,30,10,0.16)' },
+  { name: 'Kostěná pustina', cols: 21, rows: 30, seed: 121, pal: ['#5a564a', '#645e50', '#e0d8bc', '#b0a684'], fog: 'rgba(70,60,45,0.14)' },
+  { name: 'Stínový hvozd',   cols: 21, rows: 31, seed: 131, pal: ['#2a2e3c', '#333850', '#5a4a70', '#7a3adf'], fog: 'rgba(30,15,60,0.26)' },
+  { name: 'Krvavé bažiny',   cols: 22, rows: 31, seed: 141, pal: ['#4a2626', '#582c2c', '#7a4a4a', '#c02828'], fog: 'rgba(90,15,15,0.2)' },
+  { name: 'Brána podsvětí',  cols: 22, rows: 32, seed: 151, pal: ['#3c2436', '#482940', '#6a4864', '#b0308a'], fog: 'rgba(80,15,60,0.24)' },
+  { name: 'Peklo',           cols: 23, rows: 34, seed: 161, pal: ['#6a1e14', '#7c261a', '#a04030', '#ff7a20'], fog: 'rgba(120,25,5,0.22)', hell: true },
 ];
 const NUM_MAPS = MAPS.length;
 const WAVES_PER_MAP = 5;                 // každá mapa = 5 vln, 5. vlna = boss = konec mapy
@@ -126,18 +126,18 @@ const WEAPON_SHAPE = {
 /* Archetypy: WALKER | RUNNER | TANK | RANGED | EXPLODER | BOSS
    Runtime staty = base × škálování(wave). */
 const ENEMIES = {
-  chodec:    { name:'Chodec',    arch:'WALKER',   hp:20,  speed:0.7, dmg:6,  atkRate:40, size:24, bounty:4,  score:10,  leak:1, color:'#7ea06a' },
-  behac:     { name:'Běhač',     arch:'RUNNER',   hp:13,  speed:1.7, dmg:5,  atkRate:28, size:20, bounty:5,  score:15,  leak:1, color:'#c9b04a' },
-  ohar:      { name:'Ohař',      arch:'RUNNER',   hp:10,  speed:2.3, dmg:7,  atkRate:24, size:18, bounty:6,  score:18,  leak:1, color:'#9a3a3a' },
-  obr:       { name:'Obr',       arch:'TANK',     hp:110, speed:0.42,dmg:16, atkRate:60, size:40, bounty:14, score:45,  leak:2, color:'#8a5a3a' },
-  brnenec:   { name:'Brněnec',   arch:'TANK',     hp:70,  speed:0.6, dmg:12, atkRate:50, size:30, bounty:12, score:40,  leak:1, color:'#6a7a8a', armored:true },
-  plivac:    { name:'Plivač',    arch:'RANGED',   hp:18,  speed:0.5, dmg:7,  atkRate:90, size:24, bounty:8,  score:25,  leak:1, color:'#5a8a6a', projSpeed:4.2, keepDist:170 },
-  vybusny:   { name:'Výbušný',   arch:'EXPLODER', hp:16,  speed:1.15,dmg:34, atkRate:0,  size:26, bounty:10, score:30,  leak:1, color:'#b04a4a', aoeRadius:72 },
+  chodec:    { name:'Chodec',    arch:'WALKER',   hp:20,  speed:0.7, dmg:6,  atkRate:40, size:24, bounty:4,  score:10,  leak:1, color:'#86c15a' },
+  behac:     { name:'Běhač',     arch:'RUNNER',   hp:13,  speed:1.7, dmg:5,  atkRate:28, size:20, bounty:5,  score:15,  leak:1, color:'#e6cb3e' },
+  ohar:      { name:'Ohař',      arch:'RUNNER',   hp:10,  speed:2.3, dmg:7,  atkRate:24, size:18, bounty:6,  score:18,  leak:1, color:'#c24040' },
+  obr:       { name:'Obr',       arch:'TANK',     hp:110, speed:0.42,dmg:16, atkRate:60, size:40, bounty:14, score:45,  leak:2, color:'#b0703e' },
+  brnenec:   { name:'Brněnec',   arch:'TANK',     hp:70,  speed:0.6, dmg:12, atkRate:50, size:30, bounty:12, score:40,  leak:1, color:'#8aa0b8', armored:true },
+  plivac:    { name:'Plivač',    arch:'RANGED',   hp:18,  speed:0.5, dmg:7,  atkRate:90, size:24, bounty:8,  score:25,  leak:1, color:'#5fc584', projSpeed:4.2, keepDist:170 },
+  vybusny:   { name:'Výbušný',   arch:'EXPLODER', hp:16,  speed:1.15,dmg:34, atkRate:0,  size:26, bounty:10, score:30,  leak:1, color:'#54a83f', aoeRadius:72 },
   // Bossové (cyklují se – viz bossForWave)
-  nekromant: { name:'Nekromant', arch:'BOSS',     hp:650, speed:0.55,dmg:24, atkRate:70, size:52, bounty:140,score:600, leak:5, color:'#7a3a9a', summon:'chodec', summonRate:200 },
-  abominace: { name:'Abominace', arch:'BOSS',     hp:1100,speed:0.4, dmg:34, atkRate:60, size:66, bounty:200,score:800, leak:6, color:'#6a4a2a', enrage:true },
-  lich:      { name:'Lich',      arch:'BOSS',     hp:820, speed:0.5, dmg:20, atkRate:55, size:50, bounty:220,score:900, leak:5, color:'#3a6a8a', summon:'behac', summonRate:170, volley:true },
-  pekelny_pan:{name:'Pekelný pán',arch:'BOSS',    hp:3200,speed:0.5, dmg:44, atkRate:45, size:80, bounty:1000,score:5000,leak:20,color:'#ff3a10', summon:'vybusny', summonRate:120, volley:true, enrage:true, final:true },
+  nekromant: { name:'Nekromant', arch:'BOSS',     hp:650, speed:0.55,dmg:24, atkRate:70, size:52, bounty:140,score:600, leak:5, color:'#a44ad0', summon:'chodec', summonRate:200 },
+  abominace: { name:'Abominace', arch:'BOSS',     hp:1100,speed:0.4, dmg:34, atkRate:60, size:66, bounty:200,score:800, leak:6, color:'#9a6a34', enrage:true },
+  lich:      { name:'Lich',      arch:'BOSS',     hp:820, speed:0.5, dmg:20, atkRate:55, size:50, bounty:220,score:900, leak:5, color:'#4a92c0', summon:'behac', summonRate:170, volley:true },
+  pekelny_pan:{name:'Pekelný pán',arch:'BOSS',    hp:3200,speed:0.5, dmg:44, atkRate:45, size:80, bounty:1000,score:5000,leak:20,color:'#ff4a1a', summon:'vybusny', summonRate:120, volley:true, enrage:true, final:true },
 };
 const BOSS_CYCLE = ['nekromant', 'abominace', 'lich'];
 function bossForWave(wave) {
