@@ -183,7 +183,7 @@ function serializeState() {
     eBullets: eBullets.map(b => ({ x: b.x, y: b.y, r: b.r, color: b.color })),
     walls: walls.map(s => ({ defId: s.defId, tx: s.tx, ty: s.ty, x: s.x, y: s.y, hp: s.hp, hpMax: s.hpMax, flash: s.flash, temp: s.temp, level: s.level || 0 })),
     turrets: turrets.map(s => ({ defId: s.defId, tx: s.tx, ty: s.ty, x: s.x, y: s.y, hp: s.hp, hpMax: s.hpMax, flash: s.flash, temp: s.temp, level: s.level || 0 })),
-    traps: traps.map(t => ({ defId: t.defId, tx: t.tx, ty: t.ty, x: t.x, y: t.y, charges: t.charges, dur: t.dur, level: t.level || 0 })),
+    traps: traps.map(t => ({ defId: t.defId, tx: t.tx, ty: t.ty, x: t.x, y: t.y, dur: t.dur, level: t.level || 0 })),
     warriors: warriors.map(w => ({ defId: w.defId, x: w.x, y: w.y, r: w.r, hp: w.hp, hpMax: w.hpMax, flash: w.flash, aim: w.aim })),
     groundFx: groundFx.map(g => ({ x: g.x, y: g.y, radius: g.radius, color: g.color })),
     pickups: pickups.map(pu => ({ id: pu.id, x: pu.x, y: pu.y, bob: pu.bob })),

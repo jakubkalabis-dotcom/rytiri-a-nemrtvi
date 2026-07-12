@@ -207,7 +207,7 @@ function renderShop() {
 function shopGrid(cards, empty) { return `<div class="grid">${cards || '<div class="empty">' + (empty || '—') + '</div>'}</div>`; }
 // Krátký popis účinku pasti/věže do karty obchodu.
 function trapInfo(t) {
-  if (t.arch === 'ONESHOT') return `⚔ ${t.dmg}${t.charges > 1 ? ' ×' + t.charges : ''} zásah`;
+  if (t.arch === 'ONESHOT') return `⚔ ${t.dmg}/zásah · trvalá`;
   if (t.arch === 'DOT_AOE') return `🔥 ${t.dps}/s v okolí`;
   if (t.arch === 'SLOW') return `🐌 −${Math.round((1 - t.slow.mul) * 100)}% rychlost`;
   if (t.arch === 'EMITTER') return `🏹 ${t.dmg} dmg · dosah ${Math.round(t.range / 24)}`;
@@ -518,7 +518,7 @@ function placeAt(tx, ty) {
   } else if (TRAPS[buildSel]) {
     // pozemní past (neblokuje)
     if (traps.some(t => t.tx === tx && t.ty === ty)) return;
-    traps.push({ def, defId: buildSel, tx, ty, x, y, charges: def.charges || 0, hp: def.hp || 0, dur: def.dur || Infinity, cool: 0, hitCd: 0 });
+    traps.push({ def, defId: buildSel, tx, ty, x, y, hp: def.hp || 0, dur: def.dur || Infinity, cool: 0, hitCd: 0 });
   } else if (WARRIORS[buildSel]) {
     if (warriors.length >= MAX_WARRIORS) { banner = { text: 'LIMIT SPOJENCŮ (' + MAX_WARRIORS + ')!', t: 60, warn: true }; return; }
     warriors.push({ def, defId: buildSel, x, y, r: 12, hp: def.hp, hpMax: def.hp, homeX: x, homeY: y, cool: 0, aim: 0, flash: 0 });
@@ -1307,14 +1307,16 @@ function updateTraps(dt) {
   for (const t of traps) {
     const def = t.def;
     if (def.arch === 'ONESHOT') {
+      // TRVALÁ nášlapná past — zasáhne JEDNOHO nepřítele na dlaždici a chvíli
+      // se „nabíjí". Nízké poškození → mob potřebuje víc zásahů, nezmizí.
       t.hitCd -= dt;
-      if (t.charges > 0 && t.hitCd <= 0) {
+      if (t.hitCd <= 0) {
         const cand = enemyHash.query(t.x, t.y, TILE * 0.7);
         for (const e of cand) {
           if (e.dead) continue;
           if (dist(t.x, t.y, e.x, e.y) < TILE * 0.6 + e.r) {
-            damageEnemy(e, def.dmg * (t.up || 1), null, null); t.charges--; t.hitCd = 12;
-            burst(t.x, t.y, '#ffffff', 8);
+            damageEnemy(e, def.dmg * (t.up || 1), null, null); t.hitCd = 16;
+            burst(t.x, t.y, '#ffffff', 5);
             break;
           }
         }
@@ -1327,7 +1329,8 @@ function updateTraps(dt) {
     }
     // SLOW se aplikuje v updateEnemies
   }
-  traps = traps.filter(t => !(t.def.arch === 'ONESHOT' && t.charges <= 0) && !(t.def.arch === 'DOT_AOE' && t.dur <= 0));
+  // pasti jsou trvalé v rámci mapy; odstraní se jen výslovně časované (dur)
+  traps = traps.filter(t => !(t.def.arch === 'DOT_AOE' && t.dur <= 0));
 }
 function updateGroundFx(dt) {
   for (const g of groundFx) {
@@ -2387,7 +2390,6 @@ function upgradeAt(tx, ty, p) {
   if (p.gems < cost) return;
   p.gems -= cost; obj.level = lvl + 1; obj.up = (obj.up || 1) + 0.35;
   if (obj.hpMax) { obj.hpMax = Math.round(obj.hpMax * 1.45); obj.hp = obj.hpMax; }
-  if (obj.def.arch === 'ONESHOT') obj.charges = (obj.charges || 0) + 2;
   burst(obj.x, obj.y, '#8fd0ff', 12); sfx.buy();
   if (typeof netPush === 'function' && net.role === 'host') netPush();
 }

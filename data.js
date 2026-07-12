@@ -199,12 +199,12 @@ function hordeComposition(wave) { const w = { chodec: 1 }; if (wave >= 7) w.beha
 /* ---------- Pasti (15) ---------- */
 /* Archetypy: ONESHOT | SLOW | DOT_AOE | EMITTER */
 const TRAPS = {
-  // jednorázové (nášlapné) — po vybití zmizí, jinak trvalé
-  bodce:      { name:'Bodce',        arch:'ONESHOT', dmg:50,  charges:3, cost:70,  color:'#b8b8c0', cat:'trap' },
-  ostnaty_val:{ name:'Ostnatý val',  arch:'ONESHOT', dmg:26,  charges:6, cost:100, color:'#9aa0a8', cat:'trap' },
-  medvedka:   { name:'Medvědí past', arch:'ONESHOT', dmg:95,  charges:1, cost:95,  color:'#6a6a72', cat:'trap' },
-  jama:       { name:'Bodcová jáma', arch:'ONESHOT', dmg:150, charges:1, cost:140, color:'#3a3a42', cat:'trap' },
-  cakan:      { name:'Kolová past',  arch:'ONESHOT', dmg:70,  charges:2, cost:120, color:'#c8a060', cat:'trap' },
+  // nášlapné — TRVALÉ (drží do konce mapy), poškozují opakovaně po malých dávkách
+  bodce:      { name:'Bodce',        arch:'ONESHOT', dmg:7,  cost:70,  color:'#b8b8c0', cat:'trap' },
+  ostnaty_val:{ name:'Ostnatý val',  arch:'ONESHOT', dmg:5,  cost:100, color:'#9aa0a8', cat:'trap' },
+  medvedka:   { name:'Medvědí past', arch:'ONESHOT', dmg:12, cost:95,  color:'#6a6a72', cat:'trap' },
+  jama:       { name:'Bodcová jáma', arch:'ONESHOT', dmg:16, cost:140, color:'#3a3a42', cat:'trap' },
+  cakan:      { name:'Kolová past',  arch:'ONESHOT', dmg:10, cost:120, color:'#c8a060', cat:'trap' },
   // zpomalovací pole (trvalé)
   smola:      { name:'Smola',        arch:'SLOW',    slow:{mul:0.4},  hp:70,  cost:95,  color:'#3a3320', cat:'trap' },
   dehet:      { name:'Dehtová jáma', arch:'SLOW',    slow:{mul:0.55}, hp:90,  cost:130, color:'#20201a', cat:'trap' },
