@@ -53,7 +53,8 @@ const BTN = {
   pause:    { x: W - 46, y: VIEWH + 6,  w: 40,  h: 34 },
   switch2:  { x: 6,      y: VIEWH + 44, w: 148, h: 36 },   // přepínač zbraní zpět
   ability:  { x: 160,    y: VIEWH + 44, w: 200, h: 40 },   // aktivní schopnost
-  start:    { x: W - 132,y: VIEWH + 48, w: 126, h: 40 },   // start vlny (build)
+  start:    { x: W - 132,y: VIEWH + 50, w: 126, h: 38 },   // start vlny (build)
+  upgrade:  { x: W - 132,y: VIEWH + 8,  w: 126, h: 36 },   // režim vylepšování (build)
 };
 function inRect(px, py, r) { return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h; }
 
@@ -388,9 +389,10 @@ function startBuildPhase() {
   }
   // vyléčit a oživit hráče na začátku přípravy
   for (const p of players) { p.hp = p.hpMax; p.downed = false; p.inv = 0; }
-  buildSel = null;
+  buildSel = null; upgradeMode = false;
   readyHost = false; readyGuest = false;
   setState('build');
+  const me = localPlayer(); if (me) updateCamera(me.x, me.y, 1, true);   // kamera k jádru
 }
 function advanceToMap(i) {
   // trvalé obrany si přeneseme na novou mapu (co se vejde do koridoru)
@@ -1210,7 +1212,7 @@ function updateTurrets(dt) {
       const tgt = nearestEnemy(t.x, t.y, def.range);
       if (tgt) {
         const a = Math.atan2(tgt.y - t.y, tgt.x - t.x);
-        bullets.push({ x: t.x, y: t.y, vx: Math.cos(a) * def.projSpeed, vy: Math.sin(a) * def.projSpeed, r: 4, dmg: def.dmg, pierce: def.pierce || 0, range: def.range, traveled: 0, color: '#ffe08a', hitIds: [], owner: null });
+        bullets.push({ x: t.x, y: t.y, vx: Math.cos(a) * def.projSpeed, vy: Math.sin(a) * def.projSpeed, r: 4, dmg: def.dmg * (t.up || 1), pierce: def.pierce || 0, range: def.range, traveled: 0, color: '#ffe08a', hitIds: [], owner: null });
         t.fireCool = rate; sfx.crossbow();
       }
     }
@@ -1228,7 +1230,7 @@ function updateTraps(dt) {
         for (const e of cand) {
           if (e.dead) continue;
           if (dist(t.x, t.y, e.x, e.y) < TILE * 0.6 + e.r) {
-            damageEnemy(e, def.dmg, null, null); t.charges--; t.hitCd = 12;
+            damageEnemy(e, def.dmg * (t.up || 1), null, null); t.charges--; t.hitCd = 12;
             burst(t.x, t.y, '#ffffff', 8);
             break;
           }
@@ -1237,7 +1239,7 @@ function updateTraps(dt) {
     } else if (def.arch === 'DOT_AOE') {
       t.dur -= dt;
       const cand = enemyHash.query(t.x, t.y, def.radius);
-      for (const e of cand) { if (!e.dead && dist(t.x, t.y, e.x, e.y) <= def.radius + e.r) { e.hp -= def.dps * dt / 60; if (e.hp <= 0) killEnemy(e); } }
+      for (const e of cand) { if (!e.dead && dist(t.x, t.y, e.x, e.y) <= def.radius + e.r) { e.hp -= def.dps * (t.up || 1) * dt / 60; if (e.hp <= 0) killEnemy(e); } }
       if (Math.random() < 0.3) burst(t.x + (Math.random() - 0.5) * def.radius, t.y + (Math.random() - 0.5) * def.radius, def.color, 1);
     }
     // SLOW se aplikuje v updateEnemies
@@ -1340,7 +1342,8 @@ function render() {
   ctx.clearRect(0, 0, W, H);
   if (state === 'menu' || state === 'class' || state === 'host' || state === 'join' || state === 'gameOver' || state === 'victory') { drawMenuBg(); return; }
   const cp = localPlayer();
-  if (cp) updateCamera(cp.x, cp.y, 1);
+  if (cp && state !== 'build') updateCamera(cp.x, cp.y, 1);   // ve stavění kamerou hýbe hráč ručně
+  else clampCamera();
   ctx.save();
   if (shake > 0.2) ctx.translate((Math.random() - 0.5) * shake * 2, (Math.random() - 0.5) * shake * 2);
   applyCamera();
@@ -1520,7 +1523,14 @@ function drawStructures() {
       ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(x + 3, y - 3, T - 6, 3);
       ctx.fillStyle = '#5cff8a'; ctx.fillRect(x + 3, y - 3, (T - 6) * (s.hp / s.hpMax), 3);
     }
+    if (s.level) drawLevelBadge(x + T - 4, y + 4);
   }
+}
+function drawLevelBadge(x, y) {
+  ctx.fillStyle = '#2a6ad0'; ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#8fc0ff'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 7px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('⬆', x, y + 0.5); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
 }
 function drawTraps() {
   for (const t of traps) {
@@ -1559,6 +1569,7 @@ function drawTraps() {
       }
       if (fr() < 0.5) particles.push({ x: t.x + (Math.random() - 0.5) * 8, y: t.y - 6, vx: 0, vy: -0.5, life: 0.6, decay: 0.05, size: 2, color: lite, smoke: true });
     }
+    if (t.level) drawLevelBadge(t.tx * TILE + TILE - 4, t.ty * TILE + 4);
   }
 }
 function drawGroundFx() {
@@ -2079,9 +2090,10 @@ function drawStick(s, color) {
 }
 function drawBuildBar() {
   const items = paletteItems();
-  ctx.fillStyle = '#e8ecd8'; ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'left';
-  ctx.fillText('💎 ' + meGems() + '  ·  Klepni na položku, pak na mapu. (Klepni na hotovou stavbu = prodej)', 8, VIEWH + 20);
-  const size = 40, gap = 6; let x = 8, y = VIEWH + 28;
+  ctx.fillStyle = '#e8ecd8'; ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'left';
+  ctx.fillText('💎 ' + meGems() + '  ·  Táhni prstem = posun kamery · Klepni = ' + (upgradeMode ? 'VYLEPŠIT' : (buildSel ? 'postavit' : 'prodat')), 8, VIEWH + 18);
+  drawButton(BTN.upgrade, upgradeMode ? '🔧 VYLEPŠIT ✔' : '🔧 Vylepšit', upgradeMode);
+  const size = 40, gap = 6; let x = 8, y = VIEWH + 26;
   paletteRects = [];
   for (const id of items) {
     const def = defOf(id);
@@ -2121,6 +2133,8 @@ function drawBanner() {
 const moveStick = { active: false, id: null, ox: 0, oy: 0, dx: 0, dy: 0 };
 const aimStick = { active: false, id: null, ox: 0, oy: 0, dx: 0, dy: 0 };
 let buildHover = null;
+let buildPan = null;       // tažení kamery ve fázi stavění
+let upgradeMode = false;   // režim vylepšování položených barikád/věží
 
 function evtPos(clientX, clientY) {
   const r = canvas.getBoundingClientRect();
@@ -2137,7 +2151,8 @@ function hudTap(x, y) {
   }
   if (state === 'build') {
     if (inRect(x, y, BTN.start)) { toggleReady(); return true; }
-    for (const r of paletteRects) if (inRect(x, y, r)) { buildSel = (buildSel === r.id ? null : r.id); return true; }
+    if (inRect(x, y, BTN.upgrade)) { upgradeMode = !upgradeMode; if (upgradeMode) buildSel = null; return true; }
+    for (const r of paletteRects) if (inRect(x, y, r)) { buildSel = (buildSel === r.id ? null : r.id); upgradeMode = false; return true; }
     return true;
   }
   return true;
@@ -2182,7 +2197,11 @@ canvas.addEventListener('touchstart', e => {
     const pos = evtPos(t.clientX, t.clientY);
     if (state === 'paused') { togglePause(); continue; }
     if (!inArena(pos.y)) { hudTap(pos.x, pos.y); continue; }
-    if (state === 'build') { const wp = screenToWorld(pos.x, pos.y); handleBuildTap(wp.x, wp.y); continue; }
+    if (state === 'build') {
+      // dotek v aréně = táhni kamerou; krátký tap (bez pohybu) = akce na dlaždici
+      if (!buildPan) { const wp = screenToWorld(pos.x, pos.y); buildHover = tileOf(wp.x, wp.y); buildPan = { id: t.identifier, sx: pos.x, sy: pos.y, camx: camera.x, camy: camera.y, moved: false }; }
+      continue;
+    }
     if (state === 'combat') {
       if (pos.x < W / 2 && !moveStick.active) startStick(moveStick, t.identifier, pos);
       else startStick(aimStick, t.identifier, pos);
@@ -2195,7 +2214,12 @@ canvas.addEventListener('touchmove', e => {
     const pos = evtPos(t.clientX, t.clientY);
     if (moveStick.id === t.identifier) moveStickUpdate(moveStick, pos);
     else if (aimStick.id === t.identifier) moveStickUpdate(aimStick, pos);
-    else if (state === 'build') { const wp = screenToWorld(pos.x, pos.y); buildHover = tileOf(wp.x, wp.y); }
+    else if (buildPan && buildPan.id === t.identifier) {
+      const dx = pos.x - buildPan.sx, dy = pos.y - buildPan.sy;
+      if (Math.hypot(dx, dy) > 6) buildPan.moved = true;
+      camera.x = buildPan.camx - dx; camera.y = buildPan.camy - dy; clampCamera();
+      const wp = screenToWorld(pos.x, pos.y); buildHover = tileOf(wp.x, wp.y);
+    }
   }
 }, { passive: false });
 canvas.addEventListener('touchend', e => {
@@ -2203,10 +2227,11 @@ canvas.addEventListener('touchend', e => {
   for (const t of e.changedTouches) {
     if (moveStick.id === t.identifier) endStick(moveStick);
     else if (aimStick.id === t.identifier) endStick(aimStick);
+    else if (buildPan && buildPan.id === t.identifier) { if (!buildPan.moved) { const wp = screenToWorld(buildPan.sx, buildPan.sy); handleBuildTap(wp.x, wp.y); } buildPan = null; }
   }
 }, { passive: false });
 canvas.addEventListener('touchcancel', e => {
-  for (const t of e.changedTouches) { if (moveStick.id === t.identifier) endStick(moveStick); else if (aimStick.id === t.identifier) endStick(aimStick); }
+  for (const t of e.changedTouches) { if (moveStick.id === t.identifier) endStick(moveStick); else if (aimStick.id === t.identifier) endStick(aimStick); else if (buildPan && buildPan.id === t.identifier) buildPan = null; }
 }, { passive: false });
 
 function startStick(s, id, pos) { s.active = true; s.id = id; s.ox = pos.x; s.oy = pos.y; s.dx = 0; s.dy = 0; applyStick(s); }
@@ -2228,14 +2253,29 @@ function handleBuildTap(x, y) {
   const { tx, ty } = tileOf(x, y);
   buildHover = { tx, ty };
   if (net.role === 'guest') {
-    // guest neřeší lokálně — pošle příkaz hostiteli
     if (buildSel) netSend({ t: 'cmd', act: 'place', sel: buildSel, tx, ty });
+    else if (upgradeMode) netSend({ t: 'cmd', act: 'upgrade', tx, ty });
     else netSend({ t: 'cmd', act: 'sell', tx, ty });
     return;
   }
-  if (!buildSel && sellAt(tx, ty)) return;
-  if (buildSel) placeAt(tx, ty);
-  else sellAt(tx, ty);
+  if (buildSel) { placeAt(tx, ty); return; }
+  if (upgradeMode) { upgradeAt(tx, ty, localPlayer()); return; }
+  sellAt(tx, ty);
+}
+// Vylepšení položené barikády/věže/pasti (+HP, +poškození). Max Lv.5.
+function upgradeAt(tx, ty, p) {
+  p = p || localPlayer();
+  const i = tileIndex(tx, ty);
+  let obj = grid.structures[i] || traps.find(t => t.tx === tx && t.ty === ty);
+  if (!obj || obj.temp != null) return;
+  const lvl = obj.level || 0; if (lvl >= 5) return;
+  const cost = Math.round((obj.def.cost || 60) * 0.55 * Math.pow(1.5, lvl));
+  if (p.gems < cost) return;
+  p.gems -= cost; obj.level = lvl + 1; obj.up = (obj.up || 1) + 0.35;
+  if (obj.hpMax) { obj.hpMax = Math.round(obj.hpMax * 1.45); obj.hp = obj.hpMax; }
+  if (obj.def.arch === 'ONESHOT') obj.charges = (obj.charges || 0) + 2;
+  burst(obj.x, obj.y, '#8fd0ff', 12); sfx.buy();
+  if (typeof netPush === 'function' && net.role === 'host') netPush();
 }
 
 /* ---------- Klávesnice + myš (desktop) ---------- */
@@ -2254,16 +2294,29 @@ canvas.addEventListener('mousemove', e => {
   const lp = localPlayer();
   const wp = screenToWorld(pos.x, pos.y);
   if (state === 'combat' && lp) { myInput.aimAngle = Math.atan2(wp.y - lp.y, wp.x - lp.x); if (mouseDown) myInput.aiming = true; }
-  if (state === 'build') buildHover = tileOf(wp.x, wp.y);
+  if (state === 'build') {
+    buildHover = tileOf(wp.x, wp.y);
+    if (buildPan && buildPan.id === 'mouse') { const dx = pos.x - buildPan.sx, dy = pos.y - buildPan.sy; if (Math.hypot(dx, dy) > 6) buildPan.moved = true; camera.x = buildPan.camx - dx; camera.y = buildPan.camy - dy; clampCamera(); }
+  }
 });
 canvas.addEventListener('mousedown', e => {
   initAudio(); const pos = evtPos(e.clientX, e.clientY);
   if (state === 'paused') { togglePause(); return; }
   if (!inArena(pos.y)) { hudTap(pos.x, pos.y); return; }
-  if (state === 'build') { const wp = screenToWorld(pos.x, pos.y); handleBuildTap(wp.x, wp.y); return; }
+  if (state === 'build') { buildPan = { id: 'mouse', sx: pos.x, sy: pos.y, camx: camera.x, camy: camera.y, moved: false }; return; }
   if (state === 'combat') myInput.aiming = true;
 });
-canvas.addEventListener('mouseup', () => { myInput.aiming = false; });
+canvas.addEventListener('mouseup', () => {
+  if (buildPan && buildPan.id === 'mouse') { if (!buildPan.moved) { const wp = screenToWorld(buildPan.sx, buildPan.sy); handleBuildTap(wp.x, wp.y); } buildPan = null; }
+  myInput.aiming = false;
+});
+// Posun kamery šipkami/WASD ve fázi stavění.
+function buildCamKeys(dt) {
+  const sp = 8 * dt; let mx = 0, my = 0;
+  if (keys['a'] || keys['arrowleft']) mx -= sp; if (keys['d'] || keys['arrowright']) mx += sp;
+  if (keys['w'] || keys['arrowup']) my -= sp; if (keys['s'] || keys['arrowdown']) my += sp;
+  if (mx || my) { camera.x += mx; camera.y += my; clampCamera(); }
+}
 // Klávesnicový pohyb píše do myInput (host/solo ho aplikuje, guest odesílá).
 function keyboardMove() {
   if (state !== 'combat') return;
@@ -2287,6 +2340,7 @@ function loop(now) {
   try {
     const dt = Math.min(3, (now - lastTime) / 16.67);
     lastTime = now;
+    if (state === 'build') buildCamKeys(dt);   // šipky posouvají kameru při stavění
     if (net.role === 'guest') {
       // guest nepočítá simulaci — jen posílá vstup, žene lokální kosmetiku a vykresluje
       if (state === 'combat') keyboardMove();

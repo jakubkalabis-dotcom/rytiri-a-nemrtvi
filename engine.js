@@ -57,6 +57,8 @@ function updateCamera(tx, ty, dt, snap) {
 }
 // Je bod na obrazovce (s okrajem)? Pro culling.
 function onScreen(x, y, m) { m = m || 40; return x > camera.x - m && x < camera.x + VIEWW + m && y > camera.y - m && y < camera.y + VIEWH + m; }
+// Udrž kameru v hranicích mapy (po ručním posunu ve fázi stavění).
+function clampCamera() { camera.x = clamp(camera.x, 0, Math.max(0, ARENA_W - VIEWW)); camera.y = clamp(camera.y, 0, Math.max(0, ARENA_H - VIEWH)); }
 
 /* ---------- Mřížka / dlaždice ---------- */
 // tiles: 0 = tráva, 1 = statická překážka. structures[i] = objekt zdi/null.
