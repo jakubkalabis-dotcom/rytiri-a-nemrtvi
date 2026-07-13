@@ -110,11 +110,13 @@ function genObstacles(seed, mapIdx) {
 function tileIndex(tx, ty) { return ty * COLS + tx; }
 function inBounds(tx, ty) { return tx >= 0 && ty >= 0 && tx < COLS && ty < ROWS; }
 function tileOf(x, y) { return { tx: Math.floor(x / TILE), ty: Math.floor(y / TILE) }; }
-// Blokuje pohyb? (mimo mapu / překážka / zeď)
+// Blokuje daná stavba pohyb? Věže (EMITTER) jsou PRŮCHOZÍ — jen zdi/barikády blokují.
+function structBlocks(o) { return !!o && !(o.def && o.def.arch === 'EMITTER'); }
+// Blokuje pohyb? (mimo mapu / překážka / blokující zeď — věže NE)
 function isBlocked(tx, ty) {
   if (!inBounds(tx, ty)) return true;
   const i = tileIndex(tx, ty);
-  return grid.tiles[i] === 1 || grid.structures[i] !== null;
+  return grid.tiles[i] === 1 || structBlocks(grid.structures[i]);
 }
 // Blokuje střely? (překážka nebo zeď s blocksProj)
 function blocksProjectile(tx, ty) {
@@ -251,7 +253,7 @@ function buildFlowField() {
   flowDist.fill(Infinity);
   let head = 0, tail = 0;
   for (const ci of grid.coreTiles) {
-    if (grid.structures[ci] !== null || grid.tiles[ci] === 1) continue;
+    if (structBlocks(grid.structures[ci]) || grid.tiles[ci] === 1) continue;   // věže jsou průchozí
     flowDist[ci] = 0;
     _bfsQueue[tail++] = ci;
   }
@@ -303,7 +305,7 @@ function pathExistsWith(blockTx, blockTy) {
   let head = 0, tail = 0;
   for (const ci of grid.coreTiles) {
     if (ci === tileIndex(blockTx, blockTy)) continue;
-    if (grid.tiles[ci] === 1 || grid.structures[ci] !== null) continue;
+    if (grid.tiles[ci] === 1 || structBlocks(grid.structures[ci])) continue;
     seen[ci] = 1; _bfsQueue[tail++] = ci;
   }
   while (head < tail) {

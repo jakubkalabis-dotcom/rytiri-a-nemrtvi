@@ -154,6 +154,9 @@ function netHandleCmd(m) {
     case 'upweapon': buyWeaponUp(m.id, players[1]); break;
     case 'buylife': buyLife(players[1]); break;
     case 'toshop': setState('shop'); break;
+    case 'perkpick': choosePerk(players[1], m.id); break;
+    case 'upshield': buyShield(players[1]); break;
+    case 'wheelpick': chooseWheel(m.id); break;
     case 'sready': readyGuest = true; if (readyHost) startBuildPhase(); break;
     case 'sunready': readyGuest = false; break;
     case 'cycle': cycleWeapon(players[1]); break;
@@ -173,11 +176,11 @@ function netHandleCmd(m) {
 function serializeState() {
   const snap = {
     st: state, map: currentMap,
-    run: run && { lives: run.lives, wave: run.wave, score: run.score || 0, ownedWeapons: run.ownedWeapons, ammo: run.ammo, owned: run.owned, upgrades: run.upgrades, wUpgrades: run.wUpgrades, wood: run.wood || 0, steel: run.steel || 0, combo: run.combo || 0, comboT: run.comboT || 0 },
+    run: run && { lives: run.lives, wave: run.wave, score: run.score || 0, ownedWeapons: run.ownedWeapons, ammo: run.ammo, owned: run.owned, upgrades: run.upgrades, wUpgrades: run.wUpgrades, wood: run.wood || 0, steel: run.steel || 0, combo: run.combo || 0, comboT: run.comboT || 0, shieldLvl: run.shieldLvl || 0, wheelReady: run.wheelReady || 0, wheelUpgrades: run.wheelUpgrades || {}, turretKills: run.turretKills || 0, wheelThreshold: run.wheelThreshold || 2 },
     wave: wave && { boss: wave.boss, spawned: wave.spawned, total: wave.total, reward: wave.reward },
     banner: banner && { text: banner.text, t: banner.t, warn: banner.warn },
     readyHost, readyGuest, freezeTimer,
-    players: players.map(p => ({ x: p.x, y: p.y, r: p.r, hp: p.hp, hpMax: p.hpMax, gems: p.gems || 0, aimAngle: p.aimAngle, inv: p.inv, downed: p.downed, classId: p.classId, color: p.color, weaponId: p.weaponId, mana: p.mana, manaMax: p.manaMax, walk: p.walk || 0, buffRapid: p.buffRapid || 0, buffPower: p.buffPower || 0, shieldT: p.shieldT || 0, rageT: p.rageT || 0, abilityCd: p.abilityCd || 0 })),
+    players: players.map(p => ({ x: p.x, y: p.y, r: p.r, hp: p.hp, hpMax: p.hpMax, gems: p.gems || 0, aimAngle: p.aimAngle, inv: p.inv, downed: p.downed, classId: p.classId, color: p.color, weaponId: p.weaponId, mana: p.mana, manaMax: p.manaMax, walk: p.walk || 0, buffRapid: p.buffRapid || 0, buffPower: p.buffPower || 0, shieldT: p.shieldT || 0, rageT: p.rageT || 0, abilityCd: p.abilityCd || 0, perks: p.perks || {}, perkOffer: p.perkOffer || null, blockT: p.blockT || 0, invisT: p.invisT || 0, flurryT: p.flurryT || 0, abomT: p.abomT || 0, potions: p.potions || 0, bile: p.bile || 0, clanCd: p.clanCd || 0, resurrectUsed: !!p.resurrectUsed, _clanActive: !!p._clanActive })),
     enemies: enemies.map(e => ({ x: e.x, y: e.y, r: e.r, hp: e.hp, hpMax: e.hpMax, flash: e.flash, arch: e.arch, color: e.color, typeId: e.typeId, elite: e.elite, spawnT: e.spawnT })),
     bullets: bullets.map(b => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, r: b.r, color: b.color, thrown: b.thrown, magic: b.magic, ang: b.ang, crit: b.crit })),
     eBullets: eBullets.map(b => ({ x: b.x, y: b.y, r: b.r, color: b.color })),
@@ -209,7 +212,7 @@ function applyState(s) {
   banner = s.banner ? s.banner : null;
   // hráči (napojíme třídu z classId)
   players.length = 0;
-  for (const p of s.players) { p.class = CLASSES[p.classId]; p.passive = p.class ? p.class.passive : {}; p.input = { mx: 0, my: 0, aiming: false }; players.push(p); }
+  for (const p of s.players) { p.class = CLASSES[p.classId]; p.basePassive = p.class ? p.class.passive : {}; p.perks = p.perks || {}; p.input = { mx: 0, my: 0, aiming: false }; recalcPerks(p); players.push(p); }
   // nepřátelé — napojíme def podle typeId (kvůli vykreslení bosse/pancíře)
   enemies = s.enemies.map(e => (e.def = ENEMIES[e.typeId] || {}, e));
   bullets = s.bullets; eBullets = s.eBullets;

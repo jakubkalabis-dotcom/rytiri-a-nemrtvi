@@ -75,6 +75,11 @@ function newRun(classIds) {
     wUpgrades: {},      // vylepšení zbraní: weaponId -> úroveň
     wood: 0, steel: 0,  // materiály na vylepšování zbraní (sdílený pool)
     score: 0,
+    shieldLvl: 0,       // vylepšení štítu rytíře (0..SHIELD_UP_MAX)
+    turretKills: 0,     // zabití věžemi (plní „Kolečka se točí")
+    wheelThreshold: 2,  // kolik zabití věží na další nabití koleček (zdvojnásobuje se)
+    wheelReady: 0,      // nevyužité nabité „spiny" koleček
+    wheelUpgrades: { dmg: 0, dur: 0, rate: 0, count: 0, hp: 0 },  // vylepšení polní věže
   };
   for (const k in AMMO) run.ammo[k] = 0;
   // sdílené vlastněné zbraně = sjednocení startovních zbraní hráčů
@@ -98,20 +103,110 @@ function newRun(classIds) {
 function makePlayer(cls, classId) {
   const pas = cls.passive || {};
   const baseHp = Math.round(120 * cls.hpMod);
-  const hpMax = Math.round(baseHp * (1 + 0.12 * ((run.upgrades && run.upgrades.hp) || 0)));
-  return {
+  const p = {
     classId, class: cls, color: cls.color, gems: cls.startGems,   // vlastní peněženka
     x: (CORE.tx + CORE.w / 2) * TILE, y: (CORE.ty - 1) * TILE, r: 12,
-    baseHp, hpMax, hp: hpMax,
+    baseHp, hpMax: baseHp, hp: baseHp,
     baseSpeed: 2.6 * cls.spdMod * (pas.moveSpeed || 1),
     weaponId: cls.start[0], cool: 0, aimAngle: -Math.PI / 2, inv: 0, downed: false,
     manaMax: Math.round(100 * (pas.manaMax || 1)), mana: Math.round(100 * (pas.manaMax || 1)),
     manaRegen: 0.11 * (pas.manaRegen || 1),
     abilityCd: 0, buffRapid: 0, buffPower: 0, shieldT: 0, rageT: 0, dashT: 0, walk: 0, atkAnim: 0,
+    // stavy schopností (per-hráč): rytíř blok, zvěd neviditelnost/backstab, lovec smršt, abominace, kněz
+    blockT: 0, invisT: 0, backstabArmed: false, flurryT: 0, abomT: 0, bonusHp: 0,
+    bile: 0, potions: 0, resurrectUsed: false, clanCd: 0,
     autoaim: true, autofire: true,   // per-hráč (v co-opu má každý své)
+    basePassive: pas,     // třídní passivy (neměnné) — perky se počítají navrch
+    perks: {},            // trvalé buffy ze sub-bossů: id -> počet (do konce hry)
+    perkOffer: null,      // aktuální nabídka buffů (po bossovi), pole id
     passive: pas,
     input: { mx: 0, my: 0, aiming: false },
   };
+  recalcPerks(p);
+  return p;
+}
+// Přepočte p.passive z třídních passiv + všech vlastněných perků. Volá se při zisku perku
+// (a na guestovi po přijetí stavu). Deriv. násobiče (dmgMul, rateMul…) čtou call-sity dole.
+function recalcPerks(p) {
+  const base = p.basePassive || {};
+  const pas = Object.assign({}, base);
+  let dmgPct = 0, ratePct = 0, speedPct = 0, maxHpPct = 0, armorPct = 0, rangePct = 0, cdPct = 0,
+      critAdd = 0, critMulAdd = 0, lifestealAdd = 0, dodgeAdd = 0, pickupRadiusAdd = 0,
+      gemPct = 0, xpPct = 0, regenAdd = 0, thornsPct = 0, projAdd = 0, explodeChance = 0,
+      freezeChance = 0, knockbackAdd = 0, ammoSaveChance = 0, manaRegenPct = 0;
+  for (const id in (p.perks || {})) {
+    const def = PERKS[id]; if (!def) continue; const n = p.perks[id];
+    dmgPct += (def.dmgPct || 0) * n;           ratePct += (def.ratePct || 0) * n;
+    speedPct += (def.speedPct || 0) * n;       maxHpPct += (def.maxHpPct || 0) * n;
+    armorPct += (def.armorPct || 0) * n;       rangePct += (def.rangePct || 0) * n;
+    cdPct += (def.cdPct || 0) * n;             critAdd += (def.critAdd || 0) * n;
+    critMulAdd += (def.critMulAdd || 0) * n;   lifestealAdd += (def.lifestealAdd || 0) * n;
+    dodgeAdd += (def.dodgeAdd || 0) * n;       pickupRadiusAdd += (def.pickupRadiusAdd || 0) * n;
+    gemPct += (def.gemPct || 0) * n;           xpPct += (def.xpPct || 0) * n;
+    regenAdd += (def.regenAdd || 0) * n;       thornsPct += (def.thornsPct || 0) * n;
+    projAdd += (def.projAdd || 0) * n;         explodeChance += (def.explodeChance || 0) * n;
+    freezeChance += (def.freezeChance || 0) * n; knockbackAdd += (def.knockbackAdd || 0) * n;
+    ammoSaveChance += (def.ammoSaveChance || 0) * n; manaRegenPct += (def.manaRegenPct || 0) * n;
+  }
+  // přímé úpravy existujících passiv (čtou je stávající mechaniky):
+  pas.crit = (base.crit || 0) + critAdd;
+  pas.critMul = (base.critMul || 2) + critMulAdd;
+  pas.lifesteal = (base.lifesteal || 0) + lifestealAdd;
+  pas.dodge = (base.dodge || 0) + dodgeAdd;
+  // nové deriv. násobiče/hodnoty (čtou je call-sity níže):
+  pas.dmgMul = 1 + dmgPct;
+  pas.rateMul = Math.max(0.35, 1 - ratePct);      // nižší prodleva = rychlejší palba
+  pas.speedMul = 1 + speedPct;
+  pas.armorMul = Math.max(0.3, 1 - armorPct);      // nižší obdržené poškození
+  pas.rangeMul = 1 + rangePct;
+  pas.cdMul = Math.max(0.4, 1 - cdPct);            // nižší cooldown schopnosti
+  pas.pickupMul = 1 + pickupRadiusAdd;
+  pas.gemMul = 1 + gemPct;
+  pas.xpMul = 1 + xpPct;
+  pas.regenAdd = regenAdd;                          // HP/s
+  pas.thorns = thornsPct;
+  pas.projAdd = projAdd;
+  pas.explodeChance = explodeChance;
+  pas.freezeChance = freezeChance;
+  pas.knockbackAdd = knockbackAdd;
+  pas.ammoSaveChance = ammoSaveChance;
+  p.passive = pas;
+  // odvozené staty: max HP (+maxHpPct navrch na statové vylepšení HP) a mana regen.
+  // Na guestovi (bez p.baseHp) necháme autoritativní hpMax ze snímku beze změny.
+  if (p.baseHp != null) {
+    const oldMax = p.hpMax || p.baseHp;
+    const upHp = (run && run.upgrades && run.upgrades.hp) || 0;
+    p.hpMax = Math.round(p.baseHp * (1 + 0.12 * upHp) * (1 + maxHpPct) + (p.bonusHp || 0));
+    const gained = p.hpMax - oldMax;
+    if (gained > 0) p.hp = Math.min(p.hpMax, (p.hp || p.hpMax) + gained);  // nový max = plné doléčení přírůstku
+    else if (p.hp > p.hpMax) p.hp = p.hpMax;
+  }
+  p.manaRegen = 0.11 * (base.manaRegen || 1) * (1 + manaRegenPct);
+}
+// Nabídka 3 buffů po zabití bosse (každý hráč si vybírá vlastní). Vzácnější (nižší cap) padají řidčeji.
+function rollPerkOffer(p) {
+  const avail = PERK_KEYS.filter(id => (p.perks[id] || 0) < PERKS[id].cap);
+  if (!avail.length) return null;
+  const pool = [];
+  for (const id of avail) { const c = PERKS[id].cap; const w = c >= 4 ? 4 : (c === 3 ? 3 : (c === 2 ? 2 : 1)); for (let k = 0; k < w; k++) pool.push(id); }
+  const offer = [];
+  while (offer.length < 3 && pool.length) {
+    const id = pool[(Math.random() * pool.length) | 0];
+    if (!offer.includes(id)) offer.push(id);
+    for (let i = pool.length - 1; i >= 0; i--) if (pool[i] === id) pool.splice(i, 1);
+  }
+  return offer.length ? offer : null;
+}
+function grantPerkOffer() { for (const p of players) if (!p.perkOffer) p.perkOffer = rollPerkOffer(p); }
+function choosePerk(p, id) {
+  if (!p || !p.perkOffer || p.perkOffer.indexOf(id) < 0) return;
+  if ((p.perks[id] || 0) >= PERKS[id].cap) return;
+  p.perks[id] = (p.perks[id] || 0) + 1;
+  p.perkOffer = null;
+  recalcPerks(p);
+  sfx.levelUp();
+  if (state === 'roundEnd') renderRoundEnd();
+  if (typeof netPush === 'function' && net.role === 'host' && net.connected) netPush();
 }
 function grantAmmoFor(wid, bundles) {
   const w = WEAPONS[wid];
@@ -133,12 +228,13 @@ function costOf(cost, cat) {
    ========================================================================== */
 function setState(s) {
   state = s;
-  if (s === 'menu' || s === 'class' || s === 'shop' || s === 'roundEnd' || s === 'gameOver' || s === 'victory' || s === 'host' || s === 'join') {
+  if (s === 'menu' || s === 'class' || s === 'shop' || s === 'roundEnd' || s === 'gameOver' || s === 'victory' || s === 'host' || s === 'join' || s === 'wheel') {
     overlay.classList.remove('hidden');
   } else {
     overlay.classList.add('hidden');
   }
-  if (s === 'menu') renderMenu();
+  if (s === 'wheel') renderWheelMenu();
+  else if (s === 'menu') renderMenu();
   else if (s === 'class') renderClassSelect();
   else if (s === 'shop') renderShop();
   else if (s === 'roundEnd') renderRoundEnd();
@@ -188,7 +284,7 @@ function shopCard(id, name, cost, cat, extra, act, disabled, costLabel) {
   </div>`;
 }
 let shopTab = 'weapons';
-const SHOP_TABS = [['weapons', '🗡 Zbraně'], ['traps', '🪤 Pasti'], ['walls', '🧱 Zdi'], ['warriors', '🛡 Spojenci'], ['ammo', '🎯 Munice'], ['char', '🧙 Postava'], ['bestiary', '📖 Bestiář']];
+const SHOP_TABS = [['weapons', '🗡 Zbraně'], ['traps', '🪤 Pasti'], ['walls', '🧱 Zdi'], ['warriors', '🛡 Spojenci'], ['ammo', '🎯 Munice'], ['char', '🧙 Postava'], ['perks', '✨ Buffy'], ['bestiary', '📖 Bestiář']];
 function refreshShop() { if (state === 'shop') renderShop(); lastShopSig = typeof shopSig === 'function' ? shopSig(run) : ''; }
 function shopHeader() {
   return `<h2>Obchod · vlna ${run.wave + 1}</h2>
@@ -251,6 +347,7 @@ function renderBestiary() {
 }
 function renderShopCat(tab) {
   if (tab === 'char') return renderCharTab();
+  if (tab === 'perks') return renderPerksTab();
   if (tab === 'bestiary') return renderBestiary();
   if (tab === 'weapons') {
     const lvl = profile.playerLevel;
@@ -262,7 +359,7 @@ function renderShopCat(tab) {
   }
   if (tab === 'traps') {
     const cards = Object.keys(TRAPS).map(id => { const t = TRAPS[id], cost = costOf(t.cost, 'trap'); return shopCard(id, `${ico('trap', id)} ${t.name}`, cost, 'trap', `${trapInfo(t)} · máš ${run.owned[id] || 0}`, 'buybuild', meGems() < cost ? 'málo 💎' : null); }).join('');
-    return `<div class="shop"><p style="font-size:12px;color:#9aa87e"><b>Pasti</b> jsou v rámci mapy trvalé (nemizí mezi vlnami), ale při přechodu na další mapu se zničí. <b>Věže</b> (samostříl, tesla, plamenomet, balista) a zdi se přenášejí dál.</p><h3>Pasti a věže (${Object.keys(TRAPS).length})</h3>${shopGrid(cards)}</div>`;
+    return `<div class="shop"><p style="font-size:12px;color:#9aa87e">Vše postavené je trvalé <b>v rámci mapy</b> (nemizí mezi vlnami). Na <b>nové mapě</b> se ale všechny stavby resetují — postavíš je znovu (peníze i vylepšení zůstávají). <b>Věže</b> jsou průchozí (hráč přes ně projde, nezaseknou ho).</p><h3>Pasti a věže (${Object.keys(TRAPS).length})</h3>${shopGrid(cards)}</div>`;
   }
   if (tab === 'walls') {
     const cards = Object.keys(STRUCTURES).map(id => { const s = STRUCTURES[id], cost = costOf(s.cost, 'wall'); return shopCard(id, `${ico('wall', id)} ${s.name}`, cost, 'wall', `HP ${Math.round(s.hp * (teamMax('wallHp') || 1))} · máš ${run.owned[id] || 0}`, 'buybuild', meGems() < cost ? 'málo 💎' : null); }).join('');
@@ -278,16 +375,31 @@ function renderShopCat(tab) {
   return `<div class="shop"><h3>Munice</h3>${shopGrid(ammo)}<h3>Život brány</h3>${shopGrid(life)}</div>`;
 }
 function abilityDetail(cid) {
+  const shLvl = (run && run.shieldLvl) || 0;
+  const wu = (run && run.wheelUpgrades) || {};
   return ({
-    rytir: '🛡 Štít: sníží obdržené poškození o 65 % na ~5 s a odhodí okolní nemrtvé. Efekt: obrana + odstrčení.',
-    lovec: '🏹 Salva: naráz vystřelí 9 šípů ve vějíři, každý ~19 poškození. Efekt: velký zásah do davu.',
-    berserk: '🩸 Zuřivost: na ~6 s +80 % poškození, +25 % rychlost, vysávání životů, +20 HP. Efekt: nájezd.',
-    zved: '💨 Úprk: prudký výpad vpřed, krátká nezranitelnost, cestou sekne za ~18. Efekt: únik + zásah.',
-    mag: '❄ Mrazivá nova: zmrazí nepřátele kolem a zraní je za ~30 v okruhu 120. Efekt: kontrola davu.',
-    alchymista: '💣 Nálet: 6 výbuchů kolem tebe, každý ~30 plošně. Efekt: velké plošné poškození.',
-    inzenyr: '🔧 Polní věž: postaví dočasný samostříl na tvé pozici a opraví všechny zdi na plné HP.',
-    knez: '✨ Světlo: vyléčí celý tým o ~60 HP, dá buff síly a spálí nemrtvé za ~40 v okruhu 130.',
+    rytir: `🛡 Zvednout štít (cd 2 s): na ${(shieldBlockTime(shLvl) / 60).toFixed(2)} s vykryje VŠECHNY útoky i střely a odhodí nemrtvé o 10 px.${shLvl > 0 ? ' Odraz ' + Math.round(shieldReflect(shLvl) * 100) + ' % poškození zpět.' : ''} Štít úroveň ${shLvl}/${SHIELD_UP_MAX} (vylepši v obchodě).`,
+    lovec: '🏹 Smršt (cd 35 s): na 5 s +70 % rychlost palby a NEKONEČNÁ munice. Žádné náboje/mana se nespotřebují.',
+    berserk: `🪓 Volání klanu: přivolá 2 sekerníky (${CLAN_AXEMAN.hp} HP, ${CLAN_AXEMAN.dmg} poškození/úder). Jen při ≤ 50 % HP. Odejdou při smrti / HP > 65 % / konci kola. Poté cd 40 s.`,
+    zved: '🗡 Bodnutí do zad (cd 10 s): 5 s neviditelnost (mobové tě ignorují). PRVNÍ útok = okamžité zabití běžného nepřítele, nebo 3× poškození zbraně na bosse. Zabiješ-li silnějšího, cd se resetuje.',
+    mag: `☄ Armagedon (cd 12 s): meteor na nejbližší shluk — ${MAG_METEOR_DMG} poškození v okruhu ${MAG_METEOR_RADIUS} + ohnivá zem ${MAG_METEOR_DOT.dps}/s po 3 s. (× magický bonus).`,
+    alchymista: `🧟 Abominace (lektvar z 5 žlučí, max 2): 10 s proměna — −50 % obdrž. poškození, −38 % rychlost, POŽÍRÁ pěšáky (+${ABOM_HP_PER_EAT} max HP navždy/kus) a leptá silnější ${ABOM_ACID_BURST} dmg/2,5 s + ${ABOM_ACID_DPS} dmg/s v okruhu ${ABOM_ACID_RADIUS}.`,
+    inzenyr: `🔧 Polní věž (cd 8 s): ${1 + (wu.count || 0)}× samostříl (${(720 + (wu.dur || 0) * 180) / 60} s, ${Math.round(90 * (1 + 0.4 * (wu.hp || 0)))} HP, +${(wu.dmg || 0) * 20} % dmg, +${(wu.rate || 0) * 15} % rychlost) + opraví zdi. Zabíjením věžemi plníš „Kolečka se točí".`,
+    knez: '✨ Vzkříšení (1× za kolo): oživí padlé v okruhu 220 na 60 % HP, živé vyléčí o 60 HP a spálí nemrtvé za 40 v okruhu 130.',
   })[cid] || 'Aktivní schopnost třídy.';
+}
+// Přehled trvalých buffů (padají ze sub-bossů) — vlastněné + celý katalog s čísly.
+function renderPerksTab() {
+  const p = localPlayer() || players[0];
+  const owned = Object.keys(p.perks || {});
+  const total = owned.reduce((a, id) => a + p.perks[id], 0);
+  const ownedHtml = owned.length
+    ? owned.map(id => `<div class="card"><div class="scn">${PERKS[id].icon} ${PERKS[id].name} ×${p.perks[id]}/${PERKS[id].cap}</div><div class="scd">${PERKS[id].desc}</div></div>`).join('')
+    : '<p style="color:#9aa87e">Zatím žádné. Poraž sub-bosse (každá 5. vlna) a vyber si trvalý buff.</p>';
+  const catalog = PERK_KEYS.map(id => { const d = PERKS[id], have = p.perks[id] || 0; return `<div class="card ${have >= d.cap ? '' : 'dis'}" style="opacity:${have ? 1 : 0.7}"><div class="scn">${d.icon} ${d.name} ${have ? '×' + have : ''}</div><div class="scd">${d.desc}</div><div class="scc" style="color:#9aa87e">max ${d.cap}×</div></div>`; }).join('');
+  return `<div class="shop"><p style="font-size:12px;color:#9aa87e">Trvalé buffy platí <b>do konce hry</b> a sčítají se. Každý hráč má vlastní. Padají po zabití sub-bosse (každá 5. vlna) a mapového bosse (každá 25.).</p>
+    <h3>Tvé buffy (${total})</h3><div class="grid">${ownedHtml}</div>
+    <h3>Katalog buffů (${PERK_KEYS.length})</h3><div class="grid">${catalog}</div></div>`;
 }
 function renderCharTab() {
   const p = localPlayer() || players[0]; const up = run.upgrades; const w = WEAPONS[p.weaponId] || {};
@@ -318,15 +430,33 @@ function renderCharTab() {
       <div class="scc">${maxed ? 'MAX' : '💎 ' + cost}</div>
     </div>`;
   }).join('');
-  return `${statBlock}<h3>Vylepšit staty (Lv. max ${UPGRADE_MAX})</h3><div class="grid">${upCards}</div>`;
+  // Rytíř: vylepšení štítu (delší blok + odraz)
+  let shieldCard = '';
+  if (players.some(q => q.classId === 'rytir')) {
+    const lvl = run.shieldLvl || 0, maxed = lvl >= SHIELD_UP_MAX, cost = shieldUpCost(lvl);
+    shieldCard = `<h3>🛡 Štít rytíře (Lv. ${lvl}/${SHIELD_UP_MAX})</h3><div class="grid">
+      <div class="card ${maxed || meGems() < cost ? 'dis' : ''}" ${maxed ? '' : 'data-act="upshield"'}>
+        <div class="scn" style="color:#8fd0ff">🛡 Vylepšit štít</div>
+        <div class="scd">Blok ${(shieldBlockTime(lvl) / 60).toFixed(2)}s → ${(shieldBlockTime(lvl + (maxed ? 0 : 1)) / 60).toFixed(2)}s · odraz ${Math.round(shieldReflect(lvl) * 100)}% → ${Math.round(shieldReflect(lvl + (maxed ? 0 : 1)) * 100)}%</div>
+        <div class="upbar">${'▮'.repeat(lvl) + '▯'.repeat(SHIELD_UP_MAX - lvl)}</div>
+        <div class="scc">${maxed ? 'MAX' : '💎 ' + cost}</div>
+      </div></div>`;
+  }
+  return `${statBlock}<h3>Vylepšit staty (Lv. max ${UPGRADE_MAX})</h3><div class="grid">${upCards}</div>${shieldCard}`;
 }
 function buyUpgrade(stat, p) {
   p = p || localPlayer(); const def = UPGRADES[stat]; if (!def) return;
   const lvl = run.upgrades[stat] || 0; if (lvl >= UPGRADE_MAX) return;
   const cost = upgradeCost(def, lvl); if (p.gems < cost) return;
   p.gems -= cost; run.upgrades[stat] = lvl + 1;
-  if (stat === 'hp') for (const q of players) { const nm = Math.round(q.baseHp * (1 + 0.12 * run.upgrades.hp)); q.hp += nm - q.hpMax; q.hpMax = nm; }
+  if (stat === 'hp') for (const q of players) recalcPerks(q);   // přepočte hpMax (statové vylepšení + perky)
   sfx.buy(); refreshShop();
+}
+function buyShield(p) {
+  p = p || localPlayer();
+  const lvl = run.shieldLvl || 0; if (lvl >= SHIELD_UP_MAX) return;
+  const cost = shieldUpCost(lvl); if (p.gems < cost) return;
+  p.gems -= cost; run.shieldLvl = lvl + 1; sfx.buy(); refreshShop();
 }
 function buyWeaponUp(id, p) {
   p = p || localPlayer(); const w = WEAPONS[id]; if (!w || !run.ownedWeapons.includes(id)) return;
@@ -339,15 +469,71 @@ function buyWeaponUp(id, p) {
 function renderRoundEnd() {
   const r = (wave && wave.reward) || { gems: 0, kills: 0, xp: 0 };
   const mapEnd = isMapEndWave(run.wave);
+  const subB = isSubBossWave(run.wave);
   const nextMap = mapForWave(run.wave + 1);
   const note = mapEnd
-    ? `<p>🏆 <b>Mapa ${currentMap + 1} dokončena!</b> Další zastávka: <b>${MAPS[nextMap].name}</b> (mapa ${nextMap + 1}/${NUM_MAPS}).</p>`
-    : `<p>Jádro brány má ještě <b>${run.lives}</b> životů. Připrav se na další vlnu.</p>`;
+    ? `<p>🏆 <b>Mapa ${currentMap + 1} dokončena!</b> Další zastávka: <b>${MAPS[nextMap].name}</b> (mapa ${nextMap + 1}/${NUM_MAPS}). Na nové mapě si obranu (zdi, věže, pasti) postavíš znovu.</p>`
+    : `<p>Jádro brány má ještě <b>${run.lives}</b> životů. Připrav se na vlnu <b>${run.wave + 1}</b> (${waveInMap(run.wave + 1)}/${WAVES_PER_MAP} na mapě).</p>`;
+  const me = localPlayer();
+  // Nabídka trvalého buffu (po bossovi). Dokud si hráč nevybere, nejde dál.
+  let perkHtml = '';
+  if (me && me.perkOffer && me.perkOffer.length) {
+    const cards = me.perkOffer.map(id => {
+      const d = PERKS[id], have = me.perks[id] || 0;
+      return `<div class="card perk-card" data-act="perkpick" data-id="${id}" style="border-color:#c8a45c66">
+        <div class="scn">${d.icon} ${d.name}</div>
+        <div class="scd">${d.desc}</div>
+        <div class="scc" style="color:#9aa87e">${have > 0 ? 'máš ' + have + '/' + d.cap : 'do konce hry'}</div>
+      </div>`;
+    }).join('');
+    perkHtml = `<div class="perk-offer"><h3>☠ Trvalý buff za bosse — vyber si jeden</h3>
+      <p style="font-size:12px;color:#9aa87e">Platí do konce hry a sčítá se s ostatními buffy. Každý hráč si vybírá vlastní.</p>
+      <div class="grid">${cards}</div></div>`;
+  }
+  const ownedHtml = me && Object.keys(me.perks).length
+    ? `<details class="perk-owned"><summary>Tvé buffy (${Object.values(me.perks).reduce((a, b) => a + b, 0)})</summary>
+       <div class="perk-list">${Object.keys(me.perks).map(id => `<div>${PERKS[id].icon} ${PERKS[id].name} ×${me.perks[id]} — <span style="color:#9aa87e">${PERKS[id].desc}</span></div>`).join('')}</div></details>`
+    : '';
+  const gate = me && me.perkOffer && me.perkOffer.length;
   ovContent.innerHTML = `
-    <h2>${mapEnd ? 'Boss poražen!' : 'Vlna ' + run.wave + ' přežita!'}</h2>
+    <h2>${mapEnd ? '🏆 Boss poražen!' : (subB ? '☠ Sub-boss padl!' : 'Vlna ' + run.wave + ' přežita!')}</h2>
     <div class="wallet">Zabito: <b>${r.kills}</b> · Získáno 💎 <b>${r.gems}</b> · XP <b>+${r.xp}</b></div>
     ${note}
-    <button data-act="toshop">Do obchodu</button>`;
+    ${perkHtml}
+    ${ownedHtml}
+    ${gate ? '<button class="dis" disabled>Nejdřív si vyber buff ☝</button>' : '<button data-act="toshop">Do obchodu</button>'}`;
+}
+// „Kolečka se točí" — nabídka vylepšení Polní věže (pauza + overlay). Otevírá se po nabití.
+let wheelReturn = 'combat';
+function openWheelMenu() {
+  if (state === 'wheel' || (run.wheelReady || 0) <= 0) return;
+  if (net.role === 'guest') return;   // v co-opu řídí stav host
+  wheelReturn = (state === 'wheel') ? wheelReturn : state;
+  setState('wheel');
+}
+function renderWheelMenu() {
+  const wu = run.wheelUpgrades || {};
+  const cards = WHEEL_KEYS.map(k => {
+    const d = WHEEL_UPGRADES[k], lv = wu[k] || 0, maxed = lv >= d.max;
+    return `<div class="card ${maxed ? 'dis' : ''}" ${maxed ? '' : `data-act="wheelpick" data-id="${k}"`}>
+      <div class="scn">${d.icon} ${d.name}</div>
+      <div class="scd">${d.desc}</div>
+      <div class="upbar">${'▮'.repeat(lv) + '▯'.repeat(d.max - lv)}</div>
+      <div class="scc">${maxed ? 'MAX' : 'úroveň ' + lv + '/' + d.max}</div>
+    </div>`;
+  }).join('');
+  ovContent.innerHTML = `<h2>⚙ Kolečka se točí</h2>
+    <p>Zabíjením nepřátel věžemi jsi nabil vylepšení <b>Polní věže</b>. Zbývá spinů: <b>${run.wheelReady || 0}</b>. Vyber jedno vylepšení:</p>
+    <div class="grid">${cards}</div>`;
+}
+function chooseWheel(key) {
+  const d = WHEEL_UPGRADES[key]; if (!d) return;
+  const lv = run.wheelUpgrades[key] || 0; if (lv >= d.max) return;
+  run.wheelUpgrades[key] = lv + 1;
+  run.wheelReady = Math.max(0, (run.wheelReady || 0) - 1);
+  sfx.buy();
+  if ((run.wheelReady || 0) > 0) renderWheelMenu();
+  else { setState(wheelReturn || 'combat'); if (typeof performance !== 'undefined') lastTime = performance.now(); }
 }
 function scoreBoardHtml() {
   return loadScores().map((r, i) => `<div class="row"><span class="rank">${i + 1}.</span><span class="nm">${escapeHtml(r.name)}</span><span class="sc">vlna ${r.wave} · ${r.score}</span></div>`).join('') || '<div class="empty">—</div>';
@@ -389,11 +575,14 @@ overlay.addEventListener('click', e => {
   if (act === 'tobuild') { shopReady(); return; }              // ready-gate obchodu (co-op)
   // --- guest: ekonomika a tok = příkazy hostiteli ---
   if (net.role === 'guest') {
-    if (['buyweapon', 'buyammo', 'buybuild', 'buylife', 'upstat', 'upweapon', 'toshop'].includes(act)) { netSend({ t: 'cmd', act, id }); return; }
+    if (['buyweapon', 'buyammo', 'buybuild', 'buylife', 'upstat', 'upweapon', 'toshop', 'perkpick', 'upshield', 'wheelpick'].includes(act)) { netSend({ t: 'cmd', act, id }); if (act === 'perkpick') { const g = players[1]; if (g && g.perkOffer) { g.perkOffer = null; renderRoundEnd(); } } return; }
     return;
   }
   // --- host / solo ---
   const me = localPlayer();
+  if (act === 'perkpick') { choosePerk(me, id); return; }
+  if (act === 'wheelpick') { chooseWheel(id); return; }
+  if (act === 'upshield') { buyShield(me); return; }
   if (act === 'buyweapon') buyWeapon(id, me);
   else if (act === 'buyammo') buyAmmo(id, me);
   else if (act === 'buybuild') buyBuild(id, me);
@@ -458,37 +647,29 @@ function buyBuild(id, p) {
 let buildSel = null;   // vybraná položka z palety
 function startBuildPhase() {
   // postup na další mapu po dokončení bossovské (map-end) vlny
+  let mapChanged = false;
   if (run.wave > 0 && isMapEndWave(run.wave) && run.wave < FINAL_WAVE) {
     const nextMap = mapForWave(run.wave + 1);
-    if (nextMap !== currentMap) advanceToMap(nextMap);
+    if (nextMap !== currentMap) { advanceToMap(nextMap); mapChanged = true; }
   }
   // vyléčit a oživit hráče na začátku přípravy
   for (const p of players) { p.hp = p.hpMax; p.downed = false; p.inv = 0; }
   buildSel = null; upgradeMode = false;
   readyHost = false; readyGuest = false;
   setState('build');
+  // po přechodu na novou mapu nech viditelné oznámení mapy (setState('build') jinak přepíše banner)
+  if (mapChanged) banner = { text: '🗺 MAPA ' + (currentMap + 1) + '/' + NUM_MAPS + ': ' + MAPS[currentMap].name + ' — postav obranu znovu', t: 180 };
   const me = localPlayer(); if (me) updateCamera(me.x, me.y, 1, true);   // kamera k jádru
 }
 function advanceToMap(i) {
-  // Zdi a věže PŘENESEME na novou mapu — když padne pozice do překážky/hráče,
-  // přesuneme je na nejbližší volné místo. POZEMNÍ PASTI se přechodem NIČÍ
-  // (v rámci jedné mapy jsou ale trvalé — nemizí mezi vlnami).
-  const keepW = walls.slice(), keepT = turrets.slice(), keepWa = warriors.slice();
+  // NOVÁ MAPA = čerstvá obrana: zdi, věže, pasti i spojenci se NEPŘENÁŠEJÍ — hráč staví znovu.
+  // Ekonomika, vylepšení, zbraně a munice (objekt `run`) zůstávají.
   loadMap(i);
   enemies = []; bullets = []; eBullets = []; groundFx = []; pickups = []; decals = []; particles = [];
   walls = []; turrets = []; traps = []; warriors = [];
-  const cx = (CORE.tx + CORE.w / 2) * TILE;
-  const spawnPos = players.map((p, idx) => ({ x: cx + (idx === 0 ? -20 : 20), y: (CORE.ty - 1) * TILE }));
-  const spawnTiles = new Set(spawnPos.map(s => tileIndex(Math.floor(s.x / TILE), Math.floor(s.y / TILE))));
-  const walkable = (tx, ty) => inBounds(tx, ty) && grid.tiles[tileIndex(tx, ty)] !== 1 && !grid.coreTiles.includes(tileIndex(tx, ty));
-  const freeStruct = (tx, ty) => walkable(tx, ty) && grid.structures[tileIndex(tx, ty)] === null && !spawnTiles.has(tileIndex(tx, ty)) && pathExistsWith(tx, ty);
-  const relocate = (tx, ty, test) => { if (test(tx, ty)) return [tx, ty]; for (let r = 1; r <= 8; r++) for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) { if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue; if (test(tx + dx, ty + dy)) return [tx + dx, ty + dy]; } return null; };
-  const setPos = (o, p) => { o.tx = p[0]; o.ty = p[1]; o.x = (p[0] + 0.5) * TILE; o.y = (p[1] + 0.5) * TILE; };
-  for (const s of keepW) { const p = relocate(s.tx, s.ty, freeStruct); if (p) { setPos(s, p); s.hp = s.hpMax; grid.structures[tileIndex(p[0], p[1])] = s; walls.push(s); } }
-  for (const s of keepT) { if (s.temp != null) continue; const p = relocate(s.tx, s.ty, freeStruct); if (p) { setPos(s, p); s.hp = s.hpMax; s.fireCool = 0; grid.structures[tileIndex(p[0], p[1])] = s; turrets.push(s); } }
-  for (const w of keepWa) { w.hp = w.hpMax; w.x = cx + (Math.random() - 0.5) * TILE * 3; w.y = (CORE.ty - 3) * TILE; w.homeX = w.x; w.homeY = w.y; warriors.push(w); }
   flowDirty = true;
-  players.forEach((p, idx) => { p.x = spawnPos[idx].x; p.y = spawnPos[idx].y; });
+  const cx = (CORE.tx + CORE.w / 2) * TILE;
+  players.forEach((p, idx) => { p.x = cx + (idx === 0 ? -20 : 20); p.y = (CORE.ty - 1) * TILE; });
   if (players[0]) updateCamera(players[0].x, players[0].y, 1, true);
   banner = { text: '🗺 MAPA ' + (i + 1) + '/' + NUM_MAPS + ': ' + MAPS[i].name, t: 150 };
 }
@@ -504,12 +685,12 @@ function placeAt(tx, ty) {
   const def = defOf(buildSel);
   const x = (tx + 0.5) * TILE, y = (ty + 0.5) * TILE;
   const blocking = STRUCTURES[buildSel] || (TRAPS[buildSel] && TRAPS[buildSel].arch === 'EMITTER');
-  // nestav blokující stavbu na dlaždici, kde stojí hráč (zasekl by se)
-  if (blocking && players.some(p => !p.downed && Math.floor(p.x / TILE) === tx && Math.floor(p.y / TILE) === ty)) { banner = { text: 'STOJÍ TAM HRÁČ!', t: 50, warn: true }; return; }
+  // nestav ZEĎ na dlaždici, kde stojí hráč (zasekl by se); věže jsou průchozí, ty tam vadit nemůžou
+  if (STRUCTURES[buildSel] && players.some(p => !p.downed && Math.floor(p.x / TILE) === tx && Math.floor(p.y / TILE) === ty)) { banner = { text: 'STOJÍ TAM HRÁČ!', t: 50, warn: true }; return; }
   if (blocking) {
-    // blokující stavba — nesmí být obsazená a nesmí zapečetit jádro
+    // stavba na mřížce — nesmí být obsazená; jen ZEĎ (průchozí věž ne) může zapečetit jádro
     if (grid.structures[i] !== null) return;
-    if (!pathExistsWith(tx, ty)) { banner = { text: 'ZAPEČETILO BY JÁDRO!', t: 60, warn: true }; return; }
+    if (STRUCTURES[buildSel] && !pathExistsWith(tx, ty)) { banner = { text: 'ZAPEČETILO BY JÁDRO!', t: 60, warn: true }; return; }
     const hp = Math.round(def.hp * (STRUCTURES[buildSel] ? (teamMax('wallHp') || 1) : 1));
     const obj = { def, defId: buildSel, tx, ty, x, y, r: 15, hp, hpMax: hp, wallCool: 0, fireCool: 0, flash: 0 };
     grid.structures[i] = obj;
@@ -556,25 +737,38 @@ function refund(id, seller) {
 function startWave() {
   run.wave++;
   const wv = run.wave;
-  const boss = isBossWave(wv);
+  // konec předchozího kola: sekerníci klanu odejdou, schopnosti se resetují na kolo
+  warriors = warriors.filter(w => !w.clanOwner);
+  for (const p of players) {
+    if (p._clanActive) { p._clanActive = false; p.clanCd = CLAN_COOLDOWN; }
+    p.resurrectUsed = false;                       // vzkříšení: 1× za kolo
+    p.blockT = 0; p.invisT = 0; p.backstabArmed = false; p.flurryT = 0;
+    if (p.abomT > 0) { p.abomT = 0; p.r = p._preAbomR || 12; }   // ukončí proměnu
+  }
+  const mapBoss = isMapEndWave(wv);          // konec mapy = velký boss (každá 25.)
+  const subBoss = isSubBossWave(wv);         // mini-boss (každá 5. mimo 25.)
+  const boss = mapBoss || subBoss;
   const horde = !boss && isHordeWave(wv);
   const queue = [];
   let bossId = null;
   if (boss) {
-    bossId = bossForWave(wv);
+    bossId = mapBoss ? mapBossForWave(wv) : subBossForWave(wv);
     queue.push(bossId);
     const comp = waveComposition(wv);
-    for (let k = 0; k < 6 + wv; k++) queue.push(pickWeighted(comp));
+    const escort = mapBoss ? (8 + Math.floor(wv / 25)) : (4 + mapForWave(wv));   // doprovod bosse
+    for (let k = 0; k < escort; k++) queue.push(pickWeighted(comp));
   } else {
     const comp = horde ? hordeComposition(wv) : waveComposition(wv);
     for (let k = 0, n = waveCount(wv); k < n; k++) queue.push(pickWeighted(comp));
   }
-  wave = { queue, spawned: 0, total: queue.length, spawnCool: 20, boss, horde,
+  wave = { queue, spawned: 0, total: queue.length, spawnCool: 20, boss, mapBoss, subBoss, horde,
+           bossKind: mapBoss ? 'map' : (subBoss ? 'sub' : null), bossId,
            interval: horde ? 8 : null, kills: 0, reward: { gems: 0, kills: 0, xp: 0 } };
   flowDirty = true;
   setState('combat');
-  banner = boss ? { text: '⚠ BOSS: ' + ENEMIES[bossId].name.toUpperCase() + ' ⚠', t: 110, warn: true }
-    : (horde ? { text: '🧟 HORDA! VLNA ' + wv, t: 120, warn: true } : { text: 'VLNA ' + wv, t: 110 });
+  banner = mapBoss ? { text: '⚠ BOSS: ' + ENEMIES[bossId].name.toUpperCase() + ' ⚠', t: 120, warn: true }
+    : (subBoss ? { text: '☠ SUB-BOSS: ' + ENEMIES[bossId].name.toUpperCase(), t: 110, warn: true }
+    : (horde ? { text: '🧟 HORDA! VLNA ' + wv, t: 120, warn: true } : { text: 'VLNA ' + wv, t: 110 }));
   if (boss) sfx.boss(); else if (horde) { sfx.groan(); sfx.waveStart(); } else sfx.waveStart();
 }
 function pickWeighted(weights) {
@@ -587,10 +781,13 @@ function spawnEnemy(typeId) {
   const base = ENEMIES[typeId];
   const sc = enemyScale(run.wave);
   const s = SPAWNS[(Math.random() * SPAWNS.length) | 0];
-  const bossNum = Math.max(1, Math.floor(run.wave / 5));
-  let hpMul = base.arch === 'BOSS' ? (base.final ? 1 : Math.min(3, 1 + 0.2 * (bossNum - 1))) : sc.hp;
-  let spdMul = base.arch === 'BOSS' ? 1 : sc.spd;
-  let dmgMul = sc.dmg;
+  const mapIdx = mapForWave(run.wave);
+  // Škálování: mapoví bossové rostou podle pořadí mapy; sub-bossové mírněji; běžní přes enemyScale.
+  let hpMul, spdMul;
+  if (base.arch === 'BOSS' && base.sub)      { hpMul = 1 + 0.26 * mapIdx; spdMul = 1; }
+  else if (base.arch === 'BOSS')             { hpMul = base.final ? 1 : Math.min(3.2, 1 + 0.16 * mapIdx); spdMul = 1; }
+  else                                        { hpMul = sc.hp; spdMul = sc.spd; }
+  let dmgMul = base.arch === 'BOSS' ? Math.min(3, 1 + 0.12 * mapIdx) : sc.dmg;
   // elitní přídomek (jen běžní nepřátelé)
   let elite = null;
   if (base.arch !== 'BOSS' && Math.random() < eliteChance(run.wave)) {
@@ -622,6 +819,8 @@ function activeWeapon(p) { return WEAPONS[p.weaponId]; }
 function rateMod(p, w) {
   let m = 1;
   if (w.cat === 'ranged' && p.passive.rangedRate) m = p.passive.rangedRate;
+  m *= (p.passive.rateMul || 1);   // perky: rychlejší palba
+  if (p.flurryT > 0) m *= 1 / 1.7; // lovec: smršt +70 % rychlost palby
   if (p.buffRapid > 0) m *= 0.5;   // drop „Rychlopalba"
   if (p.rageT > 0) m *= 0.6;       // berserk zuřivost
   const up = (run && run.upgrades) || {};
@@ -630,8 +829,9 @@ function rateMod(p, w) {
   return m;
 }
 function rangeMod(p, w) {
-  if (w.cat === 'ranged' && p.passive.rangedRange) return p.passive.rangedRange;
-  return 1;
+  let m = (p.passive.rangeMul || 1);   // perky: +% dosah
+  if (w.cat === 'ranged' && p.passive.rangedRange) m *= p.passive.rangedRange;
+  return m;
 }
 // Vrací {dmg, crit}
 function weaponDmg(p, w) {
@@ -641,6 +841,7 @@ function weaponDmg(p, w) {
   if (w.ammo === 'mana') d *= (pas.magicDmg || 1);
   if (w.arch === 'THROWN_AOE') d *= (pas.aoeDmg || 1);
   d *= (pas.holyDmg || 1);
+  d *= (pas.dmgMul || 1);                                             // perky: +% poškození
   const up = (run && run.upgrades) || {};
   d *= 1 + 0.08 * (up.dmg || 0);                                      // stat Síla
   d *= 1 + 0.10 * ((run.wUpgrades && run.wUpgrades[p.weaponId]) || 0); // vylepšení zbraně
@@ -654,29 +855,36 @@ function weaponDmg(p, w) {
   return d;
 }
 function consumeAmmo(p, w) {
+  if (p.flurryT > 0) return true;   // lovec: smršt = nekonečná munice (i mana)
   if (w.ammo === 'melee') return true;
   if (w.ammo === 'mana') { if (p.mana < w.ammoPerShot) return false; p.mana -= w.ammoPerShot; return true; }
   const need = w.ammoPerShot || 1;
   if ((run.ammo[w.ammo] || 0) < need) return false;
+  if (p.passive.ammoSaveChance && Math.random() < p.passive.ammoSaveChance) return true;  // perk: nespotřebuje munici
   run.ammo[w.ammo] -= need; return true;
 }
 function fireWeapon(p, w, aim) {
   if (!consumeAmmo(p, w)) return false;
   const range = w.range * rangeMod(p, w);
   const dmg = weaponDmg(p, w);
+  const extra = (w.cat === 'ranged' && w.arch !== 'THROWN_AOE') ? (p.passive.projAdd || 0) : 0;  // perk: navíc projektily
   if (w.arch === 'MELEE_SWING') {
     meleeSwing(p, w, aim, range, dmg); sfx.swing();
   } else if (w.arch === 'PROJECTILE') {
-    spawnBullet(p, w, aim, range, dmg); rangedSound(w);
+    spawnBullet(p, w, aim, range, dmg);
+    for (let i = 1; i <= extra; i++) spawnBullet(p, w, aim + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 0.12, range, dmg);
+    rangedSound(w);
   } else if (w.arch === 'MULTISHOT') {
-    const n = w.shots || 3;
+    const n = (w.shots || 3) + extra;
     for (let i = 0; i < n; i++) {
       const a = aim + (i - (n - 1) / 2) * (w.spread || 0.3);
       spawnBullet(p, w, a, range, dmg);
     }
     rangedSound(w);
   } else if (w.arch === 'HITSCAN') {
-    hitscan(p, w, aim, range, dmg); rangedSound(w);
+    hitscan(p, w, aim, range, dmg);
+    for (let i = 1; i <= extra; i++) hitscan(p, w, aim + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 0.12, range, dmg);
+    rangedSound(w);
   } else if (w.arch === 'THROWN_AOE') {
     spawnThrown(p, w, aim, range, dmg); sfx.throwsnd();
   }
@@ -700,7 +908,8 @@ function meleeSwing(p, w, aim, range, dmg) {
     while (ad > Math.PI) ad -= Math.PI * 2; while (ad < -Math.PI) ad += Math.PI * 2;
     if (Math.abs(ad) > w.spread) continue;
     damageEnemy(e, dmg, w, p);
-    if (w.knockback) { e.x += Math.cos(aim) * w.knockback; e.y += Math.sin(aim) * w.knockback; }
+    const kb = (w.knockback || 0) + (p.passive.knockbackAdd || 0);   // perk: +odhoz
+    if (kb) { e.x += Math.cos(aim) * kb; e.y += Math.sin(aim) * kb; }
     hitAny = true;
   }
   if (hitAny && p.passive.lifesteal) p.hp = Math.min(p.hpMax, p.hp + dmg * p.passive.lifesteal);
@@ -759,6 +968,16 @@ function hitscan(p, w, aim, range, dmg) {
 }
 
 function damageEnemy(e, dmg, w, p, crit) {
+  // zvěd: bodnutí do zad — první útok v neviditelnosti
+  let backstab = false;
+  if (p && p.classId === 'zved' && p.backstabArmed && p.invisT > 0 && w) {
+    p.backstabArmed = false; p.invisT = 0; backstab = true;   // útok prozradí
+    const strong = e.arch === 'BOSS' || e.arch === 'TANK';
+    if (e.arch === 'BOSS') dmg *= 3;                          // boss: 3× poškození zbraně
+    else { dmg = e.hp + 9999; }                               // běžný nepřítel: okamžité zabití
+    effects.push({ type: 'text', x: e.x, y: e.y - e.r, txt: strong ? 'KRITICKÉ!' : 'FATÁLNÍ!', t: 34, color: '#ffd35c' });
+    e._backstabStrong = strong;
+  }
   // pancéřovaní pohltí část poškození
   if (e.def.armored || (e.elite === 'pancerovany')) dmg *= 0.7;
   e.hp -= dmg;
@@ -766,23 +985,48 @@ function damageEnemy(e, dmg, w, p, crit) {
   if (crit == null && p) crit = p._lastCrit;
   if (w && w.dot) { e.dotDps = Math.max(e.dotDps, w.dot.dps * ((p && p.passive.dotDmg) || 1)); e.dotTimer = w.dot.dur; }
   if (w && w.slow) { e.slowMul = w.slow.mul; e.slowTimer = w.slow.dur; }
+  // perk: mrazivé zásahy — šance zpomalit zasaženého
+  if (p && p.passive.freezeChance && Math.random() < p.passive.freezeChance) { e.slowMul = Math.min(e.slowMul || 1, 0.4); e.slowTimer = Math.max(e.slowTimer || 0, 120); }
   spawnFloater(e.x, e.y - e.r, Math.round(dmg), crit);
   burst(e.x, e.y, '#ffd0d0', crit ? 6 : 3);
   emitEv({ k: 'hit', x: e.x, y: e.y - e.r, d: Math.round(dmg), c: crit ? 1 : 0 });
   sfx.hitFlesh();
-  if (e.hp <= 0) killEnemy(e);
+  if (e.hp <= 0) {
+    // zvěd: zabití silnějšího nepřítele schopností resetuje cooldown
+    if (backstab && e._backstabStrong && p) p.abilityCd = 0;
+    if (w && w.fromTurret) registerTurretKill();   // inženýr: plnění koleček
+    killEnemy(e, p);
+  }
   else if (crit) hitStop = Math.max(hitStop, 2);
 }
-function killEnemy(e) {
+// Inženýr: zabíjením věžemi se plní „Kolečka se točí". Práh startuje na 2 a zdvojnásobuje se.
+function registerTurretKill() {
+  if (!run || !players.some(pl => pl.classId === 'inzenyr')) return;
+  run.turretKills = (run.turretKills || 0) + 1;
+  if (run.turretKills >= (run.wheelThreshold || 2)) {
+    run.turretKills = 0;
+    run.wheelThreshold = (run.wheelThreshold || 2) * 2;
+    run.wheelReady = (run.wheelReady || 0) + 1;
+    sfx.levelUp();
+    openWheelMenu();
+  }
+}
+function killEnemy(e, killer) {
   if (e.dead) return;
   e.dead = true;
   // combo → násobič skóre a gemů
   run.combo = (run.combo || 0) + 1; run.comboT = 180;
   const mult = comboMult();
   const gems = Math.max(1, Math.round((e.def.bounty || 4) * GEMS_PER_KILL_MUL * mult * (e.elite ? 3 : 1)));
-  creditAll(gems); run.score = (run.score || 0) + Math.round((e.def.score || 10) * mult * (e.elite ? 3 : 1));
+  for (const q of players) q.gems = (q.gems || 0) + Math.max(1, Math.round(gems * (q.passive.gemMul || 1)));  // perk: +% gemů (per hráč)
+  run.score = (run.score || 0) + Math.round((e.def.score || 10) * mult * (e.elite ? 3 : 1));
   if (wave) { wave.kills++; wave.reward.kills++; }
-  addXp(xpForKill(e.def) * (e.elite ? 3 : 1));
+  addXp(xpForKill(e.def) * (e.elite ? 3 : 1) * ((killer && killer.passive && killer.passive.xpMul) || 1));  // perk: +% XP
+  // perk: výbušné zabití — šance na výbuch v okolí
+  if (killer && killer.passive && killer.passive.explodeChance && Math.random() < killer.passive.explodeChance)
+    aoeExplosion(e.x, e.y, 55, 20, null, '#ffb020');
+  // BOSS (sub i mapový) → nabídka trvalého buffu všem hráčům
+  if (e.def.arch === 'BOSS') grantPerkOffer();
   const big = e.arch === 'TANK' || e.arch === 'BOSS';
   const style = e.arch === 'BOSS' ? 2 : (Math.random() * 5) | 0;
   zombieDeath(e.x, e.y, e.color, big, style);
@@ -793,6 +1037,9 @@ function killEnemy(e) {
   if (e.elite === 'zhoubny' || e.def.arch === 'EXPLODER' && false) aoeExplosion(e.x, e.y, 60, e.dmg, null, '#c060ff');
   if (e.elite) dropPickup(e.x, e.y, true);
   else if (Math.random() < 0.09) dropPickup(e.x, e.y, false);
+  // alchymista: z běžné zombie může vytéct žluč (na lektvar proměny)
+  if (e.arch !== 'BOSS' && players.some(q => q.classId === 'alchymista') && Math.random() < BILE_DROP_CHANCE)
+    pickups.push({ id: 'zluc', x: e.x, y: e.y, t: 900, bob: Math.random() * 6, hold: 0 });
 }
 // Násobič combo: 1× → až ~3× při dlouhé sérii
 function comboMult() { return 1 + Math.min(2, (run.combo || 0) * 0.05); }
@@ -823,7 +1070,7 @@ function nearestEnemyExcluding(x, y, range, ex) {
 // Nepřátelé cílí jen ŽIVÉ hráče; když jsou všichni padlí, vrací null → jdou k jádru.
 function nearestPlayer(x, y) {
   let best = null, bd = Infinity;
-  for (const p of players) { if (p.downed) continue; const d = (p.x - x) ** 2 + (p.y - y) ** 2; if (d < bd) { bd = d; best = p; } }
+  for (const p of players) { if (p.downed || p.invisT > 0) continue; const d = (p.x - x) ** 2 + (p.y - y) ** 2; if (d < bd) { bd = d; best = p; } }
   return best;
 }
 
@@ -987,11 +1234,19 @@ function updatePlayers(dt) {
     if (p.buffPower > 0) p.buffPower -= dt;
     if (p.shieldT > 0) p.shieldT -= dt;
     if (p.rageT > 0) p.rageT -= dt;
+    if (p.blockT > 0) p.blockT -= dt;         // rytíř: aktivní blok (nezranitelnost)
+    if (p.invisT > 0) { p.invisT -= dt; if (p.invisT <= 0) p.backstabArmed = false; }  // zvěd: neviditelnost
+    if (p.flurryT > 0) p.flurryT -= dt;       // lovec: smršt
+    if (p.clanCd > 0) p.clanCd -= dt;         // berserk: cooldown volání klanu (běží i mimo)
+    if (p.abomT > 0) updateAbomination(p, dt);// alchymista: proměna v abominaci
     if (p.mana < p.manaMax) p.mana = Math.min(p.manaMax, p.mana + p.manaRegen * dt);
     // léčivá aura (kněz)
     if (p.passive.healAura) p.hp = Math.min(p.hpMax, p.hp + p.passive.healAura * dt);
+    // perk: regenerace (HP/s)
+    if (p.passive.regenAdd) p.hp = Math.min(p.hpMax, p.hp + p.passive.regenAdd / 60 * dt);
     // pohyb
-    let sp = p.baseSpeed * (1 + 0.06 * ((run.upgrades && run.upgrades.speed) || 0));
+    let sp = p.baseSpeed * (1 + 0.06 * ((run.upgrades && run.upgrades.speed) || 0)) * (p.passive.speedMul || 1);
+    if (p.abomT > 0) sp *= ABOM_SPEEDMUL;     // abominace je pomalejší (−38 %)
     if (p.passive.berserk && p.hp < p.hpMax * 0.35) sp *= 1.3;
     if (p.rageT > 0) sp *= 1.25;
     if (p.dashT > 0) { // výpad (zvěd) — rychlý pohyb ve směru míření
@@ -1010,24 +1265,137 @@ function updatePlayers(dt) {
     updatePlayerCombat(p, dt);
   }
 }
-// Aktivní schopnost třídy
-function useAbility(p) {
-  if (!p || p.downed || p.abilityCd > 0) return;
-  const ab = ABILITIES[p.classId]; if (!ab) return;
-  p.abilityCd = ab.cd;
-  const a = p.aimAngle;
+function emitAbilityFx(p) {
   emitEv({ k: 'ability', x: p.x, y: p.y, cls: p.classId });
   effects.push({ type: 'nova', x: p.x, y: p.y, r: 4, rMax: 90, t: 24, color: p.color });
-  switch (p.classId) {
-    case 'rytir': p.shieldT = 300; for (const e of enemyHash.query(p.x, p.y, 160)) if (!e.dead) { const an = Math.atan2(p.y - e.y, p.x - e.x); e.x += Math.cos(an) * 6; e.y += Math.sin(an) * 6; } sfx.buy(); break;
-    case 'lovec': { const wq = WEAPONS.dlouhy_luk; for (let i = -4; i <= 4; i++) spawnBullet(p, wq, a + i * 0.14, 400, wq.dmg * 1.2); sfx.bow(); break; }
-    case 'berserk': p.rageT = 360; p.hp = Math.min(p.hpMax, p.hp + 20); sfx.groan(); break;
-    case 'zved': p.dashT = 12; sfx.throwsnd(); break;
-    case 'mag': { freezeTimer = Math.max(freezeTimer, 90); aoeExplosion(p.x, p.y, 120, 30 * (p.passive.magicDmg || 1), null, '#8fe0ff'); for (const e of enemyHash.query(p.x, p.y, 120)) if (!e.dead) { e.slowMul = 0.4; e.slowTimer = 180; } break; }
-    case 'alchymista': for (let i = 0; i < 6; i++) { const an = (i / 6) * Math.PI * 2; aoeExplosion(p.x + Math.cos(an) * 60, p.y + Math.sin(an) * 60, 60 * (p.passive.aoeRadius || 1), 30 * (p.passive.aoeDmg || 1), null, '#ff7b3a'); } break;
-    case 'inzenyr': { const tx = Math.floor(p.x / TILE), ty = Math.floor(p.y / TILE); const def = TRAPS.samostril; if (!isBlocked(tx, ty) && !grid.coreTiles.includes(tileIndex(tx, ty)) && grid.structures[tileIndex(tx, ty)] === null) { const obj = { def, defId: 'samostril', tx, ty, x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE, r: 15, hp: 90, hpMax: 90, fireCool: 0, flash: 0, temp: 900 }; grid.structures[tileIndex(tx, ty)] = obj; turrets.push(obj); flowDirty = true; } for (const s of walls) s.hp = s.hpMax; sfx.place(); break; }
-    case 'knez': for (const q of players) if (!q.downed) { q.hp = Math.min(q.hpMax, q.hp + 60); q.buffPower = 300; } aoeExplosion(p.x, p.y, 130, 40, null, '#f0e0a0'); break;
+}
+// Aktivní schopnost třídy (každá má vlastní gating; přepracováno dle zadání)
+function useAbility(p) {
+  if (!p || p.downed) return;
+  const ab = ABILITIES[p.classId]; if (!ab) return;
+  // — schopnosti s vlastním (ne-cooldown) gatingem —
+  if (p.classId === 'berserk') {
+    if (p.clanCd > 0 || p._clanActive) return;
+    if (p.hp > p.hpMax * BERSERK_HP_GATE) { banner = { text: 'Volání klanu jde jen při ≤ 50 % HP!', t: 70, warn: true }; return; }
+    spawnClanAxemen(p); p._clanActive = true; emitAbilityFx(p); sfx.groan(); return;
   }
+  if (p.classId === 'alchymista') {
+    if (p.abomT > 0) return;
+    if ((p.potions || 0) <= 0) { banner = { text: 'Potřebuješ lektvar (nasbírej 5 žlučí)!', t: 70, warn: true }; return; }
+    p.potions--; startAbomination(p); emitAbilityFx(p); sfx.groan(); return;
+  }
+  if (p.classId === 'knez') {
+    if (p.resurrectUsed) { banner = { text: 'Vzkříšení už bylo v tomto kole použito.', t: 70, warn: true }; return; }
+    p.resurrectUsed = true; doResurrect(p); emitAbilityFx(p); return;
+  }
+  // — schopnosti na klasickém cooldownu —
+  if (p.abilityCd > 0) return;
+  p.abilityCd = Math.round(ab.cd * (p.passive.cdMul || 1));   // perk Soustředění: −% cooldown
+
+  const a = p.aimAngle;
+  emitAbilityFx(p);
+  switch (p.classId) {
+    case 'rytir': {
+      const lvl = run.shieldLvl || 0;
+      p.blockT = shieldBlockTime(lvl); p._reflect = shieldReflect(lvl);
+      for (const e of enemyHash.query(p.x, p.y, 150)) if (!e.dead) { const an = Math.atan2(e.y - p.y, e.x - p.x); e.x += Math.cos(an) * 10; e.y += Math.sin(an) * 10; }
+      sfx.buy(); break;
+    }
+    case 'lovec': p.flurryT = HUNTER_FLURRY_TIME; sfx.bow(); break;
+    case 'zved': p.invisT = SCOUT_INVIS_TIME; p.backstabArmed = true; p.inv = Math.max(p.inv, 8); sfx.throwsnd(); break;
+    case 'mag': doArmageddon(p); break;
+    case 'inzenyr': deployFieldTurret(p); break;
+  }
+}
+// — Berserk: přivolá 2 sekerníky (dočasní spojenci s vlastním def) —
+function spawnClanAxemen(p) {
+  const d = CLAN_AXEMAN;
+  for (let i = 0; i < 2; i++) {
+    const ox = (i === 0 ? -1 : 1) * 22;
+    warriors.push({ def: d, defId: 'clan_axeman', x: p.x + ox, y: p.y + 14, r: 12,
+      hp: d.hp, hpMax: d.hp, homeX: p.x, homeY: p.y, cool: 0, aim: 0, flash: 0, atkAnim: 0,
+      temp: CLAN_LIFETIME, clanOwner: p });
+  }
+  banner = { text: '🪓 KLAN PŘICHÁZÍ!', t: 80 };
+}
+// — Alchymista: proměna v abominaci —
+function startAbomination(p) {
+  p.abomT = ABOM_DURATION; p._abomBurst = 0; p._preAbomR = p.r; p.r = 20;
+  p.hp = p.hpMax;   // proměna doléčí
+  banner = { text: '🧟 ABOMINACE!', t: 90, warn: true };
+}
+// běží každý tick z updatePlayers dokud abomT>0
+function updateAbomination(p, dt) {
+  p.abomT -= dt;
+  // požírání pěšáků + leptání silnějších v okruhu
+  p._abomBurst = (p._abomBurst || 0) - dt;
+  const doBurst = p._abomBurst <= 0;
+  if (doBurst) p._abomBurst = ABOM_ACID_BURST_CD;
+  const near = enemyHash.query(p.x, p.y, ABOM_ACID_RADIUS + 30);
+  for (const e of near) {
+    if (e.dead) continue;
+    const d = dist(p.x, p.y, e.x, e.y);
+    const weak = e.arch === 'WALKER' || e.arch === 'RUNNER' || e.arch === 'EXPLODER';
+    if (weak && d < p.r + e.r + 4) {                 // sežrání pěšáka na kontakt
+      e.hp = 0; killEnemy(e, p);
+      p.bonusHp = (p.bonusHp || 0) + ABOM_HP_PER_EAT; recalcPerks(p);  // +2 max HP navždy
+      p.hp = Math.min(p.hpMax, p.hp + 6);
+      spawnFloater(p.x, p.y - p.r - 4, 0, false); floaters[floaters.length - 1].txt = '+HP'; floaters[floaters.length - 1].pickup = '#8fd84a';
+    } else if (!weak && d < ABOM_ACID_RADIUS + e.r) { // leptání silnějších žíravinou
+      e.dotDps = Math.max(e.dotDps, ABOM_ACID_DPS); e.dotTimer = Math.max(e.dotTimer, 40);
+      if (doBurst) damageEnemy(e, ABOM_ACID_BURST, null, p);
+    }
+  }
+  // vizuální žíravá aura
+  if (Math.random() < 0.4) burst(p.x + (Math.random() - 0.5) * p.r * 2, p.y + (Math.random() - 0.5) * p.r * 2, '#8fd84a', 1);
+  if (p.abomT <= 0) { p.r = p._preAbomR || 12; banner = { text: 'Proměna skončila.', t: 50 }; }
+}
+// — Kněz: vzkříšení padlých + léčení + spálení —
+function doResurrect(p) {
+  let revived = 0;
+  for (const q of players) {
+    if (q === p) continue;
+    if (q.downed && dist(p.x, p.y, q.x, q.y) <= 220) { q.downed = false; q.hp = Math.round(q.hpMax * 0.6); q.inv = 60; revived++; effects.push({ type: 'nova', x: q.x, y: q.y, r: 4, rMax: 60, t: 30, color: '#f0e0a0' }); }
+  }
+  for (const q of players) if (!q.downed) q.hp = Math.min(q.hpMax, q.hp + 60);
+  aoeExplosion(p.x, p.y, 130, 40, null, '#f0e0a0');
+  banner = { text: revived ? '✨ VZKŘÍŠENO: ' + revived : '✨ Svaté světlo', t: 70 };
+}
+// — Mág: meteor na nejbližší shluk —
+function doArmageddon(p) {
+  // NEJBLIŽŠÍ shluk: mezi nepřáteli seřazenými dle vzdálenosti vezmi první s ≥3 sousedy,
+  // jinak nejbližšího nepřítele (ať meteor vždy někam dopadne).
+  let bx = p.x + Math.cos(p.aimAngle) * 160, by = p.y + Math.sin(p.aimAngle) * 160;
+  const live = enemies.filter(e => !e.dead).sort((a, b) => ((a.x - p.x) ** 2 + (a.y - p.y) ** 2) - ((b.x - p.x) ** 2 + (b.y - p.y) ** 2));
+  if (live.length) {
+    bx = live[0].x; by = live[0].y;   // fallback: nejbližší nepřítel
+    for (const e of live) { let c = 0; for (const o of enemyHash.query(e.x, e.y, MAG_METEOR_RADIUS)) if (!o.dead) c++; if (c >= 3) { bx = e.x; by = e.y; break; } }
+  }
+  const dmg = MAG_METEOR_DMG * (p.passive.magicDmg || 1);
+  effects.push({ type: 'nova', x: bx, y: by, r: 6, rMax: MAG_METEOR_RADIUS, t: 30, color: '#ff7b3a' });
+  aoeExplosion(bx, by, MAG_METEOR_RADIUS, dmg, MAG_METEOR_DOT, '#ff7b3a');
+  shake = Math.min(12, shake + 8); sfx.boom();
+  banner = { text: '☄ ARMAGEDON!', t: 70, warn: true };
+}
+// — Inženýr: postaví polní věž(e) dle vylepšení + opraví zdi —
+function deployFieldTurret(p) {
+  const wu = run.wheelUpgrades || {};
+  const count = 1 + (wu.count || 0);
+  const dur = 720 + (wu.dur || 0) * 180;        // +3 s za úroveň
+  const hp = Math.round(90 * (1 + 0.4 * (wu.hp || 0)));
+  const def = TRAPS.samostril;
+  let placed = 0;
+  const spots = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]];
+  const btx = Math.floor(p.x / TILE), bty = Math.floor(p.y / TILE);
+  for (const [dx, dy] of spots) {
+    if (placed >= count) break;
+    const tx = btx + dx, ty = bty + dy;
+    if (!inBounds(tx, ty) || isBlocked(tx, ty) || grid.coreTiles.includes(tileIndex(tx, ty)) || grid.structures[tileIndex(tx, ty)] !== null) continue;
+    const obj = { def, defId: 'samostril', tx, ty, x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE, r: 15, hp, hpMax: hp, fireCool: 0, flash: 0, temp: dur, field: true };
+    grid.structures[tileIndex(tx, ty)] = obj; turrets.push(obj); placed++;
+  }
+  for (const s of walls) s.hp = s.hpMax;
+  flowDirty = true; sfx.place();
 }
 function updatePlayerCombat(p, dt) {
   if (p.atkAnim > 0) p.atkAnim -= dt;
@@ -1048,13 +1416,23 @@ function updatePlayerCombat(p, dt) {
     else p.cool = 20; // prázdno – krátká prodleva
   }
 }
-function damagePlayer(p, amount) {
+function damagePlayer(p, amount, src) {
   if (p.inv > 0) return;
+  // rytíř: aktivní blok štítem vykryje VŠECHNY útoky (i střely) + volitelně odrazí
+  if (p.blockT > 0) {
+    effects.push({ type: 'text', x: p.x, y: p.y - 20, txt: 'BLOK', t: 30, color: '#8fd0ff' });
+    if (p._reflect && src && !src.dead) damageEnemy(src, amount * p._reflect, null, p);
+    sfx.buy(); return;
+  }
   if (p.passive.dodge && Math.random() < p.passive.dodge) { effects.push({ type: 'text', x: p.x, y: p.y - 20, txt: 'úhyb', t: 30, color: '#c8c85c' }); return; }
   let dmg = amount;
   if (p.passive.block && Math.random() < p.passive.block) dmg *= 0.4;
-  if (p.shieldT > 0) dmg *= 0.35;   // aktivní štít (Bojový pokřik)
+  if (p.shieldT > 0) dmg *= 0.35;   // starší štít (kompatibilita)
+  if (p.abomT > 0) dmg *= (1 - ABOM_DR);            // abominace: −50 % obdrž. poškození
+  dmg *= (p.passive.armorMul || 1);                  // perky: −% obdrženého poškození
   dmg *= Math.max(0.35, 1 - 0.05 * ((run.upgrades && run.upgrades.armor) || 0)); // stat Pancíř
+  // perk: trny — vrací část poškození útočníkovi zblízka
+  if (p.passive.thorns && src && !src.dead) damageEnemy(src, dmg * p.passive.thorns, null, p);
   p.hp -= dmg; p.inv = 45;
   flash = 0.5; shake = Math.min(9, shake + 5); sfx.hurt();
   burst(p.x, p.y, '#ff6a6a', 12);
@@ -1075,7 +1453,7 @@ function circleBlocked(x, y, r) {
     for (let ty = miny; ty <= maxy; ty++) {
       if (!inBounds(tx, ty)) continue;              // mimo mapu neblokuje (kraje)
       const i = tileIndex(tx, ty);
-      if (grid.tiles[i] === 1 || grid.structures[i] !== null) return true;
+      if (grid.tiles[i] === 1 || structBlocks(grid.structures[i])) return true;  // věže jsou průchozí
     }
   return false;
 }
@@ -1217,7 +1595,7 @@ function updateEnemies(dt) {
     if (pl && hitCircle(e, pl, 2)) {
       e.atkCool -= dt;
       if (e.arch === 'EXPLODER') { explodeEnemy(e, pl); continue; }
-      if (e.atkCool <= 0) { damagePlayer(pl, e.dmg); e.atkCool = e.atkRate || 40; }
+      if (e.atkCool <= 0) { damagePlayer(pl, e.dmg, e); e.atkCool = e.atkRate || 40; }
     }
     // kontakt s válečníkem
     for (const wr of warriors) {
@@ -1241,7 +1619,7 @@ function explodeEnemy(e, target) {
   e.dead = true;
   aoeExplosion(e.x, e.y, e.def.aoeRadius, 0, null, '#ff6a4a');
   // zásah hráče/válečníků v dosahu
-  if (dist(e.x, e.y, target.x, target.y) <= e.def.aoeRadius + target.r) damagePlayer(target, e.dmg);
+  if (dist(e.x, e.y, target.x, target.y) <= e.def.aoeRadius + target.r) damagePlayer(target, e.dmg, e);
   for (const wr of warriors) if (dist(e.x, e.y, wr.x, wr.y) <= e.def.aoeRadius) wr.hp -= e.dmg;
 }
 function damageStructure(s, dmg) {
@@ -1259,6 +1637,12 @@ function updateWarriors(dt) {
   for (const wr of warriors) {
     if (wr.flash > 0) wr.flash -= dt;
     if (wr.atkAnim > 0) wr.atkAnim -= dt;
+    // sekerníci klanu: dočasný život + odejdou, když berserk vystoupá nad 65 % HP
+    if (wr.clanOwner) {
+      if (wr.temp != null) wr.temp -= dt;
+      if (wr.clanOwner.hp > wr.clanOwner.hpMax * CLAN_DISMISS_HP) wr.temp = 0;
+      wr.homeX = wr.clanOwner.x; wr.homeY = wr.clanOwner.y;
+    }
     const def = wr.def;
     const buff = teamMax('warriorBuff') || 1;
     const tgt = nearestEnemy(wr.x, wr.y, def.seek);
@@ -1281,6 +1665,13 @@ function updateWarriors(dt) {
       if (d > 6) { const a = Math.atan2(wr.homeY - wr.y, wr.homeX - wr.x); moveEntity(wr, wr.x + Math.cos(a) * def.speed * dt, wr.y + Math.sin(a) * def.speed * dt); }
     }
   }
+  // úklid vypršelých sekerníků (mrtvé kosí i smyčka nepřátel — proto odchod řešíme podle vlastníka níže)
+  for (const w of warriors) if (w.clanOwner && w.temp != null && w.temp <= 0) { w.hp = 0; burst(w.x, w.y, w.def.color, 12); }
+  warriors = warriors.filter(w => w.hp > 0);
+  // po odchodu VŠECH sekerníků: 40s cooldown a odblokování dalšího volání
+  for (const p of players) {
+    if (p._clanActive && !warriors.some(w => w.clanOwner === p)) { p._clanActive = false; p.clanCd = CLAN_COOLDOWN; banner = { text: 'Klan odešel — cooldown 40 s.', t: 60 }; }
+  }
 }
 
 /* ---------- Věže (EMITTER) ---------- */
@@ -1290,12 +1681,14 @@ function updateTurrets(dt) {
     if (t.temp != null) { t.temp -= dt; if (t.temp <= 0) { t.hp = 0; damageStructure(t, 0); continue; } }
     t.fireCool -= dt;
     const def = t.def;
-    const rate = def.rate * teamRate('emitterRate');
+    const wu = (run && run.wheelUpgrades) || {};
+    const dmgMul = (t.up || 1) * (t.field ? (1 + 0.2 * (wu.dmg || 0)) : 1);   // wheel: +dmg polní věže
+    const rate = def.rate * teamRate('emitterRate') * (t.field ? 1 / (1 + 0.15 * (wu.rate || 0)) : 1);  // wheel: +rychlost
     if (t.fireCool <= 0) {
       const tgt = nearestEnemy(t.x, t.y, def.range);
       if (tgt) {
         const a = Math.atan2(tgt.y - t.y, tgt.x - t.x);
-        bullets.push({ x: t.x, y: t.y, vx: Math.cos(a) * def.projSpeed, vy: Math.sin(a) * def.projSpeed, r: 4, dmg: def.dmg * (t.up || 1), pierce: def.pierce || 0, range: def.range, traveled: 0, color: '#ffe08a', hitIds: [], owner: null });
+        bullets.push({ x: t.x, y: t.y, vx: Math.cos(a) * def.projSpeed, vy: Math.sin(a) * def.projSpeed, r: 4, dmg: def.dmg * dmgMul, pierce: def.pierce || 0, range: def.range, traveled: 0, color: '#ffe08a', hitIds: [], owner: null, fromTurret: true });
         t.fireCool = rate; sfx.crossbow();
       }
     }
@@ -1397,9 +1790,16 @@ function updateFloaters(dt) {
 function updatePickups(dt) {
   for (const pu of pickups) {
     pu.t -= dt; pu.bob += 0.1 * dt;
+    // žluč: sbírá jen alchymista a musí u ní stát 1 s (harvest)
+    if (pu.id === 'zluc') {
+      const al = players.find(p => !p.downed && p.classId === 'alchymista' && dist(pu.x, pu.y, p.x, p.y) < p.r + 16);
+      if (al) { pu.hold = (pu.hold || 0) + dt; if (pu.hold >= BILE_HARVEST_TIME) { applyPickup(pu, al); pu.dead = true; } }
+      else pu.hold = 0;
+      continue;
+    }
     for (const p of players) {
       if (p.downed) continue;
-      if (dist(pu.x, pu.y, p.x, p.y) < p.r + 14) { applyPickup(pu, p); pu.dead = true; break; }
+      if (dist(pu.x, pu.y, p.x, p.y) < (p.r + 14) * (p.passive.pickupMul || 1)) { applyPickup(pu, p); pu.dead = true; break; }
     }
   }
   pickups = pickups.filter(pu => !pu.dead && pu.t > 0);
@@ -1412,6 +1812,11 @@ function applyPickup(pu, p) {
   else if (d.kind === 'heal') { for (const q of players) if (!q.downed) q.hp = Math.min(q.hpMax, q.hp + 45); }
   else if (d.kind === 'gems') { creditAll(d.gems); }
   else if (d.kind === 'mat') { run[d.mat] = (run[d.mat] || 0) + d.amt; }
+  else if (d.kind === 'bile') {
+    p.bile = (p.bile || 0) + 1;
+    if (p.bile >= BILE_PER_POTION && (p.potions || 0) < BILE_MAX_POTIONS) { p.bile -= BILE_PER_POTION; p.potions = (p.potions || 0) + 1; banner = { text: '⚗ Lektvar abominace hotov! (' + p.potions + '/' + BILE_MAX_POTIONS + ')', t: 80 }; }
+    else if (p.bile >= BILE_PER_POTION) p.bile = BILE_PER_POTION;   // strop, když jsou lektvary plné
+  }
   burst(pu.x, pu.y, d.color, 14);
   spawnFloater(pu.x, pu.y - 8, 0, false); floaters[floaters.length - 1].txt = d.icon + ' ' + d.name; floaters[floaters.length - 1].pickup = d.color;
   sfx.heal();
@@ -1876,14 +2281,51 @@ function drawPlayers() {
     if (p.rageT > 0) { ctx.fillStyle = `rgba(255,60,40,${0.15 + Math.sin(animClock * 0.4) * 0.1})`; ctx.beginPath(); ctx.arc(p.x, p.y + bob, p.r + 8, 0, Math.PI * 2); ctx.fill(); }
     if (p.buffPower > 0 || p.buffRapid > 0) { ctx.strokeStyle = p.buffPower > 0 ? 'rgba(255,120,230,0.6)' : 'rgba(120,220,255,0.6)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p.x, p.y + bob, p.r + 4, 0, Math.PI * 2); ctx.stroke(); }
     if (isCoop() && p === lp) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(p.x, p.y + bob, p.r + 9, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
+    // alchymista: proměna v abominaci — jiné tělo + žíravá aura
+    if (p.abomT > 0) { drawAbomination(p.x, p.y + bob, p.r, p.aimAngle, p.walk); continue; }
     if (blink) continue;
     const w0 = WEAPONS[p.weaponId] || {};
     const atk = clamp(p.atkAnim / 10, 0, 1);
+    if (p.invisT > 0) ctx.globalAlpha = 0.28;   // zvěd: neviditelnost (poloprůhledný)
     drawBlockyHumanoid(p.x, p.y + bob, p.r, p.aimAngle, p.walk, atk, {
       skin: '#d8a878', shirt: p.color, dark: shade(p.color, -0.4), hat: shade(p.color, 0.22), pants: '#39344f',
       weaponShape: WEAPON_SHAPE[p.weaponId] || (w0.cat === 'melee' ? 'sword' : 'bow'), weaponColor: w0.color,
     });
+    ctx.globalAlpha = 1;
+    // rytíř: aktivní blok — velký štít napřažený ve směru míření
+    if (p.blockT > 0) drawKnightShield(p.x, p.y + bob, p.r, p.aimAngle);
   }
+}
+// Štít rytíře (vizuál aktivního bloku): kovová deska s bosem, natočená ve směru míření.
+function drawKnightShield(x, y, r, ang) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
+  const d = r * 1.15, w = r * 1.0;
+  ctx.fillStyle = '#c8cdd6'; rrect(d, -w * 0.55, r * 0.5, w * 1.1, r * 0.22, '#c8cdd6');
+  ctx.strokeStyle = '#8a9099'; ctx.lineWidth = 2; ctx.strokeRect(d, -w * 0.55, r * 0.5, w * 1.1);
+  ctx.fillStyle = '#ffd35c'; ctx.beginPath(); ctx.arc(d + r * 0.25, 0, r * 0.16, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = `rgba(150,210,255,${0.5 + Math.sin(animClock * 0.5) * 0.3})`; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(0, 0, r + 7, ang - 1.1 - ang, ang + 1.1 - ang); ctx.stroke();
+  ctx.restore();
+}
+// Tělo abominace: velké shrbené monstrum s tesáky a leptavou aurou.
+function drawAbomination(x, y, r, ang, walk) {
+  const R = r * 1.5, lp = Math.sin(walk || 0);
+  // žíravá aura
+  ctx.fillStyle = `rgba(120,200,60,${0.10 + Math.sin(animClock * 0.3) * 0.05})`;
+  ctx.beginPath(); ctx.arc(x, y, ABOM_ACID_RADIUS, 0, Math.PI * 2); ctx.fill();
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
+  // paže/drápy
+  for (const s of [-1, 1]) { rrect(R * 0.1, s * R * 0.5 - R * 0.16, R * 0.7, R * 0.32, R * 0.14, '#6f8a3a'); rrect(R * 0.7, s * R * 0.5 - R * 0.1, R * 0.22, R * 0.2, R * 0.06, '#dfe6c0'); }
+  // trup
+  rrect(-R * 0.5, -R * 0.6, R * 1.05, R * 1.2, R * 0.34, '#4e6a2c');
+  rrect(-R * 0.4, -R * 0.5, R * 0.85, R * 1.0, R * 0.3, '#6f9a3a');
+  // boule/nádory
+  ctx.fillStyle = '#8fd84a'; for (const o of [[-0.2, -0.3], [0.1, 0.25], [-0.28, 0.2]]) { ctx.beginPath(); ctx.arc(o[0] * R, o[1] * R, R * 0.13, 0, Math.PI * 2); ctx.fill(); }
+  // hlava + tesáky + oči
+  ctx.fillStyle = '#5e7a30'; ctx.beginPath(); ctx.arc(R * 0.15, 0, R * 0.5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#f4f0d0'; for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(R * 0.5, s * R * 0.14); ctx.lineTo(R * 0.72, s * R * 0.05); ctx.lineTo(R * 0.5, s * R * 0.02); ctx.fill(); }
+  ctx.fillStyle = '#ffd344'; ctx.beginPath(); ctx.arc(R * 0.3, -R * 0.16, R * 0.09, 0, Math.PI * 2); ctx.arc(R * 0.3, R * 0.16, R * 0.09, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
 }
 // Oblá postava shora, natočená ve směru míření (ang): trup, hlava, 2 ruce, 2 nohy.
 function drawBlockyHumanoid(x, y, r, ang, walk, atk, pal) {
@@ -2100,7 +2542,7 @@ function drawBuildGhost() {
     const { tx, ty } = buildHover;
     const i = tileIndex(tx, ty);
     let ok = inBounds(tx, ty) && grid.tiles[i] !== 1 && !grid.coreTiles.includes(i);
-    if (STRUCTURES[buildSel] || (TRAPS[buildSel] && TRAPS[buildSel].arch === 'EMITTER')) ok = ok && grid.structures[i] === null && pathExistsWith(tx, ty);
+    if (STRUCTURES[buildSel] || (TRAPS[buildSel] && TRAPS[buildSel].arch === 'EMITTER')) { ok = ok && grid.structures[i] === null; if (STRUCTURES[buildSel]) ok = ok && pathExistsWith(tx, ty); }
     ctx.globalAlpha = 0.35; ctx.fillStyle = ok ? '#5cff8a' : '#ff5c5c';
     roundRect(tx * TILE + 1, ty * TILE + 1, TILE - 2, TILE - 2, 5); ctx.fill();
     ctx.globalAlpha = 0.9;
@@ -2186,17 +2628,18 @@ function drawHud() {
 }
 function drawAbilityButton(me) {
   const r = BTN.ability, ab = ABILITIES[me.classId];
-  const ready = me.abilityCd <= 0;
+  // připravenost + doplňkový popisek podle typu gatingu
+  let ready = me.abilityCd <= 0, frac = ab ? Math.max(0, me.abilityCd / ab.cd) : 0, extra = '';
+  if (me.classId === 'berserk') { ready = me.clanCd <= 0 && !me._clanActive && me.hp <= me.hpMax * BERSERK_HP_GATE; frac = me.clanCd > 0 ? me.clanCd / CLAN_COOLDOWN : 0; extra = me._clanActive ? 'klan v poli' : (me.hp > me.hpMax * BERSERK_HP_GATE ? '≤50% HP' : ''); }
+  else if (me.classId === 'alchymista') { ready = (me.potions || 0) > 0 && me.abomT <= 0; frac = 0; extra = me.abomT > 0 ? Math.ceil(me.abomT / 60) + 's' : '🧪' + (me.potions || 0) + ' (' + (me.bile || 0) + '/' + BILE_PER_POTION + ')'; }
+  else if (me.classId === 'knez') { ready = !me.resurrectUsed; frac = 0; extra = me.resurrectUsed ? 'příště v dalším kole' : ''; }
   ctx.fillStyle = ready ? '#3a5a34' : '#241a10';
   roundRect(r.x, r.y, r.w, r.h, 8); ctx.fill();
   ctx.strokeStyle = ready ? '#8fd08f' : '#4a3a2a'; ctx.lineWidth = 1.5; roundRect(r.x, r.y, r.w, r.h, 8); ctx.stroke();
   ctx.fillStyle = ready ? '#e8ecd8' : '#8a7a5a'; ctx.font = '13px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText((ab ? ab.icon : '✦') + ' ' + (ab ? ab.name : ''), r.x + r.w / 2, r.y + r.h / 2);
+  ctx.fillText((ab ? ab.icon : '✦') + ' ' + (ab ? ab.name : '') + (extra ? ' · ' + extra : ''), r.x + r.w / 2, r.y + r.h / 2);
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  if (!ready) { // cooldown překryv
-    const frac = ab ? me.abilityCd / ab.cd : 0;
-    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(r.x, r.y, r.w * frac, r.h);
-  }
+  if (frac > 0) { ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(r.x, r.y, r.w * frac, r.h); }
 }
 function drawStick(s, color) {
   if (!s.active) return;

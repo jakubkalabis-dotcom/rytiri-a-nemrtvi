@@ -37,11 +37,15 @@ const MAPS = [
   { name: 'Peklo',           cols: 30, rows: 46, seed: 161, pal: ['#6a1e14', '#7c261a', '#a04030', '#ff7a20'], fog: 'rgba(120,25,5,0.22)', hell: true },
 ];
 const NUM_MAPS = MAPS.length;
-const WAVES_PER_MAP = 5;                 // každá mapa = 5 vln, 5. vlna = boss = konec mapy
-const FINAL_WAVE = NUM_MAPS * WAVES_PER_MAP;  // 75
+const WAVES_PER_MAP = 25;                // každá mapa = 25 vln; každá 5. vlna = sub-boss, 25. = mapový boss
+const FINAL_WAVE = NUM_MAPS * WAVES_PER_MAP;  // 375
 function mapForWave(wave) { return Math.min(NUM_MAPS - 1, Math.floor((Math.max(1, wave) - 1) / WAVES_PER_MAP)); }
-function isMapEndWave(wave) { return wave % WAVES_PER_MAP === 0; }   // boss vlna = konec mapy
+function waveInMap(wave) { return ((Math.max(1, wave) - 1) % WAVES_PER_MAP) + 1; }   // 1..25
+function isMapEndWave(wave) { return wave % WAVES_PER_MAP === 0; }   // mapový boss = konec mapy (každá 25.)
+function isSubBossWave(wave) { return wave % 5 === 0 && wave % WAVES_PER_MAP !== 0; } // sub-boss každou 5. (mimo 25.)
 function isFinalWave(wave) { return wave >= FINAL_WAVE; }
+// souvislý ukazatel postupu 0..~15 (mapa + zlomek uvnitř mapy) — pro škálování obtížnosti
+function waveProgress(wave) { return mapForWave(wave) + (waveInMap(wave) - 1) / WAVES_PER_MAP; }
 
 // Nastaví rozměry, jádro a spawny podle mapy (bez generování překážek – to dělá loadMap v engine).
 function applyMapDims(i) {
@@ -141,12 +145,26 @@ const ENEMIES = {
   abominace: { name:'Abominace', arch:'BOSS',     hp:1100,speed:0.4, dmg:34, atkRate:60, size:66, bounty:200,score:800, leak:6, color:'#9a6a34', enrage:true },
   lich:      { name:'Lich',      arch:'BOSS',     hp:820, speed:0.5, dmg:20, atkRate:55, size:50, bounty:220,score:900, leak:5, color:'#4a92c0', summon:'behac', summonRate:170, volley:true },
   pekelny_pan:{name:'Pekelný pán',arch:'BOSS',    hp:3200,speed:0.5, dmg:44, atkRate:45, size:80, bounty:1000,score:5000,leak:20,color:'#ff4a1a', summon:'vybusny', summonRate:120, volley:true, enrage:true, final:true },
+  // Sub-bossové (mini-bossové — objeví se každou 5. vlnu mimo 25.; po smrti dají týmu trvalý buff). arch BOSS + sub:true
+  rytir_smrti:  { name:'Rytíř smrti',   arch:'BOSS', sub:true, hp:340, speed:0.7,  dmg:20, atkRate:46, size:40, bounty:70, score:260, leak:3, color:'#8a90a0', armored:true },
+  krvavy_reznik:{ name:'Krvavý řezník', arch:'BOSS', sub:true, hp:300, speed:1.0,  dmg:26, atkRate:34, size:42, bounty:75, score:280, leak:3, color:'#b83030' },
+  morova_matka: { name:'Morová matka',  arch:'BOSS', sub:true, hp:360, speed:0.5,  dmg:16, atkRate:60, size:44, bounty:80, score:300, leak:4, color:'#6ab04a', summon:'behac', summonRate:150 },
+  kostej:       { name:'Kostěj',        arch:'BOSS', sub:true, hp:320, speed:0.55, dmg:18, atkRate:50, size:40, bounty:80, score:300, leak:3, color:'#c8c0a0', volley:true },
+  masovy_golem: { name:'Masový golem',  arch:'BOSS', sub:true, hp:520, speed:0.34, dmg:30, atkRate:64, size:52, bounty:90, score:340, leak:5, color:'#9a5a4a' },
 };
 const BOSS_CYCLE = ['nekromant', 'abominace', 'lich'];
-function bossForWave(wave) {
+const SUB_BOSS_CYCLE = ['rytir_smrti', 'krvavy_reznik', 'morova_matka', 'kostej', 'masovy_golem'];
+// Mapový boss (konec mapy, každá 25. vlna): cyklí 3 velké bossy přes mapy, finále = Pekelný pán.
+function mapBossForWave(wave) {
   if (isFinalWave(wave)) return 'pekelny_pan';
-  return BOSS_CYCLE[(Math.floor(wave / 5) - 1) % BOSS_CYCLE.length];
+  return BOSS_CYCLE[mapForWave(wave) % BOSS_CYCLE.length];
 }
+// Sub-boss (každou 5. vlnu mimo mapového bosse): cyklí 5 druhů podle pořadí v kampani.
+function subBossForWave(wave) {
+  const idx = mapForWave(wave) * 4 + Math.floor((waveInMap(wave) - 1) / 5); // 0-based pořadí sub-bosse
+  return SUB_BOSS_CYCLE[idx % SUB_BOSS_CYCLE.length];
+}
+function bossForWave(wave) { return isSubBossWave(wave) ? subBossForWave(wave) : mapBossForWave(wave); }
 
 /* ---------- Elitní přídomky (náhodně na běžných nepřátelích od pozdějších vln) ---------- */
 const ELITES = {
@@ -155,7 +173,8 @@ const ELITES = {
   zhoubny:     { name:'Zhoubný',     hpMul:1.6, spdMul:1.1, dmgMul:1.3, glow:'#c060ff', explode:true },
 };
 const ELITE_KEYS = Object.keys(ELITES);
-function eliteChance(wave) { return wave < 3 ? 0 : Math.min(0.22, 0.04 + wave * 0.012); }
+// Šance na elitu roste hlavně s pořadím mapy (a mírně uvnitř mapy). Strop 28 %.
+function eliteChance(wave) { const m = mapForWave(wave); return m < 1 && waveInMap(wave) < 6 ? 0 : Math.min(0.28, 0.03 + m * 0.016 + (waveInMap(wave) - 1) * 0.002); }
 
 /* ---------- Dočasné dropy (padají z nepřátel; elita dropne vždy) ---------- */
 const DROPS = {
@@ -166,35 +185,43 @@ const DROPS = {
   truhla: { name:'Truhla',      icon:'💰', color:'#ffd35c', kind:'gems', gems:20 },
   wood:   { name:'Dřevo',       icon:'🪵', color:'#8a5c30', kind:'mat', mat:'wood',  amt:2 },
   steel:  { name:'Ocel',        icon:'⛓', color:'#b8bcc4', kind:'mat', mat:'steel', amt:1 },
+  zluc:   { name:'Zombie žluč', icon:'🧪', color:'#8fd84a', kind:'bile' },   // sbírá jen alchymista (podržet 1 s)
 };
 // materiály na vylepšování zbraní padají často (aby se dalo craftit)
 const DROP_WEIGHTS = { rapid: 3, power: 3, freeze: 2, heal: 3, truhla: 2, wood: 7, steel: 4 };
-// Škálování dle čísla vlny (kampaň má 75 vln přes 15 map → mírnější + stropy):
+// Škálování dle POSTUPU (mapa + zlomek uvnitř mapy), aby křivka dávala smysl přes 375 vln.
+// prog = 0 (mapa 1, vlna 1) .. ~15 (mapa 15, konec). hp roste plynule, spd/dmg mají strop.
 function enemyScale(wave) {
+  const prog = waveProgress(wave);
   return {
-    hp:  Math.min(9, 1 + 0.09 * (wave - 1)),
-    spd: Math.min(1.7, 1 + 0.02 * (wave - 1)),
-    dmg: Math.min(4, 1 + 0.05 * (wave - 1)),
+    hp:  1 + 0.55 * prog,               // mapa 1 ~1×, mapa 15 konec ~9×
+    spd: Math.min(1.8, 1 + 0.035 * prog),
+    dmg: Math.min(6, 1 + 0.11 * prog),
   };
 }
-// Váhy výskytu typů podle vlny (boss řešen zvlášť: každá 5. vlna).
+// Váhy výskytu typů podle POSTUPU mapami (boss/sub-boss řešen zvlášť).
 function waveComposition(wave) {
+  const p = waveProgress(wave);
   const w = { chodec: 1 };
-  if (wave >= 2) w.behac   = 0.25 + Math.min(0.4, wave * 0.03);
-  if (wave >= 3) w.ohar    = 0.12 + Math.min(0.35, (wave - 3) * 0.03);
-  if (wave >= 4) w.obr     = 0.12 + Math.min(0.3, (wave - 4) * 0.03);
-  if (wave >= 4) w.brnenec = 0.10 + Math.min(0.28, (wave - 4) * 0.025);
-  if (wave >= 5) w.plivac  = 0.15 + Math.min(0.3, (wave - 5) * 0.025);
-  if (wave >= 6) w.vybusny = 0.12 + Math.min(0.3, (wave - 6) * 0.03);
+  if (p >= 0.3) w.behac   = 0.25 + Math.min(0.5,  p * 0.05);
+  if (p >= 1.0) w.ohar    = 0.12 + Math.min(0.45, (p - 1.0) * 0.05);
+  if (p >= 1.5) w.obr     = 0.10 + Math.min(0.35, (p - 1.5) * 0.04);
+  if (p >= 2.0) w.brnenec = 0.10 + Math.min(0.34, (p - 2.0) * 0.035);
+  if (p >= 2.5) w.plivac  = 0.12 + Math.min(0.35, (p - 2.5) * 0.03);
+  if (p >= 3.0) w.vybusny = 0.10 + Math.min(0.34, (p - 3.0) * 0.03);
   return w;
 }
-function isBossWave(wave) { return wave % 5 === 0; }
-// Horda: od 2. mapy (wave>5) je vlna těsně před bossem záplava obyčejných zombie.
+function isBossWave(wave) { return wave % 5 === 0; }   // jakákoli bossovská vlna (sub i mapový)
+// Horda: vlna těsně před (sub)bossem = záplava obyčejných zombie (mimo úplně první bloky mapy 1).
 function isHordeWave(wave) { return wave > 5 && wave % 5 === 4; }
-// Kolik nepřátel v dané vlně (se stropem, ať se to dá zvládnout)
-function waveCount(wave) { return isHordeWave(wave) ? Math.min(70, 30 + wave) : Math.min(36, 8 + Math.floor(wave * 1.3)); }
-// Složení hordy: skoro jen chodci + trocha běhačů/ohařů
-function hordeComposition(wave) { const w = { chodec: 1 }; if (wave >= 7) w.behac = 0.4; if (wave >= 9) w.ohar = 0.3; return w; }
+// Kolik nepřátel ve vlně: roste s postupem uvnitř mapy i s pořadím mapy (se stropem).
+function waveCount(wave) {
+  const m = mapForWave(wave), wIn = waveInMap(wave) - 1;
+  if (isHordeWave(wave)) return Math.min(85, 45 + m * 3 + wIn);
+  return Math.min(44, 12 + Math.floor(m * 0.8 + wIn * 1.0));
+}
+// Složení hordy: skoro jen chodci + trocha běhačů/ohařů (víc s postupem)
+function hordeComposition(wave) { const p = waveProgress(wave); const w = { chodec: 1 }; if (p >= 0.8) w.behac = 0.4; if (p >= 1.5) w.ohar = 0.3; return w; }
 
 /* ---------- Pasti (15) ---------- */
 /* Archetypy: ONESHOT | SLOW | DOT_AOE | EMITTER */
@@ -242,10 +269,10 @@ const WARRIORS = {
    costMul{melee,ranged,trap,wall,warrior,ammo}, passive{…} (viz game.js). */
 const CLASSES = {
   rytir: {
-    name:'Rytíř', icon:'⚔', color:'#c8a45c', desc:'Odolný boj zblízka, štít a levné meče.',
-    start:['rezavy_mec'], startGems:130, hpMod:1.4, spdMod:0.95,
+    name:'Rytíř', icon:'⚔', color:'#c8a45c', desc:'Nejtvrdší tank. Štítem vykryje všechny útoky. Levné meče.',
+    start:['rezavy_mec'], startGems:130, hpMod:1.7, spdMod:0.92,
     costMul:{ melee:0.8, ranged:1, trap:1, wall:1, warrior:1, ammo:1 },
-    passive:{ meleeDmg:1.15, block:0.12 },
+    passive:{ meleeDmg:1.15, block:0.18 },
   },
   lovec: {
     name:'Lovec', icon:'🏹', color:'#5cb87a', desc:'Mistr dálkového boje, delší dostřel a levná munice.',
@@ -291,17 +318,63 @@ const CLASSES = {
   },
 };
 
-/* ---------- Aktivní schopnosti tříd (tlačítko + cooldown ve framech) ---------- */
+/* ---------- Aktivní schopnosti tříd (tlačítko + cooldown ve framech, 60 = 1 s) ----------
+   Každá schopnost má `desc` s přesnými čísly (hráč musí vědět co, kolik a jak dělá).            */
 const ABILITIES = {
-  rytir:      { name:'Bojový pokřik', icon:'🛡', cd:600, desc:'Štít a provokace okolních nepřátel.' },
-  lovec:      { name:'Salva šípů',    icon:'🏹', cd:540, desc:'Vystřelí vějíř šípů.' },
-  berserk:    { name:'Zuřivost',      icon:'🩸', cd:660, desc:'Dočasně obří poškození a vysávání.' },
-  zved:       { name:'Úprk',          icon:'💨', cd:360, desc:'Prudký výpad, nezranitelnost, sekne po cestě.' },
-  mag:        { name:'Mrazivá nova',  icon:'❄', cd:600, desc:'Zmrazí a zraní vše kolem.' },
-  alchymista: { name:'Kobercový nálet', icon:'💣', cd:720, desc:'Rozhází několik bomb kolem sebe.' },
-  inzenyr:    { name:'Polní věž',      icon:'🔧', cd:660, desc:'Postaví dočasnou věž a opraví zdi.' },
-  knez:       { name:'Svaté světlo',   icon:'✨', cd:600, desc:'Vyléčí tým a spálí nemrtvé kolem.' },
+  rytir:      { name:'Zvednout štít', icon:'🛡', cd:120, desc:'Na 0,75 s vykryje VŠECHNY útoky (i střely) a odhodí okolní nemrtvé. Cooldown jen 2 s. Štít lze vylepšit (delší blok, odraz poškození).' },
+  lovec:      { name:'Smršt',         icon:'🏹', cd:2100, desc:'Na 5 s +70 % rychlost palby a NEKONEČNO munice. Cooldown 35 s.' },
+  berserk:    { name:'Volání klanu',  icon:'🪓', cd:2400, desc:'Přivolá 2 sekerníky (200 HP, 22 poškození). Zůstanou dokud nepadnou / nezvedneš HP nad 65 % / nekončí kolo. Použitelné jen při ≤50 % HP. Cooldown 40 s po jejich odchodu.' },
+  zved:       { name:'Bodnutí do zad',icon:'🗡', cd:600, desc:'Na 5 s neviditelnost (nemrtví tě ignorují). První útok: běžný nepřítel je OKAMŽITĚ zabit, boss dostane 3× poškození zbraně. Zabití silnějšího nepřítele schopností resetuje cooldown (jinak 10 s).' },
+  mag:        { name:'Armagedon',     icon:'☄', cd:720, desc:'Sešle meteor na nejbližší shluk nepřátel: 220 poškození v okruhu 90 + ohnivá zem (30/s po 3 s). Cooldown 12 s.' },
+  alchymista: { name:'Abominace',     icon:'🧟', cd:0, desc:'Vypije lektvar (z 5 žlučí) a na 10 s se promění v abominaci: −50 % obdrženého poškození, −38 % rychlost, POŽÍRÁ pěšáky (okamžitě, +2 max HP navždy za každého) a leptá silnější (20 dmg/2,5 s + 4 dmg/s žíravinou v okruhu 46). Bez cooldownu — potřebuje lektvar (max 2).' },
+  inzenyr:    { name:'Polní věž',      icon:'🔧', cd:480, desc:'Postaví dočasný samostříl (12 s) na tvé pozici a opraví všechny zdi na plné HP. Zabíjením nepřátel věžemi se plní „Kolečka se točí" — vylepšení této schopnosti. Cooldown 8 s.' },
+  knez:       { name:'Vzkříšení',      icon:'✨', cd:0, desc:'Oživí všechny padlé hrdiny v okruhu 220 na 60 % HP, vyléčí živé o 60 HP a spálí nemrtvé za 40 v okruhu 130. Použitelné 1× za kolo.' },
 };
+
+/* ---------- Balanc konstanty pro přepracované schopnosti (čísla = přesně to, co se stane) ---------- */
+const CLAN_AXEMAN = { name:'Sekerník klanu', arch:'MELEE', hp:200, dmg:22, range:46, rate:26, speed:1.25, seek:280, color:'#d07038' };
+const CLAN_LIFETIME = 480;          // 8 s život sekerníka (mimo dřívější odchod)
+const CLAN_DISMISS_HP = 0.65;       // sekerníci odejdou, když berserk vystoupá nad 65 % HP
+const CLAN_COOLDOWN = 2400;         // 40 s cooldown po odchodu sekerníků
+const BERSERK_HP_GATE = 0.50;       // volání klanu jen při ≤ 50 % HP
+
+const ABOM_DURATION = 600;          // 10 s proměny
+const ABOM_DR = 0.50;               // −50 % obdrženého poškození v proměně
+const ABOM_SPEEDMUL = 0.62;         // −38 % rychlost
+const ABOM_HP_PER_EAT = 2;          // +2 max HP navždy za sežraného pěšáka
+const ABOM_ACID_RADIUS = 46;        // dosah žíraviny
+const ABOM_ACID_BURST = 20;         // 20 poškození každých 2,5 s
+const ABOM_ACID_BURST_CD = 150;     // 2,5 s
+const ABOM_ACID_DPS = 4;            // + 4 dmg/s (2 za 0,5 s) žíravinou
+const BILE_PER_POTION = 5;          // 5 žlučí = 1 lektvar
+const BILE_MAX_POTIONS = 2;         // max 2 lektvary
+const BILE_DROP_CHANCE = 0.14;      // 14 % šance, že z běžné zombie vyteče žluč
+const BILE_HARVEST_TIME = 60;       // podržet 1 s pro sběr žluči
+
+const MAG_METEOR_DMG = 220;         // poškození meteoru
+const MAG_METEOR_RADIUS = 90;
+const MAG_METEOR_DOT = { dps: 30, dur: 180 };  // ohnivá zem 30/s po 3 s
+
+const KNIGHT_BLOCK_TIME = 45;       // 0,75 s okno bloku (základ; +štít vylepšení)
+const HUNTER_FLURRY_TIME = 300;     // 5 s smršť
+const SCOUT_INVIS_TIME = 300;       // 5 s neviditelnost
+const SCOUT_CD = 600;               // 10 s (reset při zabití silnějšího)
+
+// Vylepšení štítu rytíře (kupuje se za gemy v záložce Postava; sdílené):
+const SHIELD_UP_MAX = 5;
+function shieldBlockTime(lvl) { return KNIGHT_BLOCK_TIME + lvl * 12; }   // +0,2 s za úroveň
+function shieldReflect(lvl) { return lvl * 0.20; }                       // odraz 20 % poškození za úroveň
+function shieldUpCost(lvl) { return 60 + lvl * 55; }
+
+// „Kolečka se točí" — vylepšení Polní věže inženýra (malé opakovatelné kousky):
+const WHEEL_UPGRADES = {
+  dmg:   { name:'Ostřejší šrouby',  icon:'⚙', desc:'+20 % poškození polní věže.', max:6 },
+  dur:   { name:'Delší baterie',    icon:'🔋', desc:'+3 s výdrž polní věže.',      max:6 },
+  rate:  { name:'Promazané ozubí',  icon:'🛢', desc:'+15 % rychlost palby věže.',  max:6 },
+  count: { name:'Dvojče',           icon:'🔩', desc:'+1 věž postavená naráz.',      max:3 },
+  hp:    { name:'Pancéřování věže',  icon:'🛡', desc:'+40 % HP polní věže.',         max:5 },
+};
+const WHEEL_KEYS = Object.keys(WHEEL_UPGRADES);
 
 /* ---------- Vylepšování statů postavy (za gemy, v rámci běhu, sdílené týmem) ---------- */
 const UPGRADES = {
@@ -314,6 +387,80 @@ const UPGRADES = {
 };
 const UPGRADE_MAX = 10;
 function upgradeCost(def, lvl) { return Math.round(def.base * Math.pow(1.55, lvl)); }
+
+/* ---------- Trvalé buffy (padají ze sub-bossů; každý hráč si vybírá vlastní, platí do konce hry) ----------
+   Číselná pole = efekt (sečtou se přes všechny vlastněné buffy × počet). `cap` = kolikrát lze vzít.
+   `desc` musí přesně odpovídat číslům (hráč musí vědět, co buff dělá).                                    */
+const PERKS = {
+  // — Poškození —
+  ostri1:     { name:'Ostří I',        icon:'⚔', desc:'+7 % poškození všemi zbraněmi.',        dmgPct:0.07, cap:5 },
+  ostri2:     { name:'Ostří II',       icon:'⚔', desc:'+12 % poškození všemi zbraněmi.',       dmgPct:0.12, cap:5 },
+  titan:      { name:'Titánská síla',  icon:'💪', desc:'+18 % poškození všemi zbraněmi.',       dmgPct:0.18, cap:3 },
+  brutalita:  { name:'Brutalita',      icon:'🔨', desc:'+25 % poškození (vzácné).',             dmgPct:0.25, cap:2 },
+  // — Kritické zásahy —
+  mireni1:    { name:'Míření I',       icon:'✦', desc:'+6 % šance na kritický zásah.',          critAdd:0.06, cap:5 },
+  mireni2:    { name:'Míření II',      icon:'✦', desc:'+10 % šance na kritický zásah.',         critAdd:0.10, cap:3 },
+  devastace:  { name:'Devastace',      icon:'💥', desc:'+0,6 ke kritickému násobiči (silnější krity).', critMulAdd:0.6, cap:3 },
+  hlava:      { name:'Rána do hlavy',  icon:'🎯', desc:'+8 % kritika a +0,3 kritický násobič.', critAdd:0.08, critMulAdd:0.3, cap:2 },
+  // — Rychlost palby —
+  hbitost1:   { name:'Hbitost I',      icon:'⚡', desc:'−8 % prodleva mezi útoky (rychlejší palba).',  ratePct:0.08, cap:5 },
+  hbitost2:   { name:'Hbitost II',     icon:'⚡', desc:'−14 % prodleva mezi útoky.',                    ratePct:0.14, cap:3 },
+  salva:      { name:'Salva',          icon:'🔁', desc:'−20 % prodleva mezi útoky (vzácné).',           ratePct:0.20, cap:2 },
+  // — Rychlost pohybu —
+  mrstnost1:  { name:'Mrštnost I',     icon:'👟', desc:'+8 % rychlost pohybu.',                 speedPct:0.08, cap:5 },
+  mrstnost2:  { name:'Mrštnost II',    icon:'👟', desc:'+14 % rychlost pohybu.',                speedPct:0.14, cap:3 },
+  vitr:       { name:'Vítr v zádech',  icon:'🌀', desc:'+20 % rychlost pohybu (vzácné).',       speedPct:0.20, cap:2 },
+  // — Max HP —
+  vitalita1:  { name:'Vitalita I',     icon:'❤', desc:'+12 % maximální HP.',                    maxHpPct:0.12, cap:5 },
+  vitalita2:  { name:'Vitalita II',    icon:'❤', desc:'+20 % maximální HP.',                    maxHpPct:0.20, cap:3 },
+  kolos:      { name:'Kolos',          icon:'🗿', desc:'+30 % maximální HP (vzácné).',          maxHpPct:0.30, cap:2 },
+  // — Pancíř —
+  pancir1:    { name:'Pancíř I',       icon:'🛡', desc:'−8 % obdrženého poškození.',            armorPct:0.08, cap:5 },
+  pancir2:    { name:'Pancíř II',      icon:'🛡', desc:'−14 % obdrženého poškození.',           armorPct:0.14, cap:3 },
+  kamennakuze:{ name:'Kamenná kůže',   icon:'🪨', desc:'−20 % obdrženého poškození (vzácné).',  armorPct:0.20, cap:2 },
+  // — Vysávání —
+  upir1:      { name:'Upír I',         icon:'🩸', desc:'+6 % vysávání životů z poškození.',      lifestealAdd:0.06, cap:4 },
+  upir2:      { name:'Upír II',        icon:'🩸', desc:'+12 % vysávání životů z poškození.',     lifestealAdd:0.12, cap:2 },
+  // — Dosah —
+  dosah1:     { name:'Delší ruka',     icon:'🏹', desc:'+12 % dosah zbraní.',                   rangePct:0.12, cap:4 },
+  dosah2:     { name:'Sokolí oko',     icon:'🏹', desc:'+20 % dosah zbraní.',                   rangePct:0.20, cap:2 },
+  // — Cooldown schopnosti —
+  soustredeni1:{ name:'Soustředění I', icon:'⏱', desc:'−12 % cooldown aktivní schopnosti.',    cdPct:0.12, cap:4 },
+  soustredeni2:{ name:'Soustředění II',icon:'⏱', desc:'−20 % cooldown aktivní schopnosti.',    cdPct:0.20, cap:2 },
+  // — Sběr / ekonomika —
+  magnet1:    { name:'Magnet I',       icon:'🧲', desc:'+40 % dosah sbírání dropů.',            pickupRadiusAdd:0.4, cap:3 },
+  magnet2:    { name:'Magnet II',      icon:'🧲', desc:'+80 % dosah sbírání dropů.',            pickupRadiusAdd:0.8, cap:2 },
+  hamon1:     { name:'Hamižnost I',    icon:'💎', desc:'+20 % gemů za zabití.',                 gemPct:0.20, cap:4 },
+  hamon2:     { name:'Hamižnost II',   icon:'💎', desc:'+35 % gemů za zabití.',                 gemPct:0.35, cap:2 },
+  ucenlivost: { name:'Učenlivost',     icon:'📚', desc:'+25 % zkušeností (XP).',                xpPct:0.25, cap:3 },
+  // — Regenerace —
+  regenerace1:{ name:'Regenerace I',   icon:'✚', desc:'+2 HP za sekundu regenerace.',          regenAdd:2, cap:4 },
+  regenerace2:{ name:'Regenerace II',  icon:'✚', desc:'+4 HP za sekundu regenerace.',          regenAdd:4, cap:2 },
+  // — Obrana —
+  trny1:      { name:'Trny I',         icon:'🌵', desc:'Vrací 25 % obdrženého poškození útočníkovi.', thornsPct:0.25, cap:3 },
+  trny2:      { name:'Trny II',        icon:'🌵', desc:'Vrací 45 % obdrženého poškození útočníkovi.',          thornsPct:0.45, cap:2 },
+  uhyb1:      { name:'Úhyb I',         icon:'💨', desc:'+8 % šance zcela se vyhnout zásahu.',    dodgeAdd:0.08, cap:3 },
+  uhyb2:      { name:'Úhyb II',        icon:'💨', desc:'+14 % šance na úhyb.',                   dodgeAdd:0.14, cap:2 },
+  // — Projektily / při zásahu —
+  dvojstrela: { name:'Dvojstřela',     icon:'➹', desc:'+1 projektil u dálkových zbraní (mírný rozptyl).', projAdd:1, cap:2 },
+  trojstrela: { name:'Trojstřela',     icon:'🏹', desc:'+2 projektily u dálkových zbraní.',     projAdd:2, cap:1 },
+  vybuch1:    { name:'Výbušné zabití I',icon:'💣', desc:'20 % šance na výbuch (20 dmg v okolí) při zabití.', explodeChance:0.20, cap:2 },
+  vybuch2:    { name:'Výbušné zabití II',icon:'💣',desc:'35 % šance na výbuch (20 dmg v okolí) při zabití.', explodeChance:0.35, cap:1 },
+  mraz1:      { name:'Mrazivé zásahy I',icon:'❄', desc:'20 % šance zpomalit zasaženého na 40 % rychlosti (2 s).', freezeChance:0.20, cap:2 },
+  mraz2:      { name:'Mrazivé zásahy II',icon:'❄',desc:'35 % šance zpomalit zasaženého na 40 % rychlosti (2 s).', freezeChance:0.35, cap:1 },
+  odraz:      { name:'Odhoz',          icon:'🪃', desc:'+4 odhození nepřátel při zásahu zblízka.',knockbackAdd:4, cap:3 },
+  setrnost1:  { name:'Šetrnost I',     icon:'🎯', desc:'25 % šance nespotřebovat munici při výstřelu.', ammoSaveChance:0.25, cap:3 },
+  setrnost2:  { name:'Šetrnost II',    icon:'🎯', desc:'40 % šance nespotřebovat munici.',       ammoSaveChance:0.40, cap:2 },
+  manapoutnik:{ name:'Mana poutník',   icon:'🔮', desc:'+50 % regenerace many (pro kouzelné hole).', manaRegenPct:0.5, cap:3 },
+  // — Kombinované (vzácné) —
+  berserksrdce:{name:'Srdce berserka', icon:'🔥', desc:'+15 % poškození a +10 % rychlost.',     dmgPct:0.15, speedPct:0.10, cap:2 },
+  svatyamulet:{ name:'Svatý amulet',   icon:'✨', desc:'+15 % max HP a −10 % obdrženého poškození.', maxHpPct:0.15, armorPct:0.10, cap:2 },
+  lovecstinu: { name:'Lovec stínů',    icon:'🗡', desc:'+10 % kritika a +12 % dosah.',           critAdd:0.10, rangePct:0.12, cap:2 },
+  valecnik:   { name:'Veterán',        icon:'⚔', desc:'+12 % poškození a +12 % max HP.',        dmgPct:0.12, maxHpPct:0.12, cap:2 },
+  rychlopal:  { name:'Rychlopalník',   icon:'🔥', desc:'−12 % prodleva palby a +8 % rychlost.', ratePct:0.12, speedPct:0.08, cap:2 },
+  pretlak:    { name:'Přetlak',        icon:'💥', desc:'+8 % poškození a +0,5 kritický násobič.',dmgPct:0.08, critMulAdd:0.5, cap:2 },
+};
+const PERK_KEYS = Object.keys(PERKS);   // 53 trvalých buffů (≥ 50 dle zadání)
 
 // Vylepšení zbraní se platí MATERIÁLY (dřevo + ocel, drop z nepřátel), ne gemy.
 const WEAPON_UP_MAX = 6;
