@@ -11,10 +11,14 @@ const DIR = __dirname;
 
 // ---- minimal browser stubs ----
 function noop() { return undefined; }
+const bad = (v) => typeof v === 'number' && !Number.isFinite(v);
 const ctxProxy = new Proxy({}, {
   get(t, k) {
     if (k === 'measureText') return () => ({ width: 4 });
-    if (k === 'createLinearGradient' || k === 'createRadialGradient') return () => ({ addColorStop: noop });
+    // emulace reálného prohlížeče: záporný/NaN poloměr v arc/ellipse a NaN v gradientu = výjimka
+    if (k === 'arc' || k === 'arcTo') return (...a) => { const r = k === 'arc' ? a[2] : a[4]; if (bad(a[0]) || bad(a[1]) || bad(r) || r < 0) throw new Error(`IndexSizeError: ${k}(${a.join(',')})`); };
+    if (k === 'ellipse') return (...a) => { if (bad(a[2]) || bad(a[3]) || a[2] < 0 || a[3] < 0) throw new Error(`IndexSizeError: ellipse(${a.slice(2, 4).join(',')})`); };
+    if (k === 'createLinearGradient' || k === 'createRadialGradient') return (...a) => { if (a.some(bad)) throw new Error(`${k} non-finite(${a.join(',')})`); return { addColorStop: noop }; };
     if (k === 'getImageData') return () => ({ data: [] });
     if (k === 'canvas') return { width: 480, height: 800 };
     return typeof k === 'string' ? noop : undefined;
@@ -112,9 +116,16 @@ code += `
     for (let k = 0; k < 5; k++) spawnDummy('chodec', p.x + 20 + k*8, p.y);
     spawnDummy('obr', p.x - 30, p.y);       // TANK
     p.aimAngle = 0;
-    // fire ability a few times across ticks
-    for (let r = 0; r < 8; r++) { p.abilityCd = 0; if (cid==='knez') p.resurrectUsed=false; if (cid==='berserk'){p.hp=p.hpMax*0.4; p._clanActive=false; p.clanCd=0;} if (cid==='alchymista'){p.potions=1; p.abomT=0;} useAbility(p); tick(30); }
-    log(cid + ' ability ok · warriors=' + warriors.length + ' enemies=' + enemies.length + ' particles=' + particles.length);
+    // fire ability a few times, a UPDATE+RENDER každý tick (render s přísným canvasem odhalí pády v kreslení)
+    for (let r = 0; r < 8; r++) {
+      p.abilityCd = 0;
+      if (cid==='knez') p.resurrectUsed=false;
+      if (cid==='berserk'){p.hp=p.hpMax*0.4; p._clanActive=false; p.clanCd=0;}
+      if (cid==='alchymista'){p.potions=1; p.abomT=0;}
+      useAbility(p);
+      for (let f = 0; f < 30; f++) { if (state === 'combat') updateCombat(1); try { render(); } catch (e) { throw new Error(cid + ' RENDER CRASH po schopnosti: ' + (e && e.message)); } }
+    }
+    log(cid + ' ability+render ok · warriors=' + warriors.length + ' enemies=' + enemies.length + ' particles=' + particles.length);
   }
 
   // ---- 3) perk system: grant offer, choose, verify passive changes ----

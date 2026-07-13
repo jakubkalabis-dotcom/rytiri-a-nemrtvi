@@ -1355,7 +1355,7 @@ function doResurrect(p) {
   let revived = 0;
   for (const q of players) {
     if (q === p) continue;
-    if (q.downed && dist(p.x, p.y, q.x, q.y) <= 220) { q.downed = false; q.hp = Math.round(q.hpMax * 0.6); q.inv = 60; revived++; effects.push({ type: 'nova', x: q.x, y: q.y, r: 4, rMax: 60, t: 30, color: '#f0e0a0' }); }
+    if (q.downed && dist(p.x, p.y, q.x, q.y) <= 220) { q.downed = false; q.hp = Math.round(q.hpMax * 0.6); q.inv = 60; revived++; effects.push({ type: 'nova', x: q.x, y: q.y, r: 4, rMax: 60, t: 24, color: '#f0e0a0' }); }
   }
   for (const q of players) if (!q.downed) q.hp = Math.min(q.hpMax, q.hp + 60);
   aoeExplosion(p.x, p.y, 130, 40, null, '#f0e0a0');
@@ -1372,7 +1372,7 @@ function doArmageddon(p) {
     for (const e of live) { let c = 0; for (const o of enemyHash.query(e.x, e.y, MAG_METEOR_RADIUS)) if (!o.dead) c++; if (c >= 3) { bx = e.x; by = e.y; break; } }
   }
   const dmg = MAG_METEOR_DMG * (p.passive.magicDmg || 1);
-  effects.push({ type: 'nova', x: bx, y: by, r: 6, rMax: MAG_METEOR_RADIUS, t: 30, color: '#ff7b3a' });
+  effects.push({ type: 'nova', x: bx, y: by, r: 6, rMax: MAG_METEOR_RADIUS, t: 24, color: '#ff7b3a' });
   aoeExplosion(bx, by, MAG_METEOR_RADIUS, dmg, MAG_METEOR_DOT, '#ff7b3a');
   shake = Math.min(12, shake + 8); sfx.boom();
   banner = { text: '☄ ARMAGEDON!', t: 70, warn: true };
@@ -2252,7 +2252,7 @@ function drawEffects() {
       ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(10, -4); ctx.lineTo(14, 0); ctx.lineTo(10, 4); ctx.fill();
       ctx.restore(); ctx.globalAlpha = 1;
     } else if (e.type === 'nova') {
-      const prog = 1 - e.t / 24; const rr = e.rMax * prog;
+      const prog = 1 - e.t / 24; const rr = Math.max(0, e.rMax * prog);   // rr nesmí být záporný (arc by spadl)
       ctx.globalAlpha = clamp(e.t / 24, 0, 0.7); ctx.strokeStyle = e.color || '#fff'; ctx.lineWidth = 4;
       ctx.beginPath(); ctx.arc(e.x, e.y, rr, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
     } else if (e.type === 'text') {
