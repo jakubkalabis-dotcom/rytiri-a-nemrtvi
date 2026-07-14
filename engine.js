@@ -167,23 +167,23 @@ function buildTerrain() {
   const pal = (MAPS[currentMap] && MAPS[currentMap].pal) || ['#284020', '#2c4224', '#5a5f66', '#3f7030'];
   const c0 = hexRGB(pal[0]), c1 = hexRGB(pal[1]), acc = hexRGB(pal[3]);
   const CP = 4, N = TILE / CP;   // 4px „pixely" → 8×8 na dlaždici
+  const lerp = (a, b, t) => a + (b - a) * t;
   for (let ty = 0; ty < ROWS; ty++) for (let tx = 0; tx < COLS; tx++) {
-    const base = ((tx + ty) & 1) ? c0 : c1;
     const ox = tx * TILE, oy = ty * TILE;
-    // jednolitý podklad dlaždice
+    // hladká nízkofrekvenční variace mezi c0/c1 → organické skvrny, ŽÁDNÁ šachovnice
+    const nv = clamp((Math.sin(tx * 0.55 + ty * 0.17) * 0.5 + 0.5) * 0.55 + (Math.sin(ty * 0.5 - tx * 0.23 + 1.3) * 0.5 + 0.5) * 0.45, 0, 1);
+    const base = [lerp(c0[0], c1[0], nv) | 0, lerp(c0[1], c1[1], nv) | 0, lerp(c0[2], c1[2], nv) | 0];
     g.fillStyle = `rgb(${base[0]},${base[1]},${base[2]})`; g.fillRect(ox, oy, TILE, TILE);
-    // pár tmavších/světlejších pixelů (čistá „block" textura, ne šum)
+    // jemná organická textura (pár tmavších/světlejších/akcentních pixelů)
     const rs = mulberry32(((tx * 92821) ^ (ty * 68917) ^ (currentMap * 40503)) >>> 0);
     for (let gy = 0; gy < N; gy++) for (let gx = 0; gx < N; gx++) {
-      const v = rs(); if (v < 0.72) continue;
+      const v = rs(); if (v < 0.70) continue;
       let r = base[0], gg = base[1], b = base[2];
-      if (v > 0.96) { r = acc[0]; gg = acc[1]; b = acc[2]; }         // stéblo/akcent
-      else { const j = v > 0.86 ? 12 : -16; r += j; gg += j; b += j; }
+      if (v > 0.965) { r = acc[0]; gg = acc[1]; b = acc[2]; }        // stéblo/akcent
+      else { const j = v > 0.85 ? 10 : -13; r += j; gg += j; b += j; }
       g.fillStyle = `rgb(${clamp(r, 0, 255)},${clamp(gg, 0, 255)},${clamp(b, 0, 255)})`;
       g.fillRect(ox + gx * CP, oy + gy * CP, CP, CP);
     }
-    // jemná hrana dlaždice (spodní + pravá) → čitelné „bloky"
-    g.fillStyle = 'rgba(0,0,0,0.10)'; g.fillRect(ox, oy + TILE - 1, TILE, 1); g.fillRect(ox + TILE - 1, oy, 1, TILE);
   }
   for (const d of decor) terrainDecor(g, d, pal);
   for (const [tx, ty] of OBSTACLES) terrainRock(g, tx, ty, pal);
