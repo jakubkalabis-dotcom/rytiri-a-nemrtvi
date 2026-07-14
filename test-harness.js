@@ -235,8 +235,9 @@ code += `
       if (state==='wheel') state='roundEnd';
       // real between-wave flow: roundEnd -> shop -> build (advances map on wave 25)
       p.hp=p.hpMax; p.downed=false; if (run.lives<=0) run.lives=20;
-      startBuildPhase();          // triggers advanceToMap after wave 25
-      assert(state==='build','build phase entered after wave '+run.wave);
+      startBuildPhase();          // triggers advanceToMap (+ pact offer) after wave 25
+      if (state==='pact') { const o=run._pactOffer; choosePact(o&&o[0]); }  // nová mapa nabídne pakt
+      assert(state==='build','build phase entered after wave '+run.wave+' (state='+state+')');
     }
     assert(currentMap > startMap, 'crossed to next map (map '+(currentMap+1)+')');
     assert(run.wave >= 27, 'reached wave '+run.wave);
@@ -256,6 +257,8 @@ code += `
     // roundEnd with a perk offer
     run.wave=5; players[0].perkOffer=['ostri1','vitalita1','pancir1']; renderRoundEnd(); assert(ovContent.innerHTML.includes('buff'),'roundEnd shows perk offer');
     run.wheelReady=1; renderWheelMenu(); assert(ovContent.innerHTML.includes('Kolečka'),'wheel menu renders');
+    run._pactOffer=['krvezizen','horda','pevnost']; renderPact(); assert(ovContent.innerHTML.includes('Pakt'),'pact screen renders');
+    renderMenu(); assert(ovContent.innerHTML.includes('NEMRTVÍ'),'menu + hero renders');
     abilityDetail('rytir'); abilityDetail('alchymista'); abilityDetail('inzenyr'); // number-formatting paths
     log('UI render smoke ok (all '+SHOP_TABS.length+' tabs + roundEnd + wheel)'); }
 
@@ -291,6 +294,30 @@ code += `
     assert(enemies.some(e=>e.arch==='BOSS'), 'sub-boss spawned for HUD test');
     try { for (let f=0;f<20;f++){ if(state==='combat') updateCombat(1); render(); } } catch (e) { throw new Error('HUD boss-bar render crash: ' + (e && e.message)); }
     log('HUD renders with boss (boss bar + wave track ok)'); }
+
+  // ---- 15) PAKTY: nabídka, výběr, aplikace efektů ----
+  { newRun('rytir');
+    // po newRun jsme se dostali do 'pact' přes offerPact? newRun sám nevolá – simulujeme tok pickClass:
+    offerPact('shop'); assert(state==='pact', 'pact state entered');
+    assert(run._pactOffer && run._pactOffer.length===3, '3 pacts offered');
+    // vyber pakt s max HP (Prokletí many) pokud v nabídce, jinak vynuť
+    run._pactOffer=['pevnost']; const lives0=run.lives; choosePact('pevnost');
+    assert(run.pacts.includes('pevnost'), 'pact stored'); assert(run.lives===lives0+8, 'gate bonus applied ('+lives0+'->'+run.lives+')');
+    assert(state==='shop', 'returned to shop after pact');
+    log('pacts ok (offer/choose/gateBonus)'); }
+
+  // ---- 16) pakt effect: enemyHp multiplier reaches spawned enemy ----
+  { newRun('rytir'); run.pacts=['krvezizen']; startWave(); // +20% enemy HP
+    const base=ENEMIES.chodec.hp; spawnEnemy('chodec'); const e=enemies[enemies.length-1];
+    assert(e.hpMax > base, 'enemyHp pact raised spawned HP ('+base+'->'+e.hpMax+')');
+    newRun('rytir'); run.pacts=['krehci']; startWave(); spawnEnemy('chodec'); const e2=enemies[enemies.length-1];
+    assert(e2.hpMax < ENEMIES.chodec.hp, 'krehci pact lowered HP');
+    log('pact enemy-scaling ok'); }
+
+  // ---- 17) pakt maxHp affects player hpMax via recalc ----
+  { newRun('mag'); const p=players[0]; const hp0=p.hpMax; run.pacts=['arkany']; recalcPerks(p);
+    assert(p.hpMax < hp0, 'arkany pact -10% maxHP ('+hp0+'->'+p.hpMax+')');
+    log('pact maxHp ok'); }
 
   console.log('\\n==== TEST RESULTS ====');
   for (const r of results) console.log('  ✓ ' + r);

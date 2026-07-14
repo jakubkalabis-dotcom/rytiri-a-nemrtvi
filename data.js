@@ -355,6 +355,23 @@ const MAG_METEOR_DMG = 130;         // poškození meteoru (vybalancováno – d
 const MAG_METEOR_RADIUS = 78;
 const MAG_METEOR_DOT = { dps: 16, dur: 180 };  // ohnivá zem 16/s po 3 s
 
+/* ---------- PAKTY (roguelite modifikátory běhu) ----------
+   Před 1. mapou a při každém přechodu na novou mapu si hráč vybere 1 ze 3 náhodných paktů.
+   Platí do konce běhu a sčítají se. Každý má jasnou výhodu i cenu (číselně v popisu).      */
+const PACTS = {
+  krvezizen:  { name:'Krvežíznivost',      icon:'🩸', desc:'Nepřátelé mají +20 % HP, ale dávají +45 % gemů.',            enemyHp:1.20, gem:1.45 },
+  krehci:     { name:'Křehcí, ale zuřiví', icon:'⚡', desc:'Nepřátelé mají −30 % HP, ale jsou o 25 % rychlejší.',        enemyHp:0.70, enemySpd:1.25 },
+  horda:      { name:'Neustálá horda',     icon:'🧟', desc:'+35 % počet nepřátel ve vlnách, ale +35 % zkušeností (XP).', count:1.35, xp:1.35 },
+  hojnost:    { name:'Zlatá hojnost',      icon:'💰', desc:'+70 % šance na drop z nepřátel, ale bossové mají +18 % HP.', drop:1.70, bossHp:1.18 },
+  disciplina: { name:'Železná disciplína', icon:'⚔', desc:'+15 % poškození všemi zbraněmi, ale únik nepřítele bere bráně +1 život navíc.', dmg:1.15, leak:1 },
+  lov:        { name:'Lovecká odměna',     icon:'🎯', desc:'Elity se objevují 2× častěji a dávají +50 % gemů.',          eliteChance:2.0, eliteGem:1.5 },
+  spech:      { name:'Krvavý spěch',       icon:'⏱', desc:'Nepřátelé se spawnují o 25 % rychleji, ale +20 % skóre.',    spawn:0.75, score:1.20 },
+  masakr:     { name:'Řež',                icon:'💥', desc:'Kombo roste 2× rychleji (víc gemů i skóre), ale nepřátelé +8 % poškození.', comboRate:2.0, enemyDmg:1.08 },
+  pevnost:    { name:'Poslední pevnost',   icon:'🏰', desc:'Brána má +8 životů, ale nepřátelé jsou o 10 % rychlejší.',   gateBonus:8, enemySpd:1.10 },
+  arkany:     { name:'Prokletí many',      icon:'🔮', desc:'+35 % regenerace many a −15 % cooldown schopností, ale −10 % max HP.', manaRegen:1.35, cd:0.85, maxHp:0.90 },
+};
+const PACT_KEYS = Object.keys(PACTS);
+
 // Kněz – pasivní sekundární AOE: „Svatá záře" pravidelně pálí nemrtvé kolem něj.
 const PRIEST_NOVA = { dmg: 55, radius: 120, cd: 140 };   // 55 poškození (× svěcené) v okruhu 120 každých ~2,3 s
 const KNIGHT_BLOCK_TIME = 45;       // 0,75 s okno bloku (základ; +štít vylepšení)

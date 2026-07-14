@@ -80,6 +80,8 @@ function newRun(classIds) {
     wheelThreshold: 2,  // kolik zabití věží na další nabití koleček (zdvojnásobuje se)
     wheelReady: 0,      // nevyužité nabité „spiny" koleček
     wheelUpgrades: { dmg: 0, dur: 0, rate: 0, count: 0, hp: 0 },  // vylepšení polní věže
+    pacts: [],          // roguelite modifikátory běhu (viz PACTS)
+    _pactOffer: null,   // aktuální nabídka 3 paktů
   };
   for (const k in AMMO) run.ammo[k] = 0;
   // sdílené vlastněné zbraně = sjednocení startovních zbraní hráčů
@@ -176,12 +178,12 @@ function recalcPerks(p) {
   if (p.baseHp != null) {
     const oldMax = p.hpMax || p.baseHp;
     const upHp = (run && run.upgrades && run.upgrades.hp) || 0;
-    p.hpMax = Math.round(p.baseHp * (1 + 0.12 * upHp) * (1 + maxHpPct) + (p.bonusHp || 0));
+    p.hpMax = Math.max(1, Math.round((p.baseHp * (1 + 0.12 * upHp) * (1 + maxHpPct) + (p.bonusHp || 0)) * pactMul('maxHp')));  // + pakt Prokletí many
     const gained = p.hpMax - oldMax;
     if (gained > 0) p.hp = Math.min(p.hpMax, (p.hp || p.hpMax) + gained);  // nový max = plné doléčení přírůstku
     else if (p.hp > p.hpMax) p.hp = p.hpMax;
   }
-  p.manaRegen = 0.11 * (base.manaRegen || 1) * (1 + manaRegenPct);
+  p.manaRegen = 0.11 * (base.manaRegen || 1) * (1 + manaRegenPct) * pactMul('manaRegen');   // + pakt Prokletí many
 }
 // Nabídka 3 buffů po zabití bosse (každý hráč si vybírá vlastní). Vzácnější (nižší cap) padají řidčeji.
 function rollPerkOffer(p) {
@@ -197,7 +199,48 @@ function rollPerkOffer(p) {
   }
   return offer.length ? offer : null;
 }
+// PAKTY: součin násobičů / součet přídavků přes aktivní pakty běhu
+function pactMul(key) { let m = 1; if (run && run.pacts) for (const id of run.pacts) { const v = PACTS[id] && PACTS[id][key]; if (v != null) m *= v; } return m; }
+function pactSum(key) { let s = 0; if (run && run.pacts) for (const id of run.pacts) { const v = PACTS[id] && PACTS[id][key]; if (v != null) s += v; } return s; }
 function grantPerkOffer() { for (const p of players) if (!p.perkOffer) p.perkOffer = rollPerkOffer(p); }
+/* ---- PAKTY: nabídka 3 před během a před každou mapou ---- */
+let pactReturn = 'shop';
+function rollPactOffer() {
+  const avail = PACT_KEYS.filter(id => !run.pacts.includes(id));
+  const off = [];
+  while (off.length < 3 && avail.length) off.push(avail.splice((Math.random() * avail.length) | 0, 1)[0]);
+  return off;
+}
+function offerPact(returnState) {
+  pactReturn = returnState;
+  if (net.role === 'guest') { setState('pact'); return; }   // guest jen zrcadlí; host generuje
+  const off = rollPactOffer();
+  if (!off.length) { setState(returnState); return; }
+  run._pactOffer = off;
+  setState('pact');
+}
+function choosePact(id) {
+  if (!run._pactOffer || run._pactOffer.indexOf(id) < 0 || run.pacts.includes(id)) return;
+  run.pacts.push(id);
+  const p = PACTS[id];
+  if (p.gateBonus) run.lives += p.gateBonus;               // okamžité efekty
+  if (p.maxHp || p.manaRegen) for (const q of players) recalcPerks(q);
+  run._pactOffer = null;
+  sfx.levelUp();
+  setState(pactReturn || 'shop');
+  if (net.role === 'host' && net.connected && typeof netPush === 'function') netPush();
+}
+function renderPact() {
+  const off = run._pactOffer || [];
+  const cards = off.map(id => { const d = PACTS[id]; return `<div class="card pact-card" data-act="pactpick" data-id="${id}">
+    <div class="scn">${d.icon} ${d.name}</div><div class="scd">${d.desc}</div></div>`; }).join('');
+  const owned = run.pacts.length ? `<details class="perk-owned"><summary>Aktivní pakty (${run.pacts.length})</summary><div class="perk-list">${run.pacts.map(id => `<div>${PACTS[id].icon} ${PACTS[id].name} — <span style="color:#9aa87e">${PACTS[id].desc}</span></div>`).join('')}</div></details>` : '';
+  const guestWait = (net.role === 'guest') ? '<p>Hostitel volí pakt…</p>' : '';
+  ovContent.innerHTML = `<h2>☠ Pakt s temnotou</h2>
+    <p>Vyber si modifikátor pro zbytek běhu. Každý má výhodu i cenu — a mění celý běh. ${off.length ? '' : 'Všechny pakty už máš!'}</p>
+    ${off.length ? `<div class="perk-offer"><div class="grid">${cards}</div></div>` : '<button data-act="pactskip">Pokračovat</button>'}
+    ${guestWait}${owned}`;
+}
 function choosePerk(p, id) {
   if (!p || !p.perkOffer || p.perkOffer.indexOf(id) < 0) return;
   if ((p.perks[id] || 0) >= PERKS[id].cap) return;
@@ -228,12 +271,13 @@ function costOf(cost, cat) {
    ========================================================================== */
 function setState(s) {
   state = s;
-  if (s === 'menu' || s === 'class' || s === 'shop' || s === 'roundEnd' || s === 'gameOver' || s === 'victory' || s === 'host' || s === 'join' || s === 'wheel') {
+  if (s === 'menu' || s === 'class' || s === 'shop' || s === 'roundEnd' || s === 'gameOver' || s === 'victory' || s === 'host' || s === 'join' || s === 'wheel' || s === 'pact') {
     overlay.classList.remove('hidden');
   } else {
     overlay.classList.add('hidden');
   }
-  if (s === 'wheel') renderWheelMenu();
+  if (s === 'pact') renderPact();
+  else if (s === 'wheel') renderWheelMenu();
   else if (s === 'menu') renderMenu();
   else if (s === 'class') renderClassSelect();
   else if (s === 'shop') renderShop();
@@ -622,12 +666,14 @@ overlay.addEventListener('click', e => {
   if (act === 'tobuild') { shopReady(); return; }              // ready-gate obchodu (co-op)
   // --- guest: ekonomika a tok = příkazy hostiteli ---
   if (net.role === 'guest') {
-    if (['buyweapon', 'buyammo', 'buybuild', 'buylife', 'upstat', 'upweapon', 'toshop', 'perkpick', 'upshield', 'wheelpick'].includes(act)) { netSend({ t: 'cmd', act, id }); if (act === 'perkpick') { const g = players[1]; if (g && g.perkOffer) { g.perkOffer = null; renderRoundEnd(); } } return; }
+    if (['buyweapon', 'buyammo', 'buybuild', 'buylife', 'upstat', 'upweapon', 'toshop', 'perkpick', 'upshield', 'wheelpick', 'pactpick'].includes(act)) { netSend({ t: 'cmd', act, id }); if (act === 'perkpick') { const g = players[1]; if (g && g.perkOffer) { g.perkOffer = null; renderRoundEnd(); } } return; }
     return;
   }
   // --- host / solo ---
   const me = localPlayer();
   if (act === 'perkpick') { choosePerk(me, id); return; }
+  if (act === 'pactpick') { choosePact(id); return; }
+  if (act === 'pactskip') { setState(pactReturn || 'shop'); return; }
   if (act === 'wheelpick') { chooseWheel(id); return; }
   if (act === 'upshield') { buyShield(me); return; }
   if (act === 'buyweapon') buyWeapon(id, me);
@@ -650,7 +696,7 @@ function shopReady() {
 
 // Výběr třídy (solo i co-op)
 function pickClass(id) {
-  if (!isCoop()) { newRun(id); setState('shop'); return; }
+  if (!isCoop()) { newRun(id); offerPact('shop'); return; }   // 1. pakt před prvním obchodem
   if (net.role === 'host') {
     net.hostClass = id;
     if (net.guestClass) startCoop();
@@ -664,7 +710,7 @@ function pickClass(id) {
 // Host spustí sdílený běh a rozešle stav (guest ho zrcadlí přes snímky).
 function startCoop() {
   newRun([net.hostClass, net.guestClass]);
-  setState('shop');
+  offerPact('shop');
   if (typeof netPush === 'function') netPush();
 }
 
@@ -703,10 +749,10 @@ function startBuildPhase() {
   for (const p of players) { p.hp = p.hpMax; p.downed = false; p.inv = 0; }
   buildSel = null; upgradeMode = false;
   readyHost = false; readyGuest = false;
-  setState('build');
-  // po přechodu na novou mapu nech viditelné oznámení mapy (setState('build') jinak přepíše banner)
-  if (mapChanged) banner = { text: '🗺 MAPA ' + (currentMap + 1) + '/' + NUM_MAPS + ': ' + MAPS[currentMap].name + ' — postav obranu znovu', t: 180 };
   const me = localPlayer(); if (me) updateCamera(me.x, me.y, 1, true);   // kamera k jádru
+  // nová mapa → nabídni pakt, pak teprve stavění; jinak rovnou stavění
+  if (mapChanged) { offerPact('build'); banner = { text: '🗺 MAPA ' + (currentMap + 1) + '/' + NUM_MAPS + ': ' + MAPS[currentMap].name, t: 180 }; }
+  else setState('build');
 }
 function advanceToMap(i) {
   // NOVÁ MAPA = čerstvá obrana: zdi, věže, pasti i spojenci se NEPŘENÁŠEJÍ — hráč staví znovu.
@@ -806,11 +852,13 @@ function startWave() {
     for (let k = 0; k < escort; k++) queue.push(pickWeighted(comp));
   } else {
     const comp = horde ? hordeComposition(wv) : waveComposition(wv);
-    for (let k = 0, n = waveCount(wv); k < n; k++) queue.push(pickWeighted(comp));
+    const n = Math.round(waveCount(wv) * pactMul('count'));   // pakt Neustálá horda
+    for (let k = 0; k < n; k++) queue.push(pickWeighted(comp));
   }
-  wave = { queue, spawned: 0, total: queue.length, spawnCool: 20, boss, mapBoss, subBoss, horde,
-           bossKind: mapBoss ? 'map' : (subBoss ? 'sub' : null), bossId,
-           interval: horde ? 8 : null, kills: 0, reward: { gems: 0, kills: 0, xp: 0 } };
+  const spawnMul = pactMul('spawn');   // pakt Krvavý spěch (nižší = rychleji)
+  wave = { queue, spawned: 0, total: queue.length, spawnCool: 20 * spawnMul, boss, mapBoss, subBoss, horde,
+           bossKind: mapBoss ? 'map' : (subBoss ? 'sub' : null), bossId, spawnMul,
+           interval: horde ? 8 * spawnMul : null, kills: 0, reward: { gems: 0, kills: 0, xp: 0 } };
   flowDirty = true;
   setState('combat');
   banner = mapBoss ? { text: '⚠ BOSS: ' + ENEMIES[bossId].name.toUpperCase() + ' ⚠', t: 120, warn: true }
@@ -834,10 +882,13 @@ function spawnEnemy(typeId) {
   if (base.arch === 'BOSS' && base.sub)      { hpMul = 1 + 0.26 * mapIdx; spdMul = 1; }
   else if (base.arch === 'BOSS')             { hpMul = base.final ? 1 : Math.min(3.2, 1 + 0.16 * mapIdx); spdMul = 1; }
   else                                        { hpMul = sc.hp; spdMul = sc.spd; }
-  let dmgMul = base.arch === 'BOSS' ? Math.min(3, 1 + 0.12 * mapIdx) : sc.dmg;
+  // pakty: HP (boss vs běžní), rychlost a poškození nepřátel
+  hpMul *= (base.arch === 'BOSS' ? pactMul('bossHp') : pactMul('enemyHp'));
+  spdMul *= pactMul('enemySpd');
+  let dmgMul = (base.arch === 'BOSS' ? Math.min(3, 1 + 0.12 * mapIdx) : sc.dmg) * pactMul('enemyDmg');
   // elitní přídomek (jen běžní nepřátelé)
   let elite = null;
-  if (base.arch !== 'BOSS' && Math.random() < eliteChance(run.wave)) {
+  if (base.arch !== 'BOSS' && Math.random() < eliteChance(run.wave) * pactMul('eliteChance')) {
     elite = ELITE_KEYS[(Math.random() * ELITE_KEYS.length) | 0];
     const ed = ELITES[elite]; hpMul *= ed.hpMul; spdMul *= ed.spdMul; dmgMul *= ed.dmgMul;
   }
@@ -889,6 +940,7 @@ function weaponDmg(p, w) {
   if (w.arch === 'THROWN_AOE') d *= (pas.aoeDmg || 1);
   d *= (pas.holyDmg || 1);
   d *= (pas.dmgMul || 1);                                             // perky: +% poškození
+  d *= pactMul('dmg');                                               // pakt: Železná disciplína
   const up = (run && run.upgrades) || {};
   d *= 1 + 0.08 * (up.dmg || 0);                                      // stat Síla
   d *= 1 + 0.10 * ((run.wUpgrades && run.wUpgrades[p.weaponId]) || 0); // vylepšení zbraně
@@ -1064,11 +1116,12 @@ function killEnemy(e, killer) {
   // combo → násobič skóre a gemů
   run.combo = (run.combo || 0) + 1; run.comboT = 180;
   const mult = comboMult();
-  const gems = Math.max(1, Math.round((e.def.bounty || 4) * GEMS_PER_KILL_MUL * mult * (e.elite ? 3 : 1)));
+  const eliteGem = e.elite ? 3 * pactMul('eliteGem') : 1;   // pakt Lovecká odměna
+  const gems = Math.max(1, Math.round((e.def.bounty || 4) * GEMS_PER_KILL_MUL * mult * eliteGem * pactMul('gem')));
   for (const q of players) q.gems = (q.gems || 0) + Math.max(1, Math.round(gems * (q.passive.gemMul || 1)));  // perk: +% gemů (per hráč)
-  run.score = (run.score || 0) + Math.round((e.def.score || 10) * mult * (e.elite ? 3 : 1));
+  run.score = (run.score || 0) + Math.round((e.def.score || 10) * mult * (e.elite ? 3 : 1) * pactMul('score'));
   if (wave) { wave.kills++; wave.reward.kills++; }
-  addXp(xpForKill(e.def) * (e.elite ? 3 : 1) * ((killer && killer.passive && killer.passive.xpMul) || 1));  // perk: +% XP
+  addXp(xpForKill(e.def) * (e.elite ? 3 : 1) * ((killer && killer.passive && killer.passive.xpMul) || 1) * pactMul('xp'));  // perk + pakt: +% XP
   // perk: výbušné zabití — šance na výbuch v okolí
   if (killer && killer.passive && killer.passive.explodeChance && Math.random() < killer.passive.explodeChance)
     aoeExplosion(e.x, e.y, 55, 20, null, '#ffb020');
@@ -1083,13 +1136,13 @@ function killEnemy(e, killer) {
   // elita „zhoubný" vybuchne, elita jindy → zaručený drop
   if (e.elite === 'zhoubny' || e.def.arch === 'EXPLODER' && false) aoeExplosion(e.x, e.y, 60, e.dmg, null, '#c060ff');
   if (e.elite) dropPickup(e.x, e.y, true);
-  else if (Math.random() < 0.09) dropPickup(e.x, e.y, false);
+  else if (Math.random() < 0.09 * pactMul('drop')) dropPickup(e.x, e.y, false);   // pakt Zlatá hojnost
   // alchymista: z běžné zombie může vytéct žluč (na lektvar proměny)
   if (e.arch !== 'BOSS' && players.some(q => q.classId === 'alchymista') && Math.random() < BILE_DROP_CHANCE)
     pickups.push({ id: 'zluc', x: e.x, y: e.y, t: 900, bob: Math.random() * 6, hold: 0 });
 }
 // Násobič combo: 1× → až ~3× při dlouhé sérii
-function comboMult() { return 1 + Math.min(2, (run.combo || 0) * 0.05); }
+function comboMult() { return 1 + Math.min(2, (run.combo || 0) * 0.05 * pactMul('comboRate')); }   // pakt Řež: rychlejší růst
 function addXp(n) {
   profile.xp += n;
   while (profile.xp >= xpToLevel(profile.playerLevel)) {
@@ -1237,7 +1290,7 @@ function updateCombat(dt) {
     wave.spawnCool -= dt;
     if (wave.spawnCool <= 0) {
       spawnEnemy(wave.queue[wave.spawned++]);
-      wave.spawnCool = wave.interval || Math.max(10, 40 - run.wave * 1.2);
+      wave.spawnCool = wave.interval || Math.max(10, 40 - run.wave * 1.2) * (wave.spawnMul || 1);
     }
   }
   // konec vlny
@@ -1339,7 +1392,7 @@ function useAbility(p) {
   }
   // — schopnosti na klasickém cooldownu —
   if (p.abilityCd > 0) return;
-  p.abilityCd = Math.round(ab.cd * (p.passive.cdMul || 1));   // perk Soustředění: −% cooldown
+  p.abilityCd = Math.round(ab.cd * (p.passive.cdMul || 1) * pactMul('cd'));   // perk Soustředění + pakt Prokletí many
 
   const a = p.aimAngle;
   emitAbilityFx(p);
@@ -1666,7 +1719,7 @@ function updateEnemies(dt) {
     // dosažení jádra → únik (ztráta životů)
     const cx = Math.floor(e.x / TILE), cy = Math.floor(e.y / TILE);
     if (cx >= CORE.tx && cx < CORE.tx + CORE.w && cy >= CORE.ty && cy < CORE.ty + CORE.h) {
-      run.lives -= e.def.leak || 1; e.dead = true;
+      run.lives -= (e.def.leak || 1) + pactSum('leak'); e.dead = true;   // pakt Železná disciplína: +1 za únik
       flash = 0.4; shake = Math.min(9, shake + 4); sfx.coreHit();
       burst(e.x, e.y, '#ff5c5c', 16);
       if (navigator.vibrate && profile.settings.haptics) navigator.vibrate(60);
