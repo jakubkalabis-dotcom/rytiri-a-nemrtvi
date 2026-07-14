@@ -12,104 +12,256 @@
 <meta name="apple-mobile-web-app-title" content="Rytíři">
 <link rel="apple-touch-icon" href="icon-180.png">
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  /* ============================================================
+     RYTÍŘI A NEMRTVÍ — designový systém UI (obsidián · zlato · krev)
+     ============================================================ */
+  :root {
+    --bg-0:#07080c; --bg-1:#0e1016; --bg-2:#15171f;
+    --panel-a:#191c26; --panel-b:#12141b;
+    --line:#2c2f3d; --line-warm:#4a3f2a;
+    --gold:#e7c56a; --gold-2:#ffdd86; --gold-deep:#8a6a24; --amber:#e0a445;
+    --blood:#c23346; --blood-2:#ec5563;
+    --leaf:#7fd489; --leaf-deep:#2f7a3e;
+    --mana:#5aa9ee;
+    --ink:#ece6d6; --ink-dim:#a29c8a; --ink-faint:#6a6656;
+    --r-lg:18px; --r-md:13px; --r-sm:9px;
+    --sh-1:0 2px 10px rgba(0,0,0,.45);
+    --sh-2:0 14px 40px rgba(0,0,0,.6);
+    --ring:0 0 0 1px rgba(255,255,255,.05) inset;
+    --glow-gold:0 0 22px rgba(231,197,106,.28);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html, body {
-    height: 100%;
-    background: #0c0f08;
-    color: #e8ecd8;
-    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
-    overflow: hidden;
-    overscroll-behavior: none;
-    -webkit-tap-highlight-color: transparent;
-    -webkit-user-select: none; user-select: none;
+    height:100%; background:var(--bg-0); color:var(--ink);
+    font-family:-apple-system, "Segoe UI", system-ui, sans-serif;
+    overflow:hidden; overscroll-behavior:none;
+    -webkit-user-select:none; user-select:none;
+    text-rendering:optimizeLegibility; -webkit-font-smoothing:antialiased;
   }
-  #game-area { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
-  canvas {
-    background: #12160e;
-    display: block;
-    touch-action: none;
-    box-shadow: 0 0 40px rgba(0,0,0,.6);
-  }
-  /* ---- Overlay (menu / výběr třídy / obchod / konec) ---- */
+  #game-area { position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; }
+  canvas { background:#0d0f14; display:block; touch-action:none; box-shadow:0 0 60px rgba(0,0,0,.7); }
+
+  /* ---- Overlay: frostované sklo + atmosférická vinětace ---- */
   #overlay {
-    position: absolute; inset: 0;
-    display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
-    background: rgba(10,12,7,.94);
-    padding: max(16px, env(safe-area-inset-top)) 14px max(16px, env(safe-area-inset-bottom));
-    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    position:absolute; inset:0; z-index:5;
+    display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
+    background:
+      radial-gradient(120% 80% at 50% -10%, rgba(90,70,30,.16), transparent 55%),
+      radial-gradient(140% 120% at 50% 120%, rgba(120,30,40,.10), transparent 60%),
+      linear-gradient(180deg, rgba(8,9,13,.90), rgba(6,7,10,.95));
+    -webkit-backdrop-filter:blur(14px) saturate(1.1); backdrop-filter:blur(14px) saturate(1.1);
+    padding:max(18px, env(safe-area-inset-top)) 15px max(18px, env(safe-area-inset-bottom));
+    overflow-y:auto; -webkit-overflow-scrolling:touch;
   }
-  #overlay.hidden { display: none; }
-  #ovContent { width: 100%; max-width: 460px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-  h2 { font-size: 24px; color: #f0e0a0; text-align: center; letter-spacing: .5px; margin-top: 8px; }
-  h3 { font-size: 13px; color: #8fb070; letter-spacing: 1px; align-self: flex-start; margin-top: 6px; }
-  p { color: #b6c098; font-size: 13px; line-height: 1.5; text-align: center; }
-  .wallet { color: #e8ecd8; font-size: 15px; background: rgba(255,255,255,.05); padding: 8px 14px; border-radius: 8px; text-align: center; }
+  #overlay::before {
+    content:""; position:absolute; inset:0; pointer-events:none;
+    box-shadow:inset 0 0 160px rgba(0,0,0,.7);
+    background:repeating-linear-gradient(0deg, rgba(255,255,255,.012) 0 1px, transparent 1px 3px);
+    mix-blend-mode:overlay;
+  }
+  #overlay.hidden { display:none; }
+  #ovContent {
+    width:100%; max-width:470px; display:flex; flex-direction:column; align-items:center; gap:13px;
+    position:relative; z-index:1; animation:rise .28s cubic-bezier(.2,.7,.2,1) both;
+  }
+  @keyframes rise { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+  ::-webkit-scrollbar { width:8px; } ::-webkit-scrollbar-thumb { background:#2a2d38; border-radius:8px; }
+
+  /* ---- Typografie ---- */
+  h2 {
+    font-family:"Cinzel", "Trajan Pro", Georgia, serif; font-weight:700;
+    font-size:27px; letter-spacing:1.5px; text-align:center; margin-top:6px;
+    color:transparent; background:linear-gradient(180deg,#fff2c8,#e7c56a 55%,#a8801f);
+    -webkit-background-clip:text; background-clip:text;
+    filter:drop-shadow(0 2px 10px rgba(200,150,40,.25));
+  }
+  h3 {
+    font-size:11px; font-weight:700; letter-spacing:2px; text-transform:uppercase;
+    color:var(--gold); align-self:flex-start; margin-top:8px; opacity:.85;
+    display:flex; align-items:center; gap:8px; width:100%;
+  }
+  h3::after { content:""; flex:1; height:1px; background:linear-gradient(90deg, var(--line-warm), transparent); }
+  p { color:var(--ink-dim); font-size:13px; line-height:1.55; text-align:center; }
+  b { color:var(--ink); }
+
+  /* ---- Peněženka: čipy se surovinami ---- */
+  .wallet {
+    display:flex; flex-wrap:wrap; justify-content:center; gap:7px; width:100%;
+    font-size:14px; background:none; padding:0;
+  }
+  .wallet, .wallet * { line-height:1; }
+  .chip, .wallet {
+    color:var(--ink);
+  }
+  /* wallet obsahuje text s ikonami – nadělíme mu vzhled čipů přes vnitřní span není možné,
+     tak ji uděláme jako jeden elegantní panel */
+  .wallet {
+    display:inline-flex; gap:14px; padding:9px 16px; border-radius:99px;
+    background:linear-gradient(180deg, rgba(40,44,58,.7), rgba(20,22,30,.7));
+    border:1px solid var(--line); box-shadow:var(--sh-1), var(--ring);
+    font-weight:600; letter-spacing:.3px; backdrop-filter:blur(6px);
+  }
+
+  /* ---- Tlačítka ---- */
   button {
-    background: linear-gradient(180deg, #6a8f3a, #4a6b28);
-    color: #fff; border: none; padding: 13px 28px; border-radius: 10px;
-    font-size: 16px; font-weight: 700; cursor: pointer; min-height: 48px;
-    box-shadow: 0 4px 14px rgba(60,90,20,.4); width: 100%; max-width: 320px; margin: 6px 0;
+    position:relative; width:100%; max-width:340px; margin:5px 0; min-height:50px;
+    padding:14px 26px; border:none; border-radius:var(--r-md); cursor:pointer;
+    font-size:16px; font-weight:800; letter-spacing:.3px; color:#3a2a06;
+    background:linear-gradient(180deg,#ffe294,#e7c56a 45%,#c79a34);
+    box-shadow:0 6px 18px rgba(150,110,30,.35), var(--ring);
+    transition:transform .12s ease, filter .15s ease, box-shadow .15s ease;
+    overflow:hidden;
   }
-  button:hover { filter: brightness(1.1); }
-  button.ghost { background: #2a331f; box-shadow: none; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; width: 100%; }
+  button::after {
+    content:""; position:absolute; inset:0 0 55% 0;
+    background:linear-gradient(180deg, rgba(255,255,255,.4), transparent); pointer-events:none;
+  }
+  button:hover { filter:brightness(1.06); box-shadow:0 8px 24px rgba(150,110,30,.45), var(--glow-gold); }
+  button:active { transform:translateY(2px) scale(.99); filter:brightness(.95); }
+  button.ghost {
+    color:var(--ink); background:linear-gradient(180deg, rgba(44,48,62,.9), rgba(24,26,34,.9));
+    border:1px solid var(--line); box-shadow:var(--sh-1);
+  }
+  button.ghost::after { opacity:.12; }
+  button.dis, button:disabled { filter:grayscale(.6) brightness(.6); cursor:not-allowed; }
+
+  /* ---- Segmentované záložky ---- */
+  .tabs {
+    display:flex; gap:5px; width:100%; padding:5px; border-radius:14px;
+    background:linear-gradient(180deg, rgba(14,16,22,.9), rgba(10,11,16,.9));
+    border:1px solid var(--line); box-shadow:var(--ring);
+    overflow-x:auto; scrollbar-width:none;
+  }
+  .tabs::-webkit-scrollbar { display:none; }
+  .tab {
+    flex:1 0 auto; margin:0; min-height:42px; padding:9px 12px; white-space:nowrap;
+    font-size:12.5px; font-weight:700; letter-spacing:.2px; border-radius:10px; max-width:none;
+    color:var(--ink-dim); background:transparent; box-shadow:none;
+    transition:color .15s, background .2s, transform .1s;
+  }
+  .tab::after { display:none; }
+  .tab:hover { color:var(--ink); }
+  .tab.on {
+    color:#2a1e04; background:linear-gradient(180deg,#ffe294,#e0b552);
+    box-shadow:0 3px 10px rgba(150,110,30,.35);
+  }
+
+  /* ---- Mřížka + karty ---- */
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:9px; width:100%; }
   .card {
-    background: #1a2012; border: 1px solid #33401f; border-radius: 10px; padding: 10px;
-    cursor: pointer; display: flex; flex-direction: column; gap: 4px; min-height: 44px;
+    position:relative; cursor:pointer; display:flex; flex-direction:column; gap:5px;
+    min-height:48px; padding:12px; border-radius:var(--r-md);
+    background:linear-gradient(180deg, var(--panel-a), var(--panel-b));
+    border:1px solid var(--line); box-shadow:var(--sh-1), var(--ring);
+    transition:transform .14s cubic-bezier(.2,.7,.2,1), border-color .15s, box-shadow .18s;
   }
-  .card:hover { border-color: #6a8f3a; }
-  .card.dis { opacity: .5; cursor: not-allowed; }
-  .class-card { align-items: center; text-align: center; }
-  .class-card .ci { font-size: 30px; }
-  .class-card .cn { font-weight: 700; font-size: 15px; }
-  .class-card .cd { font-size: 11px; color: #a0ac84; }
-  .class-card .cs { font-size: 11px; color: #d0c080; }
-  .shop-card .scn { font-weight: 600; font-size: 13px; }
-  .shop-card .scd { font-size: 11px; color: #9aa87e; }
-  .shop-card .scc { font-size: 13px; color: #ffd35c; font-weight: 700; }
-  .shop { width: 100%; display: flex; flex-direction: column; gap: 6px; }
-  .board { width: 100%; max-width: 320px; }
-  .row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 8px; border-radius: 4px; color: #cdd4b5; }
-  .row:nth-child(odd) { background: rgba(255,255,255,.04); }
-  .row .rank { color: #7a8560; width: 24px; }
-  .row .nm { flex: 1; text-align: left; padding-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row .sc { color: #ffd35c; }
-  .empty { font-size: 12px; color: #6a734c; padding: 8px; text-align: center; }
-  .tabs { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; }
-  .tab { flex: 1 1 28%; background: #20261c; box-shadow: none; margin: 0; padding: 8px 4px; font-size: 12.5px; min-height: 40px; }
-  .tab.on { background: linear-gradient(180deg, #6a8f3a, #4a6b28); }
-  .statbox { width: 100%; background: #161c10; border: 1px solid #33401f; border-radius: 10px; padding: 10px 12px; }
-  .statname { font-weight: 700; font-size: 16px; margin-bottom: 6px; }
-  .statrow { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); color: #b6c098; }
-  .statrow b { color: #e8ecd8; }
-  .ico { vertical-align: middle; margin-right: 5px; }
-  .scn { display: flex; align-items: center; }
-  .bcard { display: flex; align-items: flex-start; gap: 10px; text-align: left;
-    background: #141a0e; border: 1px solid #2c3a1a; border-radius: 10px; padding: 8px 10px; margin: 6px 0; }
-  .benemy { flex: 0 0 40px; image-rendering: pixelated; }
-  .binfo { flex: 1; min-width: 0; }
-  .bname { font-size: 14px; font-weight: bold; color: #e8ecd8; }
-  .bboss { font-size: 10px; color: #ff6a3a; border: 1px solid #ff6a3a; border-radius: 4px; padding: 0 4px; margin-left: 4px; }
-  .bstats { font-size: 12px; color: #c0a060; margin: 2px 0; }
-  .bdesc { font-size: 12px; color: #9aa87e; }
-  .up-card { align-items: flex-start; gap: 3px; }
-  .upbar { font-size: 10px; color: #8fb070; letter-spacing: 1px; }
-  .lbl { color: #8fb070; font-size: 12px; align-self: flex-start; margin-top: 4px; }
+  .card::before {
+    content:""; position:absolute; left:0; top:10px; bottom:10px; width:3px; border-radius:3px;
+    background:linear-gradient(180deg, var(--gold), var(--gold-deep)); opacity:.55;
+  }
+  .card:hover { transform:translateY(-3px); border-color:var(--line-warm); box-shadow:var(--sh-2), var(--glow-gold); }
+  .card:active { transform:translateY(-1px) scale(.99); }
+  .card.dis { opacity:.42; cursor:not-allowed; filter:grayscale(.5); }
+  .card.dis:hover { transform:none; box-shadow:var(--sh-1); }
+
+  /* Karty tříd */
+  .class-card { align-items:center; text-align:center; padding:16px 12px; gap:6px; }
+  .class-card::before { display:none; }
+  .class-card .ci {
+    font-size:34px; width:62px; height:62px; display:flex; align-items:center; justify-content:center;
+    border-radius:50%; background:radial-gradient(circle at 50% 35%, rgba(255,255,255,.10), rgba(0,0,0,.25));
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.06), 0 4px 14px rgba(0,0,0,.4); margin-bottom:2px;
+  }
+  .class-card .cn { font-weight:800; font-size:16px; letter-spacing:.3px; }
+  .class-card .cd { font-size:11px; color:var(--ink-dim); line-height:1.35; }
+  .class-card .cs { font-size:11.5px; color:var(--gold); font-weight:700; margin-top:2px; }
+
+  /* Karty obchodu */
+  .shop { width:100%; display:flex; flex-direction:column; gap:9px; }
+  .shop-card { padding-left:15px; }
+  .shop-card .scn { display:flex; align-items:center; gap:6px; font-weight:700; font-size:13.5px; }
+  .shop-card .scd { font-size:11px; color:var(--ink-dim); line-height:1.4; }
+  .shop-card .scc {
+    align-self:flex-start; margin-top:2px; font-size:12.5px; font-weight:800; color:var(--gold-2);
+    padding:3px 9px; border-radius:99px; background:rgba(231,197,106,.10);
+    border:1px solid rgba(231,197,106,.22);
+  }
+
+  /* Vylepšení / úrovně */
+  .up-card { align-items:stretch; gap:5px; }
+  .upbar { font-size:11px; color:var(--gold); letter-spacing:2px; }
+
+  /* Skóre tabulka */
+  .board {
+    width:100%; max-width:360px; padding:6px; border-radius:var(--r-md);
+    background:linear-gradient(180deg, rgba(18,20,28,.8), rgba(12,13,18,.8));
+    border:1px solid var(--line); box-shadow:var(--ring);
+  }
+  .row { display:flex; justify-content:space-between; font-size:13px; padding:7px 10px; border-radius:8px; color:#cdd4c0; }
+  .row:nth-child(odd) { background:rgba(255,255,255,.03); }
+  .row .rank { color:var(--gold-deep); width:24px; font-weight:800; }
+  .row .nm { flex:1; text-align:left; padding-left:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .row .sc { color:var(--gold-2); font-weight:700; }
+  .empty { font-size:12px; color:var(--ink-faint); padding:14px; text-align:center; }
+
+  /* Statistiky postavy */
+  .statbox {
+    width:100%; padding:13px 14px; border-radius:var(--r-md);
+    background:linear-gradient(180deg, var(--panel-a), var(--panel-b));
+    border:1px solid var(--line); box-shadow:var(--sh-1), var(--ring);
+  }
+  .statname { font-weight:800; font-size:16px; margin-bottom:8px; letter-spacing:.3px; }
+  .statrow { display:flex; justify-content:space-between; font-size:13px; padding:6px 0; border-bottom:1px solid rgba(255,255,255,.05); color:var(--ink-dim); }
+  .statrow:last-child { border-bottom:none; }
+  .statrow b { color:var(--ink); }
+  .scd { color:var(--ink-dim); }
+  .ico { vertical-align:middle; margin-right:5px; }
+
+  /* Bestiář */
+  .bcard {
+    display:flex; align-items:flex-start; gap:12px; text-align:left; margin:0;
+    padding:11px 12px; border-radius:var(--r-md);
+    background:linear-gradient(180deg, var(--panel-a), var(--panel-b));
+    border:1px solid var(--line); box-shadow:var(--sh-1), var(--ring);
+  }
+  .benemy { flex:0 0 44px; image-rendering:pixelated; filter:drop-shadow(0 3px 6px rgba(0,0,0,.5)); }
+  .binfo { flex:1; min-width:0; }
+  .bname { font-size:14px; font-weight:800; color:var(--ink); }
+  .bboss { font-size:9.5px; font-weight:800; letter-spacing:.5px; color:#fff; background:linear-gradient(180deg,var(--blood-2),var(--blood)); border:none; border-radius:5px; padding:2px 6px; margin-left:6px; }
+  .bstats { font-size:12px; color:var(--gold); margin:3px 0; }
+  .bdesc { font-size:12px; color:var(--ink-dim); }
+
+  /* Buffy / perky */
+  .perk-offer { width:100%; padding:12px; border-radius:var(--r-md);
+    background:radial-gradient(120% 100% at 50% 0%, rgba(120,40,50,.18), transparent 60%), linear-gradient(180deg, var(--panel-a), var(--panel-b));
+    border:1px solid var(--line-warm); box-shadow:var(--sh-2), 0 0 30px rgba(200,60,70,.12); }
+  .perk-offer h3 { color:var(--blood-2); }
+  .perk-card::before { background:linear-gradient(180deg, var(--blood-2), var(--blood)); opacity:.8; }
+  .perk-owned { width:100%; margin-top:2px; }
+  .perk-owned summary { cursor:pointer; font-size:12px; color:var(--gold); padding:8px 10px; border-radius:9px; background:rgba(255,255,255,.03); border:1px solid var(--line); }
+  .perk-list { display:flex; flex-direction:column; gap:5px; padding:9px 4px; font-size:12px; color:var(--ink); }
+  .perk-list > div { padding:5px 8px; border-radius:7px; background:rgba(255,255,255,.02); }
+
+  /* Kódy pro co-op */
+  .lbl { color:var(--gold); font-size:12px; font-weight:700; align-self:flex-start; margin-top:4px; }
   .codebox {
-    width: 100%; min-height: 64px; max-height: 120px; resize: vertical;
-    background: #10160c; border: 1px solid #33401f; border-radius: 8px; color: #cdd4b5;
-    font-family: monospace; font-size: 11px; padding: 8px; word-break: break-all;
+    width:100%; min-height:64px; max-height:120px; resize:vertical;
+    background:var(--bg-1); border:1px solid var(--line); border-radius:var(--r-sm); color:#cdd4c0;
+    font-family:ui-monospace, monospace; font-size:11px; padding:10px; word-break:break-all;
   }
   .gamecode {
-    font-family: monospace; font-size: 44px; font-weight: bold; letter-spacing: 10px;
-    color: #ffd76a; text-align: center; padding: 12px 8px; margin: 4px 0;
-    background: #10160c; border: 2px solid #4a5a26; border-radius: 12px;
+    font-family:ui-monospace, monospace; font-size:46px; font-weight:800; letter-spacing:12px;
+    color:transparent; background:linear-gradient(180deg,#fff2c8,#e7c56a); -webkit-background-clip:text; background-clip:text;
+    text-align:center; padding:16px 8px; margin:4px 0;
+    background-color:var(--bg-1); border:1px solid var(--line-warm); border-radius:var(--r-md);
+    box-shadow:var(--ring), 0 0 24px rgba(231,197,106,.15);
   }
   .codeinput {
-    width: 100%; text-align: center; font-family: monospace; font-size: 40px;
-    letter-spacing: 10px; padding: 10px; margin: 6px 0;
-    background: #10160c; border: 2px solid #4a5a26; border-radius: 12px; color: #ffd76a;
+    width:100%; text-align:center; font-family:ui-monospace, monospace; font-size:40px;
+    letter-spacing:12px; padding:12px; margin:6px 0;
+    background:var(--bg-1); border:1px solid var(--line-warm); border-radius:var(--r-md); color:var(--gold-2);
   }
+  @media (prefers-reduced-motion: reduce) { * { animation:none !important; transition:none !important; } }
 </style>
 </head>
 <body>
