@@ -1934,9 +1934,13 @@ function drawVignette() {
 let vignetteCache = null;
 
 function drawMenuBg() {
-  if (terrainCanvas) ctx.drawImage(terrainCanvas, 0, 0, ARENA_W, ARENA_H, 0, 0, W, H);
-  else { ctx.fillStyle = '#243018'; ctx.fillRect(0, 0, W, H); }
-  ctx.fillStyle = 'rgba(8,10,6,0.55)'; ctx.fillRect(0, 0, W, H);
+  // temná gotická obloha (ladí s hero scénou; overlay je stejně z větší části zakryje)
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#0a0416'); g.addColorStop(0.55, '#1a081a'); g.addColorStop(1, '#2c0c16');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  const rg = ctx.createRadialGradient(W * 0.7, H * 0.18, 20, W * 0.7, H * 0.18, W * 0.9);
+  rg.addColorStop(0, 'rgba(200,40,50,0.22)'); rg.addColorStop(1, 'rgba(200,40,50,0)');
+  ctx.fillStyle = rg; ctx.fillRect(0, 0, W, H);
 }
 function drawArena() {
   if (terrainCanvas) ctx.drawImage(terrainCanvas, 0, 0);
