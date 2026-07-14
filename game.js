@@ -382,10 +382,10 @@ function abilityDetail(cid) {
     lovec: '🏹 Smršt (cd 35 s): na 5 s +70 % rychlost palby a NEKONEČNÁ munice. Žádné náboje/mana se nespotřebují.',
     berserk: `🪓 Volání klanu: přivolá 2 sekerníky (${CLAN_AXEMAN.hp} HP, ${CLAN_AXEMAN.dmg} poškození/úder). Jen při ≤ 50 % HP. Odejdou při smrti / HP > 65 % / konci kola. Poté cd 40 s.`,
     zved: '🗡 Bodnutí do zad (cd 10 s): 5 s neviditelnost (mobové tě ignorují). PRVNÍ útok = okamžité zabití běžného nepřítele, nebo 3× poškození zbraně na bosse. Zabiješ-li silnějšího, cd se resetuje.',
-    mag: `☄ Armagedon (cd 12 s): meteor na nejbližší shluk — ${MAG_METEOR_DMG} poškození v okruhu ${MAG_METEOR_RADIUS} + ohnivá zem ${MAG_METEOR_DOT.dps}/s po 3 s. (× magický bonus).`,
+    mag: `☄ Armagedon (cd 15 s): meteor na nejbližší shluk — ${MAG_METEOR_DMG} poškození v okruhu ${MAG_METEOR_RADIUS} + ohnivá zem ${MAG_METEOR_DOT.dps}/s po 3 s. (× magický bonus).`,
     alchymista: `🧟 Abominace (lektvar z 5 žlučí, max 2): 10 s proměna — −50 % obdrž. poškození, −38 % rychlost, POŽÍRÁ pěšáky (+${ABOM_HP_PER_EAT} max HP navždy/kus) a leptá silnější ${ABOM_ACID_BURST} dmg/2,5 s + ${ABOM_ACID_DPS} dmg/s v okruhu ${ABOM_ACID_RADIUS}.`,
-    inzenyr: `🔧 Polní věž (cd 8 s): ${1 + (wu.count || 0)}× samostříl (${(720 + (wu.dur || 0) * 180) / 60} s, ${Math.round(90 * (1 + 0.4 * (wu.hp || 0)))} HP, +${(wu.dmg || 0) * 20} % dmg, +${(wu.rate || 0) * 15} % rychlost) + opraví zdi. Zabíjením věžemi plníš „Kolečka se točí".`,
-    knez: '✨ Vzkříšení (1× za kolo): oživí padlé v okruhu 220 na 60 % HP, živé vyléčí o 60 HP a spálí nemrtvé za 40 v okruhu 130.',
+    inzenyr: `🔧 Polní věž (cd 17 s): ${1 + (wu.count || 0)}× samostříl (${(720 + (wu.dur || 0) * 180) / 60} s, ${Math.round(90 * (1 + 0.4 * (wu.hp || 0)))} HP, +${(wu.dmg || 0) * 20} % dmg, +${(wu.rate || 0) * 15} % rychlost) + opraví zdi. Zabíjením věžemi plníš „Kolečka se točí".`,
+    knez: `✨ Vzkříšení (1× za kolo): oživí padlé v okruhu 220 na 60 % HP, živé vyléčí o 60 HP a spálí nemrtvé za 40 v okruhu 130.  ➕ Pasivně: Svatá záře — každých ${(PRIEST_NOVA.cd / 60).toFixed(1)} s spálí nemrtvé kolem za ${Math.round(PRIEST_NOVA.dmg * 1.25)} v okruhu ${PRIEST_NOVA.radius}.`,
   })[cid] || 'Aktivní schopnost třídy.';
 }
 // Přehled trvalých buffů (padají ze sub-bossů) — vlastněné + celý katalog s čísly.
@@ -1242,6 +1242,8 @@ function updatePlayers(dt) {
     if (p.mana < p.manaMax) p.mana = Math.min(p.manaMax, p.mana + p.manaRegen * dt);
     // léčivá aura (kněz)
     if (p.passive.healAura) p.hp = Math.min(p.hpMax, p.hp + p.passive.healAura * dt);
+    // kněz: pasivní sekundární AOE „Svatá záře" – pálí nemrtvé kolem
+    if (p.classId === 'knez') { p.holyNovaCd = (p.holyNovaCd || 0) - dt; if (p.holyNovaCd <= 0) { priestHolyPulse(p); p.holyNovaCd = PRIEST_NOVA.cd; } }
     // perk: regenerace (HP/s)
     if (p.passive.regenAdd) p.hp = Math.min(p.hpMax, p.hp + p.passive.regenAdd / 60 * dt);
     // pohyb
@@ -1350,6 +1352,14 @@ function updateAbomination(p, dt) {
   if (Math.random() < 0.4) burst(p.x + (Math.random() - 0.5) * p.r * 2, p.y + (Math.random() - 0.5) * p.r * 2, '#8fd84a', 1);
   if (p.abomT <= 0) { p.r = p._preAbomR || 12; banner = { text: 'Proměna skončila.', t: 50 }; }
 }
+// — Kněz: pasivní „Svatá záře" — pravidelný AOE puls do nemrtvých (sekundární útok) —
+function priestHolyPulse(p) {
+  const r = PRIEST_NOVA.radius, dmg = PRIEST_NOVA.dmg * (p.passive.holyDmg || 1);
+  effects.push({ type: 'nova', x: p.x, y: p.y, r: 4, rMax: r, t: 24, color: '#fff2b0' });
+  let hit = false;
+  for (const e of enemyHash.query(p.x, p.y, r)) if (!e.dead && dist(p.x, p.y, e.x, e.y) <= r + e.r) { damageEnemy(e, dmg, null, p); hit = true; }
+  if (hit && typeof sfx !== 'undefined' && sfx.magic) sfx.magic();
+}
 // — Kněz: vzkříšení padlých + léčení + spálení —
 function doResurrect(p) {
   let revived = 0;
@@ -1402,15 +1412,17 @@ function updatePlayerCombat(p, dt) {
   p.cool -= dt;
   const w = activeWeapon(p);
   const range = w.range * rangeMod(p, w);
-  const manual = p.input.aiming;             // ruční stick vždy přebíjí
+  const manual = p.input.aiming;             // hráč drží mířící stick
   const tgt = nearestEnemy(p.x, p.y, range);
   let aim = p.aimAngle;
-  if (!manual && p.autoaim && tgt) { aim = Math.atan2(tgt.y - p.y, tgt.x - p.x); p.aimAngle = aim; }
+  // MÍŘENÍ: autoaim míří na nejbližší cíl VŽDY (i při ruční palbě/vypnuté palbě),
+  // takže střely letí na nepřítele, ne kam ukazuje stick. Bez autoaimu míří ruční stick.
+  if (p.autoaim && tgt) { aim = Math.atan2(tgt.y - p.y, tgt.x - p.x); p.aimAngle = aim; }
+  else if (manual) aim = p.aimAngle;
+  // PALBA: autofire střílí sám; s vypnutou palbou střílíš ručním vstupem (stick),
+  // ale směr bere z autoaimu (pokud je zapnutý) → autoaim funguje i při vypnuté palbě.
   let wantFire = manual;
-  if (!manual && p.autofire) {
-    // s auto-mířením stačí cíl v dosahu; bez něj střílí kam kouká (jen když je kam)
-    wantFire = w.cat === 'melee' ? !!nearestEnemy(p.x, p.y, range) : (p.autoaim ? !!tgt : true);
-  }
+  if (p.autofire) wantFire = w.cat === 'melee' ? !!tgt : (p.autoaim ? !!tgt : true);
   if (wantFire && p.cool <= 0) {
     if (fireWeapon(p, w, aim)) { p.cool = w.rate * rateMod(p, w); p.aimAngle = aim; p.atkAnim = w.cat === 'melee' ? 10 : 6; }
     else p.cool = 20; // prázdno – krátká prodleva
@@ -2080,12 +2092,13 @@ function drawGroundFx() {
 function drawWarriors() {
   for (const wr of warriors) {
     if (!onScreen(wr.x, wr.y, wr.r + 20)) continue;
+    const def = wr.def || { color: '#d07038', arch: 'MELEE' };   // obrana proti chybějícímu def (např. co-op)
     drawShadow(wr.x, wr.y, wr.r);
-    const col = wr.flash > 0 ? '#ffffff' : wr.def.color;
-    const ranged = wr.def.arch === 'RANGED';
+    const col = wr.flash > 0 ? '#ffffff' : def.color;
+    const ranged = def.arch === 'RANGED';
     drawBlockyHumanoid(wr.x, wr.y, wr.r, wr.aim || -Math.PI / 2, animClock * 0.2, clamp((wr.atkAnim || 0) / 8, 0, 1), {
-      skin: '#d8a878', shirt: col, dark: shade(wr.def.color, -0.4), hat: '#c8ccd4', pants: '#3a3444',
-      weaponShape: ranged ? 'bow' : (wr.defId === 'rytir_np' ? 'greatsword' : 'sword'),
+      skin: '#d8a878', shirt: col, dark: shade(def.color, -0.4), hat: '#c8ccd4', pants: '#3a3444',
+      weaponShape: ranged ? 'bow' : (wr.defId === 'rytir_np' ? 'greatsword' : (wr.defId === 'clan_axeman' ? 'axe' : 'sword')),
     });
     ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(wr.x - 12, wr.y - wr.r - 9, 24, 3);
     ctx.fillStyle = '#5cff8a'; ctx.fillRect(wr.x - 12, wr.y - wr.r - 9, 24 * (wr.hp / wr.hpMax), 3);

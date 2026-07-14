@@ -272,6 +272,19 @@ code += `
     for(let k=0;k<6;k++) spawnDummy('chodec', p.x+120+k*6, p.y);
     p.abilityCd=0; useAbility(p); log('armageddon ok (empty + cluster)'); }
 
+  // ---- 12) clan/warrior with missing def must render (co-op crash fix) ----
+  { newRun('berserk'); startWave();
+    warriors.push({ defId: 'clan_axeman', x: 200, y: 200, r: 12, hp: 100, hpMax: 100, aim: 0, flash: 0 }); // def undefined
+    try { render(); } catch (e) { throw new Error('drawWarriors crashed on missing def: ' + (e && e.message)); }
+    log('warrior with missing def renders (co-op clan crash fixed)'); }
+
+  // ---- 13) priest holy radiance pulses AOE damage passively ----
+  { newRun('knez'); startWave(); const p=players[0]; p.holyNovaCd=0;
+    const e=spawnDummy('chodec', p.x+30, p.y); const hp0=e.hp;
+    for (let f=0;f<3;f++){ if(state==='combat') updateCombat(1); }
+    assert(e.hp < hp0 || e.dead, 'holy radiance damaged nearby undead');
+    log('priest holy radiance ok (dmg dealt passively)'); }
+
   console.log('\\n==== TEST RESULTS ====');
   for (const r of results) console.log('  ✓ ' + r);
   console.log('==== ALL PASSED ====');

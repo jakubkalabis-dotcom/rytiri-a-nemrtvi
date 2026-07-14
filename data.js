@@ -311,7 +311,7 @@ const CLASSES = {
     passive:{ wallHp:1.3, canRepair:true, emitterRate:0.85 },
   },
   knez: {
-    name:'Kněz', icon:'✝', color:'#f0e0a0', desc:'Léčí, posiluje spojence, svěcené poškození proti nemrtvým.',
+    name:'Kněz', icon:'✝', color:'#f0e0a0', desc:'Léčí, posiluje, Svatá záře pálí nemrtvé kolem. Umí vzkřísit padlé.',
     start:['rezavy_mec'], startGems:140, hpMod:1.1, spdMod:1.0,
     costMul:{ melee:1, ranged:1, trap:1, wall:1, warrior:0.85, ammo:1 },
     passive:{ holyDmg:1.25, healAura:0.05, warriorBuff:1.2 },
@@ -325,9 +325,9 @@ const ABILITIES = {
   lovec:      { name:'Smršt',         icon:'🏹', cd:2100, desc:'Na 5 s +70 % rychlost palby a NEKONEČNO munice. Cooldown 35 s.' },
   berserk:    { name:'Volání klanu',  icon:'🪓', cd:2400, desc:'Přivolá 2 sekerníky (200 HP, 22 poškození). Zůstanou dokud nepadnou / nezvedneš HP nad 65 % / nekončí kolo. Použitelné jen při ≤50 % HP. Cooldown 40 s po jejich odchodu.' },
   zved:       { name:'Bodnutí do zad',icon:'🗡', cd:600, desc:'Na 5 s neviditelnost (nemrtví tě ignorují). První útok: běžný nepřítel je OKAMŽITĚ zabit, boss dostane 3× poškození zbraně. Zabití silnějšího nepřítele schopností resetuje cooldown (jinak 10 s).' },
-  mag:        { name:'Armagedon',     icon:'☄', cd:720, desc:'Sešle meteor na nejbližší shluk nepřátel: 220 poškození v okruhu 90 + ohnivá zem (30/s po 3 s). Cooldown 12 s.' },
+  mag:        { name:'Armagedon',     icon:'☄', cd:900, desc:'Sešle meteor na nejbližší shluk nepřátel: 130 poškození v okruhu 78 + ohnivá zem (16/s po 3 s). Cooldown 15 s.' },
   alchymista: { name:'Abominace',     icon:'🧟', cd:0, desc:'Vypije lektvar (z 5 žlučí) a na 10 s se promění v abominaci: −50 % obdrženého poškození, −38 % rychlost, POŽÍRÁ pěšáky (okamžitě, +2 max HP navždy za každého) a leptá silnější (20 dmg/2,5 s + 4 dmg/s žíravinou v okruhu 46). Bez cooldownu — potřebuje lektvar (max 2).' },
-  inzenyr:    { name:'Polní věž',      icon:'🔧', cd:480, desc:'Postaví dočasný samostříl (12 s) na tvé pozici a opraví všechny zdi na plné HP. Zabíjením nepřátel věžemi se plní „Kolečka se točí" — vylepšení této schopnosti. Cooldown 8 s.' },
+  inzenyr:    { name:'Polní věž',      icon:'🔧', cd:1020, desc:'Postaví dočasný samostříl (12 s) na tvé pozici a opraví všechny zdi na plné HP. Zabíjením nepřátel věžemi se plní „Kolečka se točí" — vylepšení této schopnosti. Cooldown 17 s.' },
   knez:       { name:'Vzkříšení',      icon:'✨', cd:0, desc:'Oživí všechny padlé hrdiny v okruhu 220 na 60 % HP, vyléčí živé o 60 HP a spálí nemrtvé za 40 v okruhu 130. Použitelné 1× za kolo.' },
 };
 
@@ -351,10 +351,12 @@ const BILE_MAX_POTIONS = 2;         // max 2 lektvary
 const BILE_DROP_CHANCE = 0.14;      // 14 % šance, že z běžné zombie vyteče žluč
 const BILE_HARVEST_TIME = 60;       // podržet 1 s pro sběr žluči
 
-const MAG_METEOR_DMG = 220;         // poškození meteoru
-const MAG_METEOR_RADIUS = 90;
-const MAG_METEOR_DOT = { dps: 30, dur: 180 };  // ohnivá zem 30/s po 3 s
+const MAG_METEOR_DMG = 130;         // poškození meteoru (vybalancováno – dřív 220)
+const MAG_METEOR_RADIUS = 78;
+const MAG_METEOR_DOT = { dps: 16, dur: 180 };  // ohnivá zem 16/s po 3 s
 
+// Kněz – pasivní sekundární AOE: „Svatá záře" pravidelně pálí nemrtvé kolem něj.
+const PRIEST_NOVA = { dmg: 55, radius: 120, cd: 140 };   // 55 poškození (× svěcené) v okruhu 120 každých ~2,3 s
 const KNIGHT_BLOCK_TIME = 45;       // 0,75 s okno bloku (základ; +štít vylepšení)
 const HUNTER_FLURRY_TIME = 300;     // 5 s smršť
 const SCOUT_INVIS_TIME = 300;       // 5 s neviditelnost

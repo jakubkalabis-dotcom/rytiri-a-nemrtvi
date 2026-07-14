@@ -219,7 +219,7 @@ function applyState(s) {
   walls = s.walls.map(o => (o.def = STRUCTURES[o.defId] || TRAPS[o.defId], o));
   turrets = s.turrets.map(o => (o.def = TRAPS[o.defId], o));
   traps = s.traps.map(o => (o.def = TRAPS[o.defId], o));
-  warriors = s.warriors.map(o => (o.def = WARRIORS[o.defId], o));
+  warriors = s.warriors.map(o => (o.def = WARRIORS[o.defId] || (o.defId === 'clan_axeman' ? CLAN_AXEMAN : { color: '#d07038', arch: 'MELEE' }), o));
   groundFx = s.groundFx;
   pickups = s.pickups || [];
   effects = s.effects || [];
