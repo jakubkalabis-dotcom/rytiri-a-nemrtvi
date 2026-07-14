@@ -285,6 +285,13 @@ code += `
     assert(e.hp < hp0 || e.dead, 'holy radiance damaged nearby undead');
     log('priest holy radiance ok (dmg dealt passively)'); }
 
+  // ---- 14) HUD renders with a boss on screen (boss bar, wave track, forged bars) ----
+  { newRun('mag'); run.wave = 4; startWave(); // wave 5 = sub-boss
+    for (let g=0; g<40 && state==='combat' && !enemies.some(e=>e.arch==='BOSS'); g++) updateCombat(1);
+    assert(enemies.some(e=>e.arch==='BOSS'), 'sub-boss spawned for HUD test');
+    try { for (let f=0;f<20;f++){ if(state==='combat') updateCombat(1); render(); } } catch (e) { throw new Error('HUD boss-bar render crash: ' + (e && e.message)); }
+    log('HUD renders with boss (boss bar + wave track ok)'); }
+
   console.log('\\n==== TEST RESULTS ====');
   for (const r of results) console.log('  ✓ ' + r);
   console.log('==== ALL PASSED ====');

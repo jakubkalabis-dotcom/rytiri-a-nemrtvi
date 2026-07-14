@@ -2576,47 +2576,104 @@ function drawParticles() {
 
 /* ---------- HUD ---------- */
 function drawButton(r, label, active) {
-  ctx.fillStyle = active ? '#3a5a34' : '#20261c';
-  roundRect(r.x, r.y, r.w, r.h, 8); ctx.fill();
-  ctx.strokeStyle = '#4a5a3a'; ctx.lineWidth = 1.5; roundRect(r.x, r.y, r.w, r.h, 8); ctx.stroke();
-  ctx.fillStyle = '#e8ecd8'; ctx.font = '13px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const g = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
+  if (active) { g.addColorStop(0, '#4c6c40'); g.addColorStop(1, '#284020'); } else { g.addColorStop(0, '#2a2e22'); g.addColorStop(1, '#161a11'); }
+  ctx.fillStyle = g; roundRect(r.x, r.y, r.w, r.h, 8); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.07)'; roundRect(r.x + 2, r.y + 2, r.w - 4, Math.max(1, r.h * 0.4), 6); ctx.fill();
+  ctx.strokeStyle = active ? '#8fd08f' : '#3e4a30'; ctx.lineWidth = 1.5; roundRect(r.x, r.y, r.w, r.h, 8); ctx.stroke();
+  ctx.fillStyle = active ? '#eaf3e0' : '#d6dbc6'; ctx.font = '13px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2);
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
 }
+/* ============================================================================
+   HUD — kovaný středověko-gotický vzhled (originální lišty, štítky, milníky vln)
+   ========================================================================== */
+// malý kovaný štítek s ikonou a hodnotou
+function forgePlate(x, y, w, h, icon, val, valColor) {
+  ctx.fillStyle = 'rgba(8,10,6,0.82)'; roundRect(x, y, w, h, 5); ctx.fill();
+  ctx.strokeStyle = '#4a3d24'; ctx.lineWidth = 1.5; roundRect(x, y, w, h, 5); ctx.stroke();
+  ctx.strokeStyle = 'rgba(120,96,54,0.5)'; ctx.lineWidth = 1; roundRect(x + 1.5, y + 1.5, w - 3, h - 3, 4); ctx.stroke();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.font = '13px system-ui'; ctx.fillStyle = '#e8dcc0'; ctx.fillText(icon, x + 6, y + h / 2 + 0.5);
+  ctx.font = 'bold 14px system-ui'; ctx.fillStyle = valColor || '#f0e6cc'; ctx.fillText(val, x + 24, y + h / 2 + 0.5);
+  ctx.textBaseline = 'alphabetic';
+}
+// kovaná lišta: rám + výplň s přechodem + „damage-lag" duch + segmenty
+function forgeBar(x, y, w, h, frac, col, opts) {
+  opts = opts || {}; frac = clamp(frac, 0, 1); const r = Math.min(h / 2, w / 2);
+  ctx.fillStyle = '#0b0e07'; roundRect(x - 1, y - 1, w + 2, h + 2, r + 1); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.55)'; roundRect(x, y, w, h, r); ctx.fill();
+  if (opts.lag != null && opts.lag > frac) { ctx.fillStyle = opts.lagCol || 'rgba(255,190,150,0.5)'; roundRect(x, y, Math.max(0, w * clamp(opts.lag, 0, 1)), h, r); ctx.fill(); }
+  if (frac > 0.001) {
+    const g = ctx.createLinearGradient(x, y, x, y + h); g.addColorStop(0, shade(col, 0.28)); g.addColorStop(1, shade(col, -0.22));
+    ctx.fillStyle = g; roundRect(x, y, Math.max(0.5, w * frac), h, r); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.16)'; roundRect(x + 1, y + 1, Math.max(0, w * frac - 2), Math.max(1, h * 0.34), r * 0.6); ctx.fill();
+  }
+  if (opts.segments) { ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1; for (let i = 1; i < opts.segments; i++) { const sx = x + w * i / opts.segments; ctx.beginPath(); ctx.moveTo(sx, y + 1); ctx.lineTo(sx, y + h - 1); ctx.stroke(); } }
+  ctx.strokeStyle = opts.frame || '#4a3d24'; ctx.lineWidth = 1.5; roundRect(x - 1, y - 1, w + 2, h + 2, r + 1); ctx.stroke();
+}
+// milníková lišta postupu mapou (25 vln): kostlivci = sub-bossové, lebka = mapový boss
+function drawWaveTrack() {
+  const tw = 188, tx = W / 2 - tw / 2, ty = 30, th = 8;
+  const wim = waveInMap(run.wave || 1), clearF = (state === 'combat' && wave && wave.total) ? clamp((wave.total - enemies.length - (wave.total - wave.spawned)) / wave.total, 0, 1) : (run.wave % WAVES_PER_MAP === 0 ? 1 : 0);
+  const journey = clamp(((wim - 1) + clearF) / WAVES_PER_MAP, 0, 1);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.font = 'bold 13px system-ui'; ctx.fillStyle = '#f0e0a0';
+  const title = (wave && wave.mapBoss) ? '☠ MAPOVÝ BOSS' : (wave && wave.subBoss) ? '☠ SUB-BOSS' : (wave && wave.horde) ? '🧟 HORDA' : 'VLNA';
+  ctx.fillText(title + ' ' + (run.wave || 0) + '  ·  ' + wim + '/' + WAVES_PER_MAP + '  (mapa ' + (currentMap + 1) + '/' + NUM_MAPS + ')', W / 2, ty - 6);
+  forgeBar(tx, ty, tw, th, journey, '#c09030', { frame: '#5a4a28' });
+  // milníky
+  for (let i = 5; i <= WAVES_PER_MAP; i += 5) {
+    const mx = tx + tw * (i / WAVES_PER_MAP), passed = wim > i || (wim === i && clearF >= 1);
+    const big = i === WAVES_PER_MAP;
+    ctx.font = (big ? 14 : 11) + 'px system-ui'; ctx.globalAlpha = passed ? 1 : 0.45;
+    ctx.fillStyle = passed ? '#ffd35c' : '#8a8270';
+    ctx.fillText(big ? '💀' : '☠', mx, ty + th + 13);   // textAlign='center' → vycentrováno na milník
+    ctx.globalAlpha = 1;
+  }
+  // aktuální pozice (jezdec)
+  const px = tx + tw * journey;
+  ctx.fillStyle = '#fff6d0'; ctx.strokeStyle = '#7a5a1a'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(px, ty - 2); ctx.lineTo(px + 4, ty + th / 2); ctx.lineTo(px, ty + th + 2); ctx.lineTo(px - 4, ty + th / 2); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.textAlign = 'left';
+}
 function drawHud() {
   const me = localPlayer() || players[0];
-  // horní info
-  ctx.fillStyle = '#e8ecd8'; ctx.font = 'bold 15px system-ui'; ctx.textAlign = 'left';
-  ctx.fillText('💎 ' + meGems(), 8, 22);
-  ctx.fillText('❤ ' + run.lives, 8, 42);
-  ctx.textAlign = 'center'; ctx.fillStyle = '#f0e0a0';
-  ctx.fillText((wave && wave.boss ? 'BOSS ' : 'VLNA ') + run.wave, W / 2, 20);
-  if (state === 'combat' && wave) {
-    ctx.fillStyle = 'rgba(0,0,0,.4)'; roundRect(W / 2 - 70, 27, 140, 6, 3); ctx.fill();
-    const prog = (wave.total - enemies.length - (wave.total - wave.spawned)) / wave.total;
-    ctx.fillStyle = '#5cff8a'; roundRect(W / 2 - 70, 27, 140 * clamp(prog, 0, 1), 6, 3); ctx.fill();
-  }
-  // combo
+  // horní kovové štítky: gemy + brána (životy hradu)
+  forgePlate(6, 6, 86, 22, '💎', meGems(), '#ffe08a');
+  const gateLow = run.lives <= 5;
+  forgePlate(6, 31, 86, 22, '🏰', run.lives, gateLow ? (Math.floor(animClock * 0.15) % 2 ? '#ff5a5a' : '#ffb0b0') : '#f0d0b0');
+  // milníková lišta vln (originální ukazatel postupu mapou)
+  drawWaveTrack();
+  // combo — údernější, se stoupajícím násobičem
   if (state === 'combat' && run.combo >= 3) {
-    ctx.textAlign = 'right'; ctx.fillStyle = '#ffd35c'; ctx.font = 'bold 16px system-ui';
-    ctx.fillText('x' + run.combo + ' KOMBO', W - 8, 22);
-    ctx.fillStyle = 'rgba(255,211,92,0.25)'; ctx.fillRect(W - 108, 27, 100, 4);
-    ctx.fillStyle = '#ffd35c'; ctx.fillRect(W - 108, 27, 100 * clamp(run.comboT / 180, 0, 1), 4);
+    const scale = 1 + Math.min(0.5, run.combo * 0.02);
+    ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+    ctx.font = `bold ${Math.round(17 * scale)}px system-ui`;
+    ctx.fillStyle = run.combo >= 15 ? '#ff8a3a' : '#ffd35c';
+    ctx.save(); ctx.shadowColor = 'rgba(255,140,40,0.7)'; ctx.shadowBlur = 8;
+    ctx.fillText('✖' + run.combo, W - 10, 24); ctx.restore();
+    ctx.font = 'bold 9px system-ui'; ctx.fillStyle = '#c8a060'; ctx.fillText('KOMBO ×' + comboMult().toFixed(1), W - 10, 35);
+    forgeBar(W - 108, 40, 100, 4, clamp(run.comboT / 180, 0, 1), '#ff9a3a', { frame: '#5a3a18' });
     ctx.textAlign = 'left';
   }
-  // boss HP lišta
+  // boss HP lišta — hrozivá, segmentovaná, krvavá
   const boss = enemies.find(e => e.arch === 'BOSS');
   if (boss) {
-    const bw = W - 80, bx = 40, by = 46;
-    ctx.fillStyle = 'rgba(0,0,0,.55)'; roundRect(bx, by, bw, 9, 4); ctx.fill();
-    ctx.fillStyle = '#ff4a7a'; roundRect(bx, by, bw * clamp(boss.hp / boss.hpMax, 0, 1), 9, 4); ctx.fill();
-    ctx.textAlign = 'center'; ctx.fillStyle = '#ffd0dc'; ctx.font = 'bold 11px system-ui';
-    ctx.fillText('☠ ' + boss.def.name.toUpperCase(), W / 2, by + 7.5); ctx.textAlign = 'left';
+    const bw = W - 72, bx = 36, by = 58;
+    const pulse = 0.5 + Math.sin(animClock * 0.2) * 0.2;
+    ctx.save(); ctx.shadowColor = `rgba(200,20,40,${pulse})`; ctx.shadowBlur = 10;
+    forgeBar(bx, by, bw, 12, clamp(boss.hp / boss.hpMax, 0, 1), boss.sub ? '#c83a5a' : '#b01e2e', { segments: 10, frame: '#5a1a20' });
+    ctx.restore();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#ffdce2'; ctx.font = 'bold 11px system-ui';
+    ctx.fillText('☠ ' + (boss.def.name || 'BOSS').toUpperCase() + '  ' + Math.max(0, Math.ceil(boss.hp)) + '/' + boss.hpMax, W / 2, by + 6.5);
+    ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   }
-  // HUD pás pozadí
-  ctx.fillStyle = '#12160e'; ctx.fillRect(0, VIEWH, W, HUD_H);
-  ctx.fillStyle = '#1a2010'; ctx.fillRect(0, VIEWH, W, 2);
-  ctx.strokeStyle = '#2a331f'; ctx.beginPath(); ctx.moveTo(0, VIEWH); ctx.lineTo(W, VIEWH); ctx.stroke();
+  // HUD pás pozadí — kámen s kovanou horní hranou
+  ctx.fillStyle = '#0f1309'; ctx.fillRect(0, VIEWH, W, HUD_H);
+  ctx.fillStyle = '#171c0f'; ctx.fillRect(0, VIEWH + 3, W, HUD_H - 3);
+  const eg = ctx.createLinearGradient(0, VIEWH, 0, VIEWH + 4); eg.addColorStop(0, '#6a5a34'); eg.addColorStop(1, '#2a2414');
+  ctx.fillStyle = eg; ctx.fillRect(0, VIEWH, W, 3);
 
   if (state === 'combat') {
     const w = activeWeapon(me);
@@ -2630,10 +2687,21 @@ function drawHud() {
     drawButton(BTN.autofire, (profile.settings.autofire ? '🔥 palba' : '🔥 vyp'), profile.settings.autofire);
     drawButton(BTN.pause, '⏸', false);
     drawAbilityButton(me);
-    if (w.ammo === 'mana') { ctx.fillStyle = 'rgba(120,180,255,.3)'; ctx.fillRect(BTN.weapon.x, BTN.weapon.y - 5, BTN.weapon.w, 3); ctx.fillStyle = '#8fbaff'; ctx.fillRect(BTN.weapon.x, BTN.weapon.y - 5, BTN.weapon.w * (me.mana / me.manaMax), 3); }
-    // HP hráče
-    ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.fillRect(8, VIEWH - 10, W - 16, 5);
-    ctx.fillStyle = me.hp < me.hpMax * 0.3 ? '#ff3a3a' : '#ff6a6a'; ctx.fillRect(8, VIEWH - 10, (W - 16) * clamp(me.hp / me.hpMax, 0, 1), 5);
+    // HP hráče — kovaná lišta se „zpožděným" duchem po zásahu + číselný stav
+    if (me._hpBar == null) me._hpBar = me.hp;
+    if (me.hp < me._hpBar) me._hpBar = Math.max(me.hp, me._hpBar - Math.max(0.6, (me._hpBar - me.hp) * 0.08));
+    else me._hpBar = me.hp;
+    const hpFrac = clamp(me.hp / me.hpMax, 0, 1), low = me.hp < me.hpMax * 0.3;
+    const hpCol = me.abomT > 0 ? '#7ac83a' : (low ? '#e83a3a' : '#d24040');
+    const hy = VIEWH - 13;
+    if (low) { ctx.save(); ctx.shadowColor = `rgba(255,40,40,${0.4 + Math.sin(animClock * 0.3) * 0.3})`; ctx.shadowBlur = 8; }
+    forgeBar(8, hy, W - 16, 9, hpFrac, hpCol, { lag: clamp(me._hpBar / me.hpMax, 0, 1), lagCol: 'rgba(255,210,170,0.55)', frame: '#4a2a20' });
+    if (low) ctx.restore();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = 'bold 10px system-ui'; ctx.fillStyle = '#fff';
+    ctx.fillText('❤ ' + Math.max(0, Math.ceil(me.hp)) + ' / ' + me.hpMax, W / 2, hy + 4.5);
+    // mana lišta (kouzelníci) hned nad HP
+    if (me.manaMax && (w.ammo === 'mana' || me.classId === 'mag')) { forgeBar(8, hy - 7, W - 16, 4, clamp(me.mana / me.manaMax, 0, 1), '#3f8ad0', { frame: '#1e3a55' }); }
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     drawStick(moveStick, '#8fd08f'); drawStick(aimStick, '#f0c060');
   } else if (state === 'build') {
     drawBuildBar();
@@ -2646,13 +2714,18 @@ function drawAbilityButton(me) {
   if (me.classId === 'berserk') { ready = me.clanCd <= 0 && !me._clanActive && me.hp <= me.hpMax * BERSERK_HP_GATE; frac = me.clanCd > 0 ? me.clanCd / CLAN_COOLDOWN : 0; extra = me._clanActive ? 'klan v poli' : (me.hp > me.hpMax * BERSERK_HP_GATE ? '≤50% HP' : ''); }
   else if (me.classId === 'alchymista') { ready = (me.potions || 0) > 0 && me.abomT <= 0; frac = 0; extra = me.abomT > 0 ? Math.ceil(me.abomT / 60) + 's' : '🧪' + (me.potions || 0) + ' (' + (me.bile || 0) + '/' + BILE_PER_POTION + ')'; }
   else if (me.classId === 'knez') { ready = !me.resurrectUsed; frac = 0; extra = me.resurrectUsed ? 'příště v dalším kole' : ''; }
-  ctx.fillStyle = ready ? '#3a5a34' : '#241a10';
-  roundRect(r.x, r.y, r.w, r.h, 8); ctx.fill();
-  ctx.strokeStyle = ready ? '#8fd08f' : '#4a3a2a'; ctx.lineWidth = 1.5; roundRect(r.x, r.y, r.w, r.h, 8); ctx.stroke();
-  ctx.fillStyle = ready ? '#e8ecd8' : '#8a7a5a'; ctx.font = '13px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  // pulzující zlatá záře, když je schopnost připravená
+  if (ready) { const pz = 0.5 + Math.sin(animClock * 0.25) * 0.4; ctx.save(); ctx.shadowColor = `rgba(255,200,80,${pz})`; ctx.shadowBlur = 12; }
+  const g = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
+  if (ready) { g.addColorStop(0, '#7a5a1e'); g.addColorStop(1, '#4a3410'); } else { g.addColorStop(0, '#221a10'); g.addColorStop(1, '#14100a'); }
+  ctx.fillStyle = g; roundRect(r.x, r.y, r.w, r.h, 8); ctx.fill();
+  if (ready) ctx.restore();
+  ctx.fillStyle = 'rgba(255,255,255,0.08)'; roundRect(r.x + 2, r.y + 2, r.w - 4, Math.max(1, r.h * 0.38), 6); ctx.fill();
+  ctx.strokeStyle = ready ? '#ffd35c' : '#4a3a2a'; ctx.lineWidth = ready ? 2 : 1.5; roundRect(r.x, r.y, r.w, r.h, 8); ctx.stroke();
+  if (frac > 0) { ctx.save(); roundRect(r.x, r.y, r.w, r.h, 8); ctx.clip(); ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(r.x, r.y, r.w * frac, r.h); ctx.restore(); }
+  ctx.fillStyle = ready ? '#fff2cc' : '#8a7a5a'; ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText((ab ? ab.icon : '✦') + ' ' + (ab ? ab.name : '') + (extra ? ' · ' + extra : ''), r.x + r.w / 2, r.y + r.h / 2);
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  if (frac > 0) { ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(r.x, r.y, r.w * frac, r.h); }
 }
 function drawStick(s, color) {
   if (!s.active) return;
