@@ -1956,6 +1956,10 @@ function render() {
   drawGroundFx();
   drawTraps();
   drawStructures();
+  // ztlumit POUZE prostředí (zem/stavby) do gotické tmy — postavy pak září na tmavém pozadí
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = '#665674'; ctx.fillRect(0, 0, VIEWW, VIEWH);
+  ctx.restore();
   drawPickups();
   drawWarriors();
   drawEnemies();
@@ -1968,18 +1972,31 @@ function render() {
   ctx.restore();
 
   // překryvy v prostoru obrazovky
+  drawGrade(cp);
   if (freezeTimer > 0) { ctx.fillStyle = 'rgba(140,220,255,0.12)'; ctx.fillRect(0, 0, VIEWW, VIEWH); }
   drawVignette();
   if (state === 'combat' || state === 'build') drawHud();
   if (banner) drawBanner();
   if (flash > 0.01) { ctx.fillStyle = `rgba(255,40,40,${flash})`; ctx.fillRect(0, 0, W, VIEWH); }
 }
+// Pochodňová světla (teplé pooly) — přisvětlí střed dění; tma prostředí se řeší v render().
+function drawGrade(cp) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const pool = (wx, wy, r, col) => { const x = wx - camera.x, y = wy - camera.y; if (x < -r || x > VIEWW + r || y < -r || y > VIEWH + r) return; const g = ctx.createRadialGradient(x, y, 3, x, y, r); g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, VIEWW, VIEWH); };
+  const flick = 0.85 + Math.sin(animClock * 0.3) * 0.12;
+  pool((CORE.tx + CORE.w / 2) * TILE, (CORE.ty + CORE.h / 2) * TILE, 165, `rgba(255,150,60,${0.15 * flick})`);   // brána = ohniště
+  if (cp && !cp.downed) pool(cp.x, cp.y, 130, `rgba(255,196,120,${0.12 * flick})`);                             // hráč = pochodeň
+  // světlo věží (samostříly svítí)
+  for (const t of turrets) pool(t.x, t.y, 70, 'rgba(255,210,120,0.07)');
+  ctx.restore();
+}
 function drawVignette() {
   if (!vignetteCache) {
     vignetteCache = document.createElement('canvas'); vignetteCache.width = VIEWW; vignetteCache.height = VIEWH;
     const g = vignetteCache.getContext('2d');
-    const rg = g.createRadialGradient(VIEWW / 2, VIEWH / 2, VIEWH * 0.35, VIEWW / 2, VIEWH / 2, VIEWH * 0.72);
-    rg.addColorStop(0, 'rgba(0,0,0,0)'); rg.addColorStop(1, 'rgba(0,0,0,0.42)');
+    const rg = g.createRadialGradient(VIEWW / 2, VIEWH * 0.46, VIEWH * 0.30, VIEWW / 2, VIEWH * 0.5, VIEWH * 0.75);
+    rg.addColorStop(0, 'rgba(0,0,0,0)'); rg.addColorStop(0.7, 'rgba(18,4,12,0.28)'); rg.addColorStop(1, 'rgba(12,2,8,0.62)');
     g.fillStyle = rg; g.fillRect(0, 0, VIEWW, VIEWH);
   }
   ctx.drawImage(vignetteCache, 0, 0);
