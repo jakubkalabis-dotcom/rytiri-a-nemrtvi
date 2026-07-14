@@ -247,26 +247,73 @@ function setState(s) {
   if (typeof netPush === 'function' && net.role === 'host' && net.connected) netPush();
 }
 
+// Gotická úvodní scéna (SVG): krvavý měsíc, hradní brána, horda nemrtvých, rytíř v čele.
+function heroSVG() {
+  // horda nemrtvých podél země
+  let horde = '';
+  const hx = [18, 52, 88, 120, 150, 300, 332, 364, 398, 432, 462];
+  for (let i = 0; i < hx.length; i++) { const s = 0.85 + (i % 3) * 0.14, sway = (i % 2 ? 1 : -1) * 3; horde += `<use href="#z" transform="translate(${hx[i]} ${206 - s * 6}) scale(${s}) rotate(${sway} 10 24)"/>`; }
+  return `<div class="hero"><svg viewBox="0 0 480 244" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0a0416"/><stop offset=".55" stop-color="#1e0a1e"/><stop offset="1" stop-color="#3a0f1c"/></linearGradient>
+      <radialGradient id="moon" cx=".42" cy=".38" r=".7"><stop offset="0" stop-color="#ffd7a0"/><stop offset=".45" stop-color="#ff6a3a"/><stop offset="1" stop-color="#b3162a"/></radialGradient>
+      <radialGradient id="mglow" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="rgba(255,70,50,.5)"/><stop offset="1" stop-color="rgba(255,40,40,0)"/></radialGradient>
+      <radialGradient id="hgrn" cx=".5" cy="1" r=".8"><stop offset="0" stop-color="rgba(120,220,80,.22)"/><stop offset="1" stop-color="rgba(120,220,80,0)"/></radialGradient>
+      <linearGradient id="fog" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(30,8,20,0)"/><stop offset="1" stop-color="#0a0410"/></linearGradient>
+      <g id="z" fill="#06030b"><ellipse cx="10" cy="30" rx="7" ry="12"/><circle cx="8" cy="14" r="5"/><rect x="0" y="22" width="5" height="16" rx="2.5" transform="rotate(-16 3 30)"/><rect x="13" y="24" width="4.5" height="15" rx="2.2"/></g>
+    </defs>
+    <rect width="480" height="244" fill="url(#sky)"/>
+    <circle cx="150" cy="34" r="1.1" fill="#fff" opacity=".5"/><circle cx="210" cy="20" r="1" fill="#fff" opacity=".4"/><circle cx="60" cy="52" r="1" fill="#fff" opacity=".35"/><circle cx="430" cy="30" r="1.2" fill="#fff" opacity=".45"/>
+    <circle cx="372" cy="72" r="118" fill="url(#mglow)"/>
+    <circle cx="372" cy="72" r="50" fill="url(#moon)"/>
+    <circle cx="358" cy="62" r="9" fill="#a01523" opacity=".35"/><circle cx="388" cy="84" r="6" fill="#a01523" opacity=".3"/><circle cx="380" cy="58" r="4" fill="#a01523" opacity=".3"/>
+    <ellipse cx="352" cy="80" rx="70" ry="9" fill="#0a0512" opacity=".55"/><ellipse cx="410" cy="60" rx="50" ry="6" fill="#0a0512" opacity=".45"/>
+    <path d="M0 150 L60 132 L120 148 L190 126 L260 150 L340 130 L420 150 L480 138 L480 244 L0 244Z" fill="#0c0614" opacity=".9"/>
+    <!-- hradní silueta s cimbuřím a branou -->
+    <g fill="#050208">
+      <path d="M150 196 V120 h12 v-10 h10 v10 h12 v10 h12 v-10 h10 v10 h12 V196 Z"/>
+      <path d="M296 196 V120 h12 v-10 h10 v10 h12 v10 h12 v-10 h10 v10 h12 V196 Z"/>
+      <rect x="196" y="150" width="88" height="46"/>
+      <path d="M196 150 h88 v-8 h-10 v-8 h-12 v8 h-10 v-8 h-12 v8 h-10 v-8 h-12 v8 h-10 Z"/>
+      <path d="M226 196 v-30 a14 14 0 0 1 28 0 v30 Z" fill="#120611"/>
+    </g>
+    <rect x="228" y="170" width="6" height="9" rx="2" fill="#ffb43a" opacity=".9"/><rect x="246" y="170" width="6" height="9" rx="2" fill="#ffb43a" opacity=".9"/>
+    <rect x="167" y="150" width="5" height="7" rx="1.5" fill="#ffb43a" opacity=".8"/><rect x="308" y="150" width="5" height="7" rx="1.5" fill="#ffb43a" opacity=".8"/>
+    <path d="M158 120 l14 4 l-14 4 Z" fill="#c21f2f"/><path d="M322 120 l-14 4 l14 4 Z" fill="#c21f2f"/>
+    <rect y="176" width="480" height="68" fill="url(#hgrn)"/>
+    <!-- rytíř v čele, zlatý obrys -->
+    <g transform="translate(240 196)">
+      <path d="M-19 2 q0 24 15 32 q15 -8 15 -32 q-15 5 -30 0 Z" fill="#0a0409" stroke="#eaba4e" stroke-width="1.3" opacity=".92"/>
+      <rect x="-9" y="-6" width="18" height="34" rx="6" fill="#07030a"/>
+      <circle cx="0" cy="-14" r="8.5" fill="#07030a"/><rect x="-6" y="-16" width="12" height="3.5" rx="1" fill="#2a1420"/>
+      <g transform="rotate(14 18 -16)"><rect x="16.5" y="-52" width="4.5" height="52" rx="2" fill="#0a060c" stroke="#ffd873" stroke-width="1" opacity=".9"/><rect x="12" y="-6" width="14" height="4" rx="2" fill="#8a5a1c"/></g>
+      <path d="M-9 28 q-4 -22 3 -40" fill="none" stroke="#ffd873" stroke-width="1.7" opacity=".65"/>
+    </g>
+    ${horde}
+    <rect width="480" height="244" fill="url(#fog)" opacity=".5"/>
+    <rect x="0" y="0" width="480" height="244" fill="none"/>
+  </svg><div class="hsub">Braň bránu · Padni jako legenda</div><div class="htitle">RYTÍŘI &amp; NEMRTVÍ</div></div>`;
+}
 function renderMenu() {
   const scores = loadScores();
   const board = scores.length
     ? scores.map((r, i) => `<div class="row"><span class="rank">${i + 1}.</span><span class="nm">${escapeHtml(r.name)}</span><span class="sc">vlna ${r.wave} · ${r.score}</span></div>`).join('')
     : '<div class="empty">Zatím žádné skóre — buď první!</div>';
   ovContent.innerHTML = `
-    <h2>⚔ RYTÍŘI A NEMRTVÍ ⚔</h2>
+    ${heroSVG()}
     <p>Braň hradní bránu před vlnami nemrtvých. Nakupuj zbraně, stav pasti, zdi a věže,
     najmi spojence a přežij co nejdéle. Úroveň profilu: <b>${profile.playerLevel}</b> (odemyká zbraně).</p>
-    <div class="board"><h3>NEJLEPŠÍ SKÓRE</h3>${board}</div>
     <button data-act="play">Hrát sám</button>
     <button data-act="hostgame" class="ghost">Hostovat co-op (2 hráči)</button>
-    <button data-act="joingame" class="ghost">Připojit se ke hře</button>`;
+    <button data-act="joingame" class="ghost">Připojit se ke hře</button>
+    <div class="board"><h3>NEJLEPŠÍ SKÓRE</h3>${board}</div>`;
 }
 
 function renderClassSelect() {
   const cards = Object.keys(CLASSES).map(id => {
     const c = CLASSES[id];
-    return `<div class="card class-card" data-act="pickclass" data-id="${id}" style="border-color:${c.color}55">
-      <div class="ci" style="color:${c.color}">${c.icon}</div>
+    return `<div class="card class-card" data-act="pickclass" data-id="${id}" style="--cc:${c.color}">
+      <div class="ci">${c.icon}</div>
       <div class="cn">${c.name}</div>
       <div class="cd">${c.desc}</div>
       <div class="cs">💎 ${c.startGems} · ❤ ${Math.round(120 * c.hpMod)}</div>
