@@ -2826,12 +2826,18 @@ function drawHud() {
   const bgg = ctx.createLinearGradient(0, py, 0, H);
   bgg.addColorStop(0, '#1b1510'); bgg.addColorStop(0.5, '#100b12'); bgg.addColorStop(1, '#08060c');
   ctx.fillStyle = bgg; ctx.fillRect(0, py, W, HUD_H);
-  const eg = ctx.createLinearGradient(0, py, 0, py + 5); eg.addColorStop(0, '#d0a338'); eg.addColorStop(0.5, '#8a6a24'); eg.addColorStop(1, '#3a2c12');
-  ctx.fillStyle = eg; ctx.fillRect(0, py, W, 4);
-  ctx.fillStyle = 'rgba(255,224,150,0.55)'; ctx.fillRect(0, py, W, 1);
-  const sh = ctx.createLinearGradient(0, py + 4, 0, py + 18); sh.addColorStop(0, 'rgba(0,0,0,0.45)'); sh.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = sh; ctx.fillRect(0, py + 4, W, 14);
-  ctx.fillStyle = '#3a2f1a'; for (const rx of [7, W - 7]) { ctx.beginPath(); ctx.arc(rx, py + 11, 2.6, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = 'rgba(255,220,150,0.25)'; ctx.beginPath(); ctx.arc(rx - 0.6, py + 10.4, 1, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#3a2f1a'; }
+  // silná tepaná zlatá lišta (3 vrstvy: podklad / kov / lesk) + putující odlesk
+  const eg = ctx.createLinearGradient(0, py, 0, py + 7); eg.addColorStop(0, '#ffe089'); eg.addColorStop(0.45, '#c79433'); eg.addColorStop(1, '#5a4114');
+  ctx.fillStyle = eg; ctx.fillRect(0, py, W, 6);
+  ctx.fillStyle = 'rgba(255,246,210,0.85)'; ctx.fillRect(0, py, W, 1.5);
+  ctx.fillStyle = '#241a0a'; ctx.fillRect(0, py + 6, W, 1.5);          // tmavá spára pod lištou
+  const sx = (animClock * 2.2) % (W + 160) - 80;                       // klouzavý odlesk
+  const sg = ctx.createLinearGradient(sx - 60, 0, sx + 60, 0); sg.addColorStop(0, 'rgba(255,255,255,0)'); sg.addColorStop(0.5, 'rgba(255,255,255,0.5)'); sg.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = sg; ctx.fillRect(0, py, W, 4);
+  const sh = ctx.createLinearGradient(0, py + 8, 0, py + 22); sh.addColorStop(0, 'rgba(0,0,0,0.5)'); sh.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = sh; ctx.fillRect(0, py + 8, W, 14);
+  // nýty podél lišty
+  for (let rx = 14; rx < W; rx += 58) { ctx.fillStyle = '#4a3a1c'; ctx.beginPath(); ctx.arc(rx, py + 13, 2.8, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = 'rgba(255,224,150,0.4)'; ctx.beginPath(); ctx.arc(rx - 0.7, py + 12.2, 1.1, 0, Math.PI * 2); ctx.fill(); }
 
   if (state === 'combat') {
     const w = activeWeapon(me);
@@ -2889,10 +2895,11 @@ function drawAbilityButton(me) {
   if (ready) ctx.restore();
   ctx.fillStyle = 'rgba(255,255,255,0.10)'; roundRect(r.x + 2, r.y + 2, r.w - 4, Math.max(1, r.h * 0.36), 7); ctx.fill();
   ctx.strokeStyle = ready ? cc : '#4a3a2a'; ctx.lineWidth = ready ? 2 : 1.4; roundRect(r.x, r.y, r.w, r.h, 9); ctx.stroke();
-  // kruhový odznak s ikonou vlevo
-  const bx = r.x + r.h * 0.5 + 3, by = r.y + r.h / 2, br = r.h * 0.38;
-  ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fillStyle = ready ? shade(cc, -0.5) : '#17110b'; ctx.fill();
-  ctx.strokeStyle = ready ? cc : '#4a3a2a'; ctx.lineWidth = 1.5; ctx.stroke();
+  // kruhový odznak s ikonou vlevo (+ pulzující prstenec, když je nabito)
+  const bx = r.x + r.h * 0.5 + 3, by = r.y + r.h / 2, br = r.h * 0.4;
+  if (ready) { const rp = 0.5 + Math.sin(animClock * 0.22) * 0.4; ctx.strokeStyle = hexA(cc, rp); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(bx, by, br + 3 + Math.sin(animClock * 0.22) * 1.5, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fillStyle = ready ? shade(cc, -0.45) : '#17110b'; ctx.fill();
+  ctx.strokeStyle = ready ? cc : '#4a3a2a'; ctx.lineWidth = 1.8; ctx.stroke();
   ctx.fillStyle = ready ? '#fff6dc' : '#7a6a52'; ctx.font = Math.round(br * 1.3) + 'px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(ab ? ab.icon : '✦', bx, by + 1);
   // název + stav
