@@ -1172,9 +1172,12 @@ function killEnemy(e, killer) {
   const big = e.arch === 'TANK' || e.arch === 'BOSS';
   const style = e.arch === 'BOSS' ? 2 : (Math.random() * 5) | 0;
   zombieDeath(e.x, e.y, e.color, big, style);
+  // KILL-POP: jasný záblesk (pocit dopadu) — šťavnaté zabití
+  particles.push({ x: e.x, y: e.y, ring: true, r: e.r * 0.5, rMax: e.r * (big ? 2.6 : 2.0), life: 1, decay: big ? 0.10 : 0.16, color: 'rgba(255,250,236,0.85)' });
   emitEv({ k: 'die', x: e.x, y: e.y, color: e.color, big: big ? 1 : 0, s: style });
   shake = Math.min(9, shake + (e.arch === 'BOSS' ? 9 : e.arch === 'TANK' ? 3 : 1.2));
   if (e.arch === 'BOSS') hitStop = 6;
+  else if (big || e.elite) hitStop = Math.max(hitStop, e.elite ? 2 : 3);   // mikro-freeze = křupavost (jen velké/elity, ne davový trash)
   // elita „zhoubný" vybuchne, elita jindy → zaručený drop
   if (e.elite === 'zhoubny' || e.def.arch === 'EXPLODER' && false) aoeExplosion(e.x, e.y, 60, e.dmg, null, '#c060ff');
   if (e.elite) dropPickup(e.x, e.y, true);
@@ -1260,7 +1263,7 @@ function explode(x, y, color, n = 14) {
 }
 // Plovoucí číslo poškození
 function spawnFloater(x, y, dmg, crit) {
-  floaters.push({ x: x + (Math.random() - 0.5) * 6, y, txt: '' + dmg, t: crit ? 46 : 34, crit: !!crit, vy: crit ? -1.1 : -0.8 });
+  floaters.push({ x: x + (Math.random() - 0.5) * 6, y, txt: '' + dmg, t: crit ? 46 : 34, max: crit ? 46 : 34, crit: !!crit, vy: crit ? -1.1 : -0.8 });
 }
 // Trvalá krvavá skvrna na zemi
 function spawnDecal(x, y, r) {
@@ -2194,14 +2197,20 @@ function drawPickups() {
   }
 }
 function drawFloaters() {
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   for (const f of floaters) {
     ctx.globalAlpha = clamp(f.t / 20, 0, 1);
-    ctx.textAlign = 'center';
-    if (f.pickup) { ctx.fillStyle = f.pickup; ctx.font = 'bold 12px system-ui'; ctx.fillText(f.txt, f.x, f.y); }
-    else if (f.crit) { ctx.fillStyle = '#fff'; ctx.font = 'bold 18px system-ui'; ctx.fillText(f.txt + '!', f.x, f.y); ctx.fillStyle = '#ffd35c'; ctx.font = 'bold 17px system-ui'; ctx.fillText(f.txt + '!', f.x, f.y - 0.5); }
-    else { ctx.fillStyle = '#ffe0e0'; ctx.font = 'bold 12px system-ui'; ctx.fillText(f.txt, f.x, f.y); }
-    ctx.globalAlpha = 1; ctx.textAlign = 'left';
+    const pop = f.crit ? 1 + clamp((f.t - ((f.max || 46) - 7)) / 7, 0, 1) * 0.8 : 1;   // rychlý „úder" u kritů
+    ctx.save(); ctx.translate(f.x, f.y); if (pop !== 1) ctx.scale(pop, pop);
+    const txt = f.pickup ? f.txt : (f.crit ? f.txt + '!' : f.txt);
+    const size = f.pickup ? 12 : (f.crit ? 18 : 12);
+    ctx.font = `bold ${size}px system-ui`;
+    ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillText(txt, 0, 1.2);                        // stín pro čitelnost
+    ctx.fillStyle = f.pickup ? f.pickup : (f.crit ? '#ffd35c' : '#ffe0e0'); ctx.fillText(txt, 0, 0);
+    if (f.crit) { ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = 'bold 17px system-ui'; ctx.fillText(txt, 0, -0.6); }
+    ctx.restore();
   }
+  ctx.globalAlpha = 1; ctx.textAlign = 'left';
 }
 // Bloková dlaždice s pixelovou texturou (dřevo = prkna, kámen = dlažba)
 function drawBlockTile(x, y, hex, flash, wood) {
