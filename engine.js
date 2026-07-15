@@ -236,8 +236,9 @@ function roundRectOn(g, x, y, w, h, r) {
 }
 // stín pod entitou
 function drawShadow(x, y, r) {
-  ctx.fillStyle = 'rgba(0,0,0,0.22)';
-  ctx.beginPath(); ctx.ellipse(x, y + r * 0.7, r * 0.95, r * 0.42, 0, 0, Math.PI * 2); ctx.fill();
+  const cy = y + r * 0.72;   // měkký dvouvrstvý stín (líp ukotví postavu na tmavé zemi)
+  ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.beginPath(); ctx.ellipse(x, cy, r * 1.18, r * 0.52, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.26)'; ctx.beginPath(); ctx.ellipse(x, cy, r * 0.8, r * 0.36, 0, 0, Math.PI * 2); ctx.fill();
 }
 
 /* ---------- Flow-field pathfinding (BFS distanční pole od jádra) ---------- */
