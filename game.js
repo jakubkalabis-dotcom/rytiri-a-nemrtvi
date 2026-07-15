@@ -3198,7 +3198,7 @@ setState('menu');
 requestAnimationFrame(loop);
 
 // Service worker (PWA)
-if ('serviceWorker' in navigator) {
+if (navigator.serviceWorker) {
   // Automatická aktualizace: jakmile nový service worker převezme kontrolu, jednou přenačti
   // stránku → hráč vždy dostane nejnovější verzi bez ručního mazání cache.
   let _swReloaded = false;
