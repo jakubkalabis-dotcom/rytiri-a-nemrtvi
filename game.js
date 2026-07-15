@@ -275,12 +275,13 @@ function costOf(cost, cat) {
    ========================================================================== */
 function setState(s) {
   state = s;
-  if (s === 'menu' || s === 'class' || s === 'shop' || s === 'roundEnd' || s === 'gameOver' || s === 'victory' || s === 'host' || s === 'join' || s === 'wheel' || s === 'pact' || s === 'shrine') {
+  if (s === 'menu' || s === 'class' || s === 'shop' || s === 'roundEnd' || s === 'gameOver' || s === 'victory' || s === 'host' || s === 'join' || s === 'wheel' || s === 'pact' || s === 'shrine' || s === 'help') {
     overlay.classList.remove('hidden');
   } else {
     overlay.classList.add('hidden');
   }
-  if (s === 'shrine') renderShrine();
+  if (s === 'help') renderHelp();
+  else if (s === 'shrine') renderShrine();
   else if (s === 'pact') renderPact();
   else if (s === 'wheel') renderWheelMenu();
   else if (s === 'menu') renderMenu();
@@ -358,6 +359,7 @@ function renderMenu() {
     <button data-act="hostgame" class="ghost">Hostovat co-op (2 hráči)</button>
     <button data-act="joingame" class="ghost">Připojit se ke hře</button>
     <button data-act="shrine" class="ghost">💀 Svatyně duší${profile.souls ? ' (' + profile.souls + ')' : ''}</button>
+    <button data-act="help" class="ghost">📖 Jak hrát</button>
     <div class="board"><h3>NEJLEPŠÍ SKÓRE</h3>${board}</div>`;
 }
 
@@ -665,6 +667,20 @@ function renderVictory() {
     <div class="board"><h3>NEJLEPŠÍ SKÓRE</h3>${scoreBoardHtml()}</div>
     <button data-act="menu" class="ghost">Do menu</button>`;
 }
+function renderHelp() {
+  ovContent.innerHTML = `<h2>📖 Jak hrát</h2>
+    <div class="statbox"><div class="statname">🎯 Cíl</div>
+      <div class="scd">Braň <b>hradní bránu</b> před vlnami nemrtvých napříč <b>${NUM_MAPS} mapami</b> až do pekla. Když bráně dojdou životy, prohráváš.</div></div>
+    <div class="statbox"><div class="statname">🔁 Smyčka kola</div>
+      <div class="scd"><b>1. Obchod</b> — nakup zbraně, pasti, zdi, spojence a vylepšuj postavu (za 💎 gemy).<br>
+      <b>2. Stavění</b> — rozmísti obranu okolo brány (klepni = postav, táhni = kamera).<br>
+      <b>3. Vlna</b> — přežij nápor. Každá <b>5. vlna</b> = sub-boss, <b>25.</b> = mapový boss (${WAVES_PER_MAP} vln/mapa).</div></div>
+    <div class="statbox"><div class="statname">🕹 Ovládání</div>
+      <div class="scd">Levý joystick = <b>pohyb</b>, pravý = <b>míření/palba</b>. Zapni <b>🎯 auto-míření</b> a <b>🔥 palbu</b>, ať se soustředíš na pohyb. Tlačítko vpravo dole = <b>schopnost třídy</b>.</div></div>
+    <div class="statbox"><div class="statname">💡 Tipy</div>
+      <div class="scd">• Sbírej 💎 z nepřátel (samy se přitáhnou). • Bossové dělají <b>drtivý úder</b> — uhni z rudého kruhu! • Za bosse dostaneš trvalý <b>buff</b> (vyber si). • Před mapou volíš <b>Pakt</b> (risk/odměna). • Po smrti utrať <b>💀 duše</b> ve Svatyni za trvalá vylepšení.</div></div>
+    <button data-act="menu">Rozumím, do boje! ⚔</button>`;
+}
 function renderShrine() {
   const cards = META_KEYS.map(k => {
     const d = META_UPGRADES[k], lv = metaLvl(k), maxed = lv >= d.max, cost = metaCost(lv);
@@ -704,6 +720,7 @@ overlay.addEventListener('click', e => {
   if (act === 'copycode') { if (typeof netCopy === 'function') netCopy(el.dataset.which, el); return; }
   if (act === 'joinconnect') { if (typeof netJoinConnect === 'function') netJoinConnect(); return; }
   if (act === 'shrine') { setState('shrine'); return; }
+  if (act === 'help') { setState('help'); return; }
   if (act === 'buymeta') { buyMeta(id); return; }
   if (act === 'pickclass') { pickClass(id); return; }
   if (act === 'tab') { shopTab = id; renderShop(); return; }   // lokální přepnutí záložky
