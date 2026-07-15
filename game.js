@@ -2512,6 +2512,13 @@ function drawBullets() {
   for (const b of bullets) {
     if (!onScreen(b.x, b.y, 20)) continue;
     const col = b.color || '#ffe08a';
+    // pohybová stopa (streak) — dělá ze střel „letící" energii, ne statické tečky
+    if (!b.thrown) {
+      const spd = Math.hypot(b.vx, b.vy) || 1, len = b.magic ? 16 : 12;
+      ctx.strokeStyle = col; ctx.globalAlpha = 0.3; ctx.lineWidth = Math.max(1.6, b.r * (b.magic ? 1.3 : 0.9)); ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(b.x - b.vx / spd * len, b.y - b.vy / spd * len); ctx.lineTo(b.x, b.y); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.lineCap = 'butt';
+    }
     if (b.thrown) {
       b.spin = (b.spin || 0) + 0.3;
       ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.spin);
