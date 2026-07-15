@@ -2328,6 +2328,7 @@ function drawWarriors() {
       skin: '#d8a878', shirt: col, dark: shade(def.color, -0.4), hat: '#c8ccd4', pants: '#3a3444',
       weaponShape: ranged ? 'bow' : (wr.defId === 'rytir_np' ? 'greatsword' : (wr.defId === 'clan_axeman' ? 'axe' : 'sword')),
     });
+    if (wr.flash <= 0) rimLight(wr.x, wr.y, wr.r);   // světelný okraj shora
     ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(wr.x - 12, wr.y - wr.r - 9, 24, 3);
     ctx.fillStyle = '#5cff8a'; ctx.fillRect(wr.x - 12, wr.y - wr.r - 9, 24 * (wr.hp / wr.hpMax), 3);
   }
@@ -2359,6 +2360,7 @@ function drawEnemies() {
     else if (e.typeId === 'ohar') drawHound(e, col, dark, walkPh);
     else drawZombie(e, col, dark, lite, walkPh);
     ctx.restore(); ctx.globalAlpha = 1;
+    if (e.spawnT <= 0 && e.flash <= 0) rimLight(e.x, e.y + bob, e.r);   // světelný okraj shora
     if (freezeTimer > 0) { ctx.strokeStyle = '#bfefff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(e.x, e.y + bob, e.r + 2, 0, Math.PI * 2); ctx.stroke(); }
     // HP proužek
     if (e.hp < e.hpMax && e.arch !== 'BOSS') {
@@ -2540,6 +2542,7 @@ function drawPlayers() {
       weaponShape: WEAPON_SHAPE[p.weaponId] || (w0.cat === 'melee' ? 'sword' : 'bow'), weaponColor: w0.color,
     });
     ctx.globalAlpha = 1;
+    if (p.invisT <= 0) rimLight(p.x, p.y + bob, p.r);   // světelný okraj shora
     // rytíř: aktivní blok — velký štít napřažený ve směru míření
     if (p.blockT > 0) drawKnightShield(p.x, p.y + bob, p.r, p.aimAngle);
   }

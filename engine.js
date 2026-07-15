@@ -240,6 +240,11 @@ function drawShadow(x, y, r) {
   ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.beginPath(); ctx.ellipse(x, cy, r * 1.18, r * 0.52, 0, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = 'rgba(0,0,0,0.26)'; ctx.beginPath(); ctx.ellipse(x, cy, r * 0.8, r * 0.36, 0, 0, Math.PI * 2); ctx.fill();
 }
+// Rim-light shora (jednotné světlo měsíce) — tenký světelný okraj, aby postava vystoupla z tmy.
+function rimLight(x, y, r) {
+  ctx.strokeStyle = 'rgba(255,238,206,0.28)'; ctx.lineWidth = Math.max(1.5, r * 0.13);
+  ctx.beginPath(); ctx.arc(x, y, r * 0.66, Math.PI * 1.16, Math.PI * 1.84); ctx.stroke();
+}
 
 /* ---------- Flow-field pathfinding (BFS distanční pole od jádra) ---------- */
 // dist = počet kroků do jádra; flowX/flowY = jednotkový vektor k dalšímu kroku.
