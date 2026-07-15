@@ -390,6 +390,17 @@ code += `
     }
     log('nové zbraně ok ('+news.length+' vystřeleno bez chyby)'); }
 
+  // ---- 24) Fáze 3: Nekromant vyvolá kostlivce, kteří pak vyprší ----
+  { assert(CLASSES.nekromant, 'třída Nekromant existuje'); assert(ABILITIES.nekromant, 'schopnost Nekromant');
+    newRun('nekromant'); startWave(); const p=players[0]; p.abilityCd=0;
+    const w0 = warriors.length; useAbility(p);
+    const skels = warriors.filter(w=>w.defId==='kostlivec').length;
+    assert(skels === SKELETON_COUNT, 'vyvoláno '+SKELETON_COUNT+' kostlivců ('+skels+')');
+    // po vypršení lifetime zmizí
+    let g=0; while (warriors.some(w=>w.defId==='kostlivec') && g++<SKELETON_LIFETIME+120) { if(state==='combat') updateCombat(1); }
+    assert(!warriors.some(w=>w.defId==='kostlivec'), 'kostlivci po čase vypršeli');
+    log('nekromant ok (kostlivci vyvoláni i vypršeli)'); }
+
   console.log('\\n==== TEST RESULTS ====');
   for (const r of results) console.log('  ✓ ' + r);
   console.log('==== ALL PASSED ====');

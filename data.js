@@ -327,6 +327,12 @@ const CLASSES = {
     costMul:{ melee:1, ranged:1, trap:1, wall:1, warrior:0.85, ammo:1 },
     passive:{ holyDmg:1.25, healAura:0.05, warriorBuff:1.2 },
   },
+  nekromant: {
+    name:'Nekromant', icon:'💀', color:'#8a4ad0', desc:'Odpadlý černokněžník. Křísí padlé jako kostlivce a vládne mrazem a jedem.',
+    start:['rezavy_mec','mraziva_hul'], startGems:145, hpMod:0.9, spdMod:1.0,
+    costMul:{ melee:1.05, ranged:0.9, trap:1, wall:1, warrior:0.65, ammo:1 },
+    passive:{ magicDmg:1.15, dotDmg:1.3, lifesteal:0.06, warriorBuff:1.15 },
+  },
 };
 
 /* ---------- Aktivní schopnosti tříd (tlačítko + cooldown ve framech, 60 = 1 s) ----------
@@ -340,7 +346,11 @@ const ABILITIES = {
   alchymista: { name:'Abominace',     icon:'🧟', cd:0, desc:'Vypije lektvar (z 6 žlučí) a na 9 s se promění v abominaci: −35 % obdrženého poškození, −38 % rychlost, POŽÍRÁ pěšáky (okamžitě, +1 max HP navždy za každého, strop 140) a leptá silnější (20 dmg/2,5 s + 4 dmg/s žíravinou v okruhu 46). Bez cooldownu — potřebuje lektvar (max 2).' },
   inzenyr:    { name:'Polní věž',      icon:'🔧', cd:1020, desc:'Postaví dočasný samostříl (12 s) na tvé pozici a opraví všechny zdi na plné HP. Zabíjením nepřátel věžemi se plní „Kolečka se točí" — vylepšení této schopnosti. Cooldown 17 s.' },
   knez:       { name:'Vzkříšení',      icon:'✨', cd:0, desc:'Oživí všechny padlé hrdiny v okruhu 220 na 60 % HP, vyléčí živé o 60 HP a spálí nemrtvé za 40 v okruhu 130. Použitelné 1× za kolo.' },
+  nekromant:  { name:'Povstaňte!',     icon:'💀', cd:1140, desc:'Vyvolá 3 kostlivé bojovníky (90 HP, 15 poškození), kteří 12 s bojují po tvém boku. Cooldown 19 s.' },
 };
+const SKELETON = { name:'Kostlivec', arch:'MELEE', hp:90, dmg:15, range:44, rate:26, speed:1.15, seek:270, color:'#d8d0b0' };
+const SKELETON_COUNT = 3;
+const SKELETON_LIFETIME = 720;   // 12 s
 
 /* ---------- Balanc konstanty pro přepracované schopnosti (čísla = přesně to, co se stane) ---------- */
 const CLAN_AXEMAN = { name:'Sekerník klanu', arch:'MELEE', hp:200, dmg:22, range:46, rate:26, speed:1.25, seek:280, color:'#d07038' };

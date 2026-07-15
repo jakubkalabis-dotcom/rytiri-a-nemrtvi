@@ -489,6 +489,7 @@ function abilityDetail(cid) {
     alchymista: `🧟 Abominace (lektvar z ${BILE_PER_POTION} žlučí, max 2): ${(ABOM_DURATION / 60)} s proměna — −${Math.round(ABOM_DR * 100)} % obdrž. poškození, −38 % rychlost, POŽÍRÁ pěšáky (+${ABOM_HP_PER_EAT} max HP navždy/kus, strop ${ABOM_HP_CAP}) a leptá silnější ${ABOM_ACID_BURST} dmg/2,5 s + ${ABOM_ACID_DPS} dmg/s v okruhu ${ABOM_ACID_RADIUS}.`,
     inzenyr: `🔧 Polní věž (cd 17 s): ${1 + (wu.count || 0)}× samostříl (${(720 + (wu.dur || 0) * 180) / 60} s, ${Math.round(90 * (1 + 0.4 * (wu.hp || 0)))} HP, +${(wu.dmg || 0) * 20} % dmg, +${(wu.rate || 0) * 15} % rychlost) + opraví zdi. Zabíjením věžemi plníš „Kolečka se točí".`,
     knez: `✨ Vzkříšení (1× za kolo): oživí padlé v okruhu 220 na 60 % HP, živé vyléčí o 60 HP a spálí nemrtvé za 40 v okruhu 130.  ➕ Pasivně: Svatá záře — každých ${(PRIEST_NOVA.cd / 60).toFixed(1)} s spálí nemrtvé kolem za ${Math.round(PRIEST_NOVA.dmg * 1.25)} v okruhu ${PRIEST_NOVA.radius}.`,
+    nekromant: `💀 Povstaňte! (cd 19 s): vyvolá ${SKELETON_COUNT} kostlivé bojovníky (${SKELETON.hp} HP, ${SKELETON.dmg} poškození), kteří ${SKELETON_LIFETIME / 60} s bojují za tebe. Pasivně: +15 % magie, +30 % jed/oheň (DoT), +6 % vysávání.`,
   })[cid] || 'Aktivní schopnost třídy.';
 }
 // Přehled trvalých buffů (padají ze sub-bossů) — vlastněné + celý katalog s čísly.
@@ -1503,7 +1504,20 @@ function useAbility(p) {
     case 'zved': p.invisT = SCOUT_INVIS_TIME; p.backstabArmed = true; p.inv = Math.max(p.inv, 8); sfx.throwsnd(); break;
     case 'mag': doArmageddon(p); break;
     case 'inzenyr': deployFieldTurret(p); break;
+    case 'nekromant': spawnSkeletons(p); break;
   }
+}
+// — Nekromant: vyvolá dočasné kostlivé bojovníky (dočasní spojenci) —
+function spawnSkeletons(p) {
+  for (let i = 0; i < SKELETON_COUNT; i++) {
+    const a = i / SKELETON_COUNT * Math.PI * 2, ox = Math.cos(a) * 26, oy = Math.sin(a) * 26;
+    warriors.push({ def: SKELETON, defId: 'kostlivec', x: p.x + ox, y: p.y + oy, r: 12,
+      hp: SKELETON.hp, hpMax: SKELETON.hp, homeX: p.x, homeY: p.y, cool: 0, aim: 0, flash: 0, atkAnim: 0, temp: SKELETON_LIFETIME });
+    // vizuál povstání z hrobu
+    for (let k = 0; k < 5; k++) burst(p.x + ox, p.y + oy, '#8a4ad0', 3);
+  }
+  banner = { text: '💀 POVSTAŇTE!', t: 80, warn: true };
+  if (sfx.groan) sfx.groan();
 }
 // — Berserk: přivolá 2 sekerníky (dočasní spojenci s vlastním def) —
 function spawnClanAxemen(p) {
@@ -1868,7 +1882,7 @@ function updateWarriors(dt) {
       if (wr.temp != null) wr.temp -= dt;
       if (wr.clanOwner.hp > wr.clanOwner.hpMax * CLAN_DISMISS_HP) wr.temp = 0;
       wr.homeX = wr.clanOwner.x; wr.homeY = wr.clanOwner.y;
-    }
+    } else if (wr.temp != null) wr.temp -= dt;   // ostatní dočasní spojenci (kostlivci nekromanta)
     const def = wr.def;
     const buff = teamMax('warriorBuff') || 1;
     const tgt = nearestEnemy(wr.x, wr.y, def.seek);
@@ -1891,8 +1905,8 @@ function updateWarriors(dt) {
       if (d > 6) { const a = Math.atan2(wr.homeY - wr.y, wr.homeX - wr.x); moveEntity(wr, wr.x + Math.cos(a) * def.speed * dt, wr.y + Math.sin(a) * def.speed * dt); }
     }
   }
-  // úklid vypršelých sekerníků (mrtvé kosí i smyčka nepřátel — proto odchod řešíme podle vlastníka níže)
-  for (const w of warriors) if (w.clanOwner && w.temp != null && w.temp <= 0) { w.hp = 0; burst(w.x, w.y, w.def.color, 12); }
+  // úklid vypršelých dočasných spojenců (klan i kostlivci); klan odchod řešíme podle vlastníka níže
+  for (const w of warriors) if (w.temp != null && w.temp <= 0) { w.hp = 0; burst(w.x, w.y, (w.def && w.def.color) || '#d8d0b0', 12); }
   warriors = warriors.filter(w => w.hp > 0);
   // po odchodu VŠECH sekerníků: 40s cooldown a odblokování dalšího volání
   for (const p of players) {
