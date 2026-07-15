@@ -342,6 +342,21 @@ code += `
   { profile.souls = 50; renderShrine(); assert(ovContent.innerHTML.includes('Svatyně'), 'shrine renders'); profile.souls = 0;
     log('shrine UI ok'); }
 
+  // ---- 20) Boss drtivý úder: telegraf → zásah pokud stojíš, uhneš pokud odejdeš ----
+  { newRun('rytir'); startWave(); const p=players[0]; p.x=300; p.y=300; p.inv=0;
+    spawnEnemy('nekromant'); const b=enemies[enemies.length-1]; b.x=340; b.y=300; b.spawnT=0;
+    // vynuť nádech na hráče
+    b.slamCd=0; if(state==='combat') updateCombat(1);
+    assert(b.slamWind>0, 'slam telegraph started');
+    // hráč ZŮSTANE stát → dostane zásah
+    const hp0=p.hp; let g=0; while(b.slamWind>0 && g++<200){ p.x=b.slamX; p.y=b.slamY; p.inv=0; updateCombat(1); }
+    assert(p.hp<hp0, 'stát v kruhu = zásah ('+hp0+'->'+p.hp+')');
+    // nový nádech, hráč UHNE → bez zásahu
+    p.hp=p.hpMax; b.slamWind=0; b.slamCd=0; p.x=300;p.y=300; updateCombat(1); assert(b.slamWind>0,'2nd telegraph');
+    const hp1=p.hp; g=0; while(b.slamWind>0 && g++<200){ p.x=b.slamX+300; p.y=b.slamY+300; p.inv=0; updateCombat(1); }
+    assert(p.hp===hp1, 'uhnutí z kruhu = bez zásahu');
+    log('boss drtivý úder ok (zásah / uhnutí)'); }
+
   console.log('\\n==== TEST RESULTS ====');
   for (const r of results) console.log('  ✓ ' + r);
   console.log('==== ALL PASSED ====');

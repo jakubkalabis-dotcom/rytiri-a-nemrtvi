@@ -182,7 +182,7 @@ function serializeState() {
     banner: banner && { text: banner.text, t: banner.t, warn: banner.warn },
     readyHost, readyGuest, freezeTimer,
     players: players.map(p => ({ x: p.x, y: p.y, r: p.r, hp: p.hp, hpMax: p.hpMax, gems: p.gems || 0, aimAngle: p.aimAngle, inv: p.inv, downed: p.downed, classId: p.classId, color: p.color, weaponId: p.weaponId, mana: p.mana, manaMax: p.manaMax, walk: p.walk || 0, buffRapid: p.buffRapid || 0, buffPower: p.buffPower || 0, shieldT: p.shieldT || 0, rageT: p.rageT || 0, abilityCd: p.abilityCd || 0, perks: p.perks || {}, perkOffer: p.perkOffer || null, blockT: p.blockT || 0, invisT: p.invisT || 0, flurryT: p.flurryT || 0, abomT: p.abomT || 0, potions: p.potions || 0, bile: p.bile || 0, clanCd: p.clanCd || 0, resurrectUsed: !!p.resurrectUsed, _clanActive: !!p._clanActive })),
-    enemies: enemies.map(e => ({ x: e.x, y: e.y, r: e.r, hp: e.hp, hpMax: e.hpMax, flash: e.flash, arch: e.arch, color: e.color, typeId: e.typeId, elite: e.elite, spawnT: e.spawnT })),
+    enemies: enemies.map(e => ({ x: e.x, y: e.y, r: e.r, hp: e.hp, hpMax: e.hpMax, flash: e.flash, arch: e.arch, color: e.color, typeId: e.typeId, elite: e.elite, spawnT: e.spawnT, slamWind: e.slamWind || 0, slamWindMax: e.slamWindMax, slamX: e.slamX, slamY: e.slamY, slamR: e.slamR })),
     bullets: bullets.map(b => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, r: b.r, color: b.color, thrown: b.thrown, magic: b.magic, ang: b.ang, crit: b.crit })),
     eBullets: eBullets.map(b => ({ x: b.x, y: b.y, r: b.r, color: b.color })),
     walls: walls.map(s => ({ defId: s.defId, tx: s.tx, ty: s.ty, x: s.x, y: s.y, hp: s.hp, hpMax: s.hpMax, flash: s.flash, temp: s.temp, level: s.level || 0 })),

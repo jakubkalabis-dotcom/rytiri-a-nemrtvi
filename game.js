@@ -415,6 +415,7 @@ function enemyDesc(id, e) {
   parts.push(A[e.arch] || '');
   if (e.armored) parts.push('Brnění: sníženému poškození odolává.');
   if (e.arch === 'BOSS') {
+    parts.push('💥 Drtivý úder: nadechne se a plošně udeří (2,2× poškození) — uhni z výstražného kruhu!');
     if (e.summon) parts.push('Přivolává další nemrtvé (' + (ENEMIES[e.summon] ? ENEMIES[e.summon].name : e.summon) + ').');
     if (e.volley) parts.push('Střílí vějíř projektilů.');
     if (e.enrage) parts.push('V nízkém HP se rozzuří (zrychlí).');
@@ -1714,6 +1715,24 @@ function updateEnemies(dt) {
         }
         e.fireCool = e.atkRate;
       }
+      // DRTIVÝ ÚDER s telegrafem — boss se nadechne (varovný kruh se plní), pak plošně udeří. Dá se uhnout.
+      if (e.slamCd == null) e.slamCd = 220 + Math.random() * 140;
+      if (e.slamWind > 0) {
+        e.slamWind -= dt;
+        if (e.slamWind <= 0) {                 // DETONACE
+          const rad = e.slamR || 74, sdmg = e.dmg * 2.2;
+          explode(e.slamX, e.slamY, '#ff4a2a', 28);
+          particles.push({ x: e.slamX, y: e.slamY, ring: true, r: 6, rMax: rad, life: 1, decay: 0.06, color: '#ff8a3a' });
+          for (const q of players) if (!q.downed && q.inv <= 0 && dist(e.slamX, e.slamY, q.x, q.y) <= rad + q.r) damagePlayer(q, sdmg, e);
+          for (const w of warriors) if (dist(e.slamX, e.slamY, w.x, w.y) <= rad) { w.hp -= sdmg; w.flash = 5; }
+          shake = Math.min(13, shake + 8); if (sfx.boom) sfx.boom();
+          emitEv({ k: 'slam', x: e.slamX, y: e.slamY, r: rad });
+          e.slamCd = 300 + Math.random() * 200;
+        }
+      } else {
+        e.slamCd -= dt;
+        if (e.slamCd <= 0 && pl) { e.slamX = pl.x; e.slamY = pl.y; e.slamR = e.def.final ? 104 : (e.def.sub ? 66 : 78); e.slamWind = e.slamWindMax = (e.def.sub ? 62 : 80); if (sfx.boss) sfx.boss(); }
+      }
     }
 
     // separace od ostatních nepřátel (aby se nehromadili)
@@ -2009,6 +2028,7 @@ function render() {
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = mapMoodTint(); ctx.fillRect(0, 0, VIEWW, VIEWH);
   ctx.restore();
+  drawTelegraphs();   // výstražné plochy bossů — jasné (nad ztmavením), pod postavami
   drawPickups();
   drawWarriors();
   drawEnemies();
@@ -2264,6 +2284,24 @@ function drawTraps() {
       if (fr() < 0.5) particles.push({ x: t.x + (Math.random() - 0.5) * 8, y: t.y - 6, vx: 0, vy: -0.5, life: 0.6, decay: 0.05, size: 2, color: lite, smoke: true });
     }
     if (t.level) drawLevelBadge(t.tx * TILE + TILE - 4, t.ty * TILE + 4);
+  }
+}
+// Telegraf drtivého úderu bosse — výstražná plocha, která se plní (uhni z ní!)
+function drawTelegraphs() {
+  for (const e of enemies) {
+    if (e.dead || !(e.slamWind > 0)) continue;
+    const rad = e.slamR || 74, prog = 1 - e.slamWind / (e.slamWindMax || 80), x = e.slamX, y = e.slamY;
+    if (!onScreen(x, y, rad)) continue;
+    ctx.save();
+    ctx.fillStyle = `rgba(255,40,20,${0.10 + prog * 0.20})`;
+    ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,100,40,0.28)';
+    ctx.beginPath(); ctx.arc(x, y, rad * prog, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = `rgba(255,${(70 + prog * 130) | 0},40,${0.55 + Math.sin(animClock * 0.5) * 0.3})`; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2); ctx.stroke();
+    // varovné rýhy (kříž) když je skoro hotovo
+    if (prog > 0.6) { ctx.globalAlpha = (prog - 0.6) * 2; ctx.beginPath(); ctx.moveTo(x - rad, y); ctx.lineTo(x + rad, y); ctx.moveTo(x, y - rad); ctx.lineTo(x, y + rad); ctx.stroke(); }
+    ctx.restore();
   }
 }
 function drawGroundFx() {
