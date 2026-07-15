@@ -326,7 +326,7 @@ const ABILITIES = {
   berserk:    { name:'Volání klanu',  icon:'🪓', cd:2400, desc:'Přivolá 2 sekerníky (200 HP, 22 poškození). Zůstanou dokud nepadnou / nezvedneš HP nad 65 % / nekončí kolo. Použitelné jen při ≤50 % HP. Cooldown 40 s po jejich odchodu.' },
   zved:       { name:'Bodnutí do zad',icon:'🗡', cd:600, desc:'Na 5 s neviditelnost (nemrtví tě ignorují). První útok: běžný nepřítel je OKAMŽITĚ zabit, boss dostane 3× poškození zbraně. Zabití silnějšího nepřítele schopností resetuje cooldown (jinak 10 s).' },
   mag:        { name:'Armagedon',     icon:'☄', cd:900, desc:'Sešle meteor na nejbližší shluk nepřátel: 130 poškození v okruhu 78 + ohnivá zem (16/s po 3 s). Cooldown 15 s.' },
-  alchymista: { name:'Abominace',     icon:'🧟', cd:0, desc:'Vypije lektvar (z 5 žlučí) a na 10 s se promění v abominaci: −50 % obdrženého poškození, −38 % rychlost, POŽÍRÁ pěšáky (okamžitě, +2 max HP navždy za každého) a leptá silnější (20 dmg/2,5 s + 4 dmg/s žíravinou v okruhu 46). Bez cooldownu — potřebuje lektvar (max 2).' },
+  alchymista: { name:'Abominace',     icon:'🧟', cd:0, desc:'Vypije lektvar (z 6 žlučí) a na 9 s se promění v abominaci: −35 % obdrženého poškození, −38 % rychlost, POŽÍRÁ pěšáky (okamžitě, +1 max HP navždy za každého, strop 140) a leptá silnější (20 dmg/2,5 s + 4 dmg/s žíravinou v okruhu 46). Bez cooldownu — potřebuje lektvar (max 2).' },
   inzenyr:    { name:'Polní věž',      icon:'🔧', cd:1020, desc:'Postaví dočasný samostříl (12 s) na tvé pozici a opraví všechny zdi na plné HP. Zabíjením nepřátel věžemi se plní „Kolečka se točí" — vylepšení této schopnosti. Cooldown 17 s.' },
   knez:       { name:'Vzkříšení',      icon:'✨', cd:0, desc:'Oživí všechny padlé hrdiny v okruhu 220 na 60 % HP, vyléčí živé o 60 HP a spálí nemrtvé za 40 v okruhu 130. Použitelné 1× za kolo.' },
 };
@@ -338,17 +338,18 @@ const CLAN_DISMISS_HP = 0.65;       // sekerníci odejdou, když berserk vystoup
 const CLAN_COOLDOWN = 2400;         // 40 s cooldown po odchodu sekerníků
 const BERSERK_HP_GATE = 0.50;       // volání klanu jen při ≤ 50 % HP
 
-const ABOM_DURATION = 600;          // 10 s proměny
-const ABOM_DR = 0.50;               // −50 % obdrženého poškození v proměně
+const ABOM_DURATION = 540;          // 9 s proměny (dřív 10)
+const ABOM_DR = 0.35;               // −35 % obdrženého poškození (dřív −50)
 const ABOM_SPEEDMUL = 0.62;         // −38 % rychlost
-const ABOM_HP_PER_EAT = 2;          // +2 max HP navždy za sežraného pěšáka
+const ABOM_HP_PER_EAT = 1;          // +1 max HP navždy za sežraného pěšáka (dřív +2)
+const ABOM_HP_CAP = 140;            // strop trvalého navýšení HP ze žraní (proti nekonečnému snowballu)
 const ABOM_ACID_RADIUS = 46;        // dosah žíraviny
 const ABOM_ACID_BURST = 20;         // 20 poškození každých 2,5 s
 const ABOM_ACID_BURST_CD = 150;     // 2,5 s
 const ABOM_ACID_DPS = 4;            // + 4 dmg/s (2 za 0,5 s) žíravinou
-const BILE_PER_POTION = 5;          // 5 žlučí = 1 lektvar
+const BILE_PER_POTION = 6;          // 6 žlučí = 1 lektvar (dřív 5)
 const BILE_MAX_POTIONS = 2;         // max 2 lektvary
-const BILE_DROP_CHANCE = 0.14;      // 14 % šance, že z běžné zombie vyteče žluč
+const BILE_DROP_CHANCE = 0.10;      // 10 % šance, že z běžné zombie vyteče žluč (dřív 14)
 const BILE_HARVEST_TIME = 60;       // podržet 1 s pro sběr žluči
 
 const MAG_METEOR_DMG = 130;         // poškození meteoru (vybalancováno – dřív 220)

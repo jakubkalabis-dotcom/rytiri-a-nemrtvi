@@ -292,6 +292,8 @@ function setState(s) {
   else if (s === 'host' && typeof renderHostLobby === 'function') renderHostLobby();
   else if (s === 'join' && typeof renderJoinLobby === 'function') renderJoinLobby();
   else if (s === 'build') { banner = { text: 'FÁZE STAVĚNÍ', t: 90 }; }
+  // ambientní dron běží během aktivního běhu (boj/stavění), jinak ztichne
+  if (typeof startDrone === 'function') { if (s === 'combat' || s === 'build') startDrone(); else stopDrone(); }
   // hostitel po každém přechodu okamžitě sesynchronizuje guesta
   if (typeof netPush === 'function' && net.role === 'host' && net.connected) netPush();
 }
@@ -481,7 +483,7 @@ function abilityDetail(cid) {
     berserk: `🪓 Volání klanu: přivolá 2 sekerníky (${CLAN_AXEMAN.hp} HP, ${CLAN_AXEMAN.dmg} poškození/úder). Jen při ≤ 50 % HP. Odejdou při smrti / HP > 65 % / konci kola. Poté cd 40 s.`,
     zved: '🗡 Bodnutí do zad (cd 10 s): 5 s neviditelnost (mobové tě ignorují). PRVNÍ útok = okamžité zabití běžného nepřítele, nebo 3× poškození zbraně na bosse. Zabiješ-li silnějšího, cd se resetuje.',
     mag: `☄ Armagedon (cd 15 s): meteor na nejbližší shluk — ${MAG_METEOR_DMG} poškození v okruhu ${MAG_METEOR_RADIUS} + ohnivá zem ${MAG_METEOR_DOT.dps}/s po 3 s. (× magický bonus).`,
-    alchymista: `🧟 Abominace (lektvar z 5 žlučí, max 2): 10 s proměna — −50 % obdrž. poškození, −38 % rychlost, POŽÍRÁ pěšáky (+${ABOM_HP_PER_EAT} max HP navždy/kus) a leptá silnější ${ABOM_ACID_BURST} dmg/2,5 s + ${ABOM_ACID_DPS} dmg/s v okruhu ${ABOM_ACID_RADIUS}.`,
+    alchymista: `🧟 Abominace (lektvar z ${BILE_PER_POTION} žlučí, max 2): ${(ABOM_DURATION / 60)} s proměna — −${Math.round(ABOM_DR * 100)} % obdrž. poškození, −38 % rychlost, POŽÍRÁ pěšáky (+${ABOM_HP_PER_EAT} max HP navždy/kus, strop ${ABOM_HP_CAP}) a leptá silnější ${ABOM_ACID_BURST} dmg/2,5 s + ${ABOM_ACID_DPS} dmg/s v okruhu ${ABOM_ACID_RADIUS}.`,
     inzenyr: `🔧 Polní věž (cd 17 s): ${1 + (wu.count || 0)}× samostříl (${(720 + (wu.dur || 0) * 180) / 60} s, ${Math.round(90 * (1 + 0.4 * (wu.hp || 0)))} HP, +${(wu.dmg || 0) * 20} % dmg, +${(wu.rate || 0) * 15} % rychlost) + opraví zdi. Zabíjením věžemi plníš „Kolečka se točí".`,
     knez: `✨ Vzkříšení (1× za kolo): oživí padlé v okruhu 220 na 60 % HP, živé vyléčí o 60 HP a spálí nemrtvé za 40 v okruhu 130.  ➕ Pasivně: Svatá záře — každých ${(PRIEST_NOVA.cd / 60).toFixed(1)} s spálí nemrtvé kolem za ${Math.round(PRIEST_NOVA.dmg * 1.25)} v okruhu ${PRIEST_NOVA.radius}.`,
   })[cid] || 'Aktivní schopnost třídy.';
@@ -1491,7 +1493,7 @@ function spawnClanAxemen(p) {
 // — Alchymista: proměna v abominaci —
 function startAbomination(p) {
   p.abomT = ABOM_DURATION; p._abomBurst = 0; p._preAbomR = p.r; p.r = 20;
-  p.hp = p.hpMax;   // proměna doléčí
+  p.hp = Math.min(p.hpMax, p.hp + p.hpMax * 0.4);   // proměna doléčí 40 % (dřív na plno)
   banner = { text: '🧟 ABOMINACE!', t: 90, warn: true };
 }
 // běží každý tick z updatePlayers dokud abomT>0
@@ -1508,8 +1510,8 @@ function updateAbomination(p, dt) {
     const weak = e.arch === 'WALKER' || e.arch === 'RUNNER' || e.arch === 'EXPLODER';
     if (weak && d < p.r + e.r + 4) {                 // sežrání pěšáka na kontakt
       e.hp = 0; killEnemy(e, p);
-      p.bonusHp = (p.bonusHp || 0) + ABOM_HP_PER_EAT; recalcPerks(p);  // +2 max HP navždy
-      p.hp = Math.min(p.hpMax, p.hp + 6);
+      if ((p.bonusHp || 0) < ABOM_HP_CAP) { p.bonusHp = (p.bonusHp || 0) + ABOM_HP_PER_EAT; recalcPerks(p); }  // +1 max HP navždy, se stropem
+      p.hp = Math.min(p.hpMax, p.hp + 4);
       spawnFloater(p.x, p.y - p.r - 4, 0, false); floaters[floaters.length - 1].txt = '+HP'; floaters[floaters.length - 1].pickup = '#8fd84a';
     } else if (!weak && d < ABOM_ACID_RADIUS + e.r) { // leptání silnějších žíravinou
       e.dotDps = Math.max(e.dotDps, ABOM_ACID_DPS); e.dotTimer = Math.max(e.dotTimer, 40);
@@ -3313,7 +3315,7 @@ window.addEventListener('keydown', e => {
   const k = e.key.toLowerCase(); keys[k] = true;
   if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault();
   if (k === 'p') togglePause();
-  if (k === 'm') { muted = !muted; profile.settings.muted = muted; saveProfile(profile); if (!muted) initAudio(); }
+  if (k === 'm') { muted = !muted; profile.settings.muted = muted; saveProfile(profile); if (muted) stopDrone(); else { initAudio(); if (state === 'combat' || state === 'build') startDrone(); } }
   if (k === 'q' && run) localCycleWeapon();
   if (k === 'e' && run) localUseAbility();
 });

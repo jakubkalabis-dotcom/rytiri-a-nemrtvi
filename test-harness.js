@@ -196,8 +196,8 @@ code += `
 
   // 6e Alchemist bile harvest -> potion -> abomination eats pawn (+maxHP)
   { newRun('alchymista'); startWave(); const p=players[0]; p.x=300;p.y=300;
-    for(let i=0;i<5;i++){ pickups.push({id:'zluc',x:p.x,y:p.y,t:900,bob:0,hold:0}); }
-    tick(70); assert((p.potions||0)>=1,'5 biles made a potion (potions='+p.potions+')');
+    for(let i=0;i<BILE_PER_POTION;i++){ pickups.push({id:'zluc',x:p.x,y:p.y,t:900,bob:0,hold:0}); }
+    tick(70); assert((p.potions||0)>=1,BILE_PER_POTION+' biles made a potion (potions='+p.potions+')');
     const max0=p.hpMax; p.potions=1; p.abilityCd=0; useAbility(p); assert(p.abomT>0,'abomination active');
     const weak=spawnDummy('chodec',p.x+4,p.y); tick(5);
     assert(weak.dead,'abomination ate the pawn'); assert(p.hpMax>max0,'maxHP grew from eating');

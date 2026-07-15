@@ -384,8 +384,15 @@ Pool.prototype.sweep = function () {
   this.active.length = n;
 };
 
-/* ---------- Audio (vlastní syntéza, středověké zvuky) ---------- */
-let actx = null, muted = false, noiseBuf = null;
+/* ---------- Audio: procedurální syntéza s master řetězcem (reverb + kompresor) ----------
+   Cíl: „moderní" prostor a hloubka místo holých pípání. Vše se sbíhá do masteru,
+   ten jde přes paralelní reverb a kompresor na výstup. Ambientní dron dělá atmosféru.   */
+let actx = null, muted = false, noiseBuf = null, master = null, compNode = null;
+function makeImpulse(dur, decay) {
+  const rate = actx.sampleRate, len = Math.max(1, Math.floor(rate * dur)), buf = actx.createBuffer(2, len, rate);
+  for (let ch = 0; ch < 2; ch++) { const d = buf.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay); }
+  return buf;
+}
 function initAudio() {
   try {
     if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
@@ -396,52 +403,81 @@ function initAudio() {
     noiseBuf = actx.createBuffer(1, len, actx.sampleRate);
     const d = noiseBuf.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
-  } catch (err) { actx = null; noiseBuf = null; }
+    master = actx.createGain(); master.gain.value = 0.82;
+    try {
+      compNode = actx.createDynamicsCompressor();
+      compNode.threshold.value = -16; compNode.knee.value = 22; compNode.ratio.value = 3.2; compNode.attack.value = 0.003; compNode.release.value = 0.2;
+      master.connect(compNode); compNode.connect(actx.destination);
+      try {   // paralelní reverb (hloubka/prostor)
+        const conv = actx.createConvolver(); conv.buffer = makeImpulse(1.7, 3.4);
+        const send = actx.createGain(); send.gain.value = 0.17;
+        master.connect(send); send.connect(conv); conv.connect(compNode);
+      } catch (e) {}
+    } catch (e) { master.connect(actx.destination); }   // fallback bez kompresoru
+  } catch (err) { actx = null; noiseBuf = null; master = null; }
 }
+function out() { return master || (actx && actx.destination); }
+// tón s krátkým náběhem (bez lupnutí) + volitelný sklouznutí frekvence
 function tone(freq, dur, type = 'square', vol = 0.15, slideTo = null) {
   if (!actx || muted) return;
-  const t = actx.currentTime;
-  const o = actx.createOscillator(), g = actx.createGain();
+  const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
   o.type = type; o.frequency.setValueAtTime(freq, t);
   if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(1, slideTo), t + dur);
-  g.gain.setValueAtTime(vol, t);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  o.connect(g).connect(actx.destination);
-  o.start(t); o.stop(t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(out()); o.start(t); o.stop(t + dur + 0.02);
 }
-function noise(dur, vol = 0.3, filterFreq = 900) {
+function noise(dur, vol = 0.3, filterFreq = 900, hp = 0) {
   if (!actx || muted) return;
-  const t = actx.currentTime;
-  const s = actx.createBufferSource(); s.buffer = noiseBuf;
+  const t = actx.currentTime, s = actx.createBufferSource(); s.buffer = noiseBuf;
   const g = actx.createGain(), f = actx.createBiquadFilter();
   f.type = 'lowpass'; f.frequency.value = filterFreq;
-  g.gain.setValueAtTime(vol, t);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  s.connect(f).connect(g).connect(actx.destination);
-  s.start(t); s.stop(t + dur);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  let chain = s.connect(f);
+  if (hp) { const h = actx.createBiquadFilter(); h.type = 'highpass'; h.frequency.value = hp; chain = chain.connect(h); }
+  chain.connect(g).connect(out()); s.start(t); s.stop(t + dur);
 }
+// akord (více tónů naráz) — pro příjemné UI/level-up zvuky
+function chord(freqs, dur, type = 'triangle', vol = 0.1, slide = null) { for (const f of freqs) tone(f, dur, type, vol, slide); }
 const sfx = {
-  swing()     { noise(0.12, 0.14, 2200); tone(300, 0.08, 'triangle', 0.05, 180); },
-  bow()       { tone(500, 0.09, 'triangle', 0.07, 220); },
-  crossbow()  { tone(360, 0.07, 'square', 0.08, 160); noise(0.05, 0.08, 3000); },
-  gun()       { noise(0.22, 0.4, 1400); tone(120, 0.2, 'sawtooth', 0.16, 45); },
-  magic()     { tone(680, 0.14, 'sine', 0.1, 1200); },
-  throwsnd()  { noise(0.09, 0.1, 2600); },
-  boom()      { noise(0.42, 0.4, 900); tone(140, 0.4, 'sawtooth', 0.16, 50); },
-  hitFlesh()  { noise(0.1, 0.16, 700); tone(180, 0.08, 'square', 0.06, 90); },
-  enemyDie()  { noise(0.16, 0.2, 800); tone(140, 0.14, 'sawtooth', 0.08, 60); },
-  groan()     { tone(90, 0.5, 'sawtooth', 0.05, 60); },
-  place()     { tone(240, 0.08, 'square', 0.1); setTimeout(() => tone(360, 0.08, 'square', 0.1), 70); },
-  buy()       { tone(560, 0.08, 'triangle', 0.12); setTimeout(() => tone(760, 0.1, 'triangle', 0.12), 80); },
-  coreHit()   { tone(200, 0.3, 'sawtooth', 0.2, 70); noise(0.25, 0.2, 500); },
-  waveStart() { tone(300, 0.14, 'triangle', 0.14); setTimeout(() => tone(450, 0.14, 'triangle', 0.14), 120); setTimeout(() => tone(600, 0.2, 'triangle', 0.15), 240); },
-  waveWin()   { tone(520, 0.12, 'triangle', 0.14); setTimeout(() => tone(660, 0.12, 'triangle', 0.14), 110); setTimeout(() => tone(880, 0.22, 'triangle', 0.15), 220); },
-  boss()      { tone(70, 0.9, 'sawtooth', 0.22, 45); noise(0.9, 0.12, 260); },
-  hurt()      { tone(220, 0.25, 'square', 0.18, 70); noise(0.2, 0.2, 600); },
-  gameOver()  { tone(300, 0.6, 'sawtooth', 0.2, 80); setTimeout(() => tone(160, 0.7, 'sawtooth', 0.2, 55), 200); },
-  heal()      { tone(600, 0.1, 'sine', 0.1); setTimeout(() => tone(820, 0.14, 'sine', 0.1), 90); },
-  levelUp()   { tone(500, 0.1, 'triangle', 0.14); setTimeout(() => tone(700, 0.1, 'triangle', 0.14), 90); setTimeout(() => tone(1000, 0.18, 'triangle', 0.15), 180); },
+  swing()     { noise(0.16, 0.13, 3400, 800); tone(280, 0.09, 'triangle', 0.05, 150); },
+  bow()       { noise(0.05, 0.06, 5000, 2000); tone(520, 0.1, 'triangle', 0.07, 240); },
+  crossbow()  { tone(360, 0.07, 'square', 0.08, 150); noise(0.06, 0.09, 4200, 1500); },
+  gun()       { noise(0.04, 0.5, 6000, 1200); noise(0.26, 0.42, 1100); tone(90, 0.24, 'sawtooth', 0.18, 38); },   // klik + tělo + dunivý spodek
+  magic()     { tone(560, 0.16, 'sine', 0.09, 1300); tone(1120, 0.14, 'sine', 0.04, 2100); },
+  throwsnd()  { noise(0.1, 0.11, 3200, 900); },
+  boom()      { tone(160, 0.5, 'sawtooth', 0.18, 38); tone(80, 0.55, 'sine', 0.16, 30); noise(0.5, 0.42, 820); noise(0.06, 0.4, 5000, 1500); },
+  hitFlesh()  { noise(0.12, 0.18, 620, 120); tone(150, 0.09, 'square', 0.06, 70); },   // masitá rána
+  enemyDie()  { noise(0.18, 0.22, 700); tone(130, 0.16, 'sawtooth', 0.08, 52); tone(300, 0.06, 'square', 0.04, 120); },
+  groan()     { tone(84, 0.55, 'sawtooth', 0.05, 56); tone(126, 0.5, 'sawtooth', 0.03, 84); },
+  place()     { tone(220, 0.08, 'square', 0.1); setTimeout(() => tone(340, 0.09, 'square', 0.1), 65); noise(0.05, 0.06, 2500, 600); },
+  buy()       { chord([523, 784], 0.1, 'triangle', 0.09); setTimeout(() => chord([659, 988], 0.14, 'triangle', 0.09), 85); },
+  coreHit()   { tone(180, 0.34, 'sawtooth', 0.2, 60); noise(0.3, 0.22, 460); tone(70, 0.4, 'sine', 0.12, 40); },
+  waveStart() { chord([294, 370], 0.16, 'triangle', 0.11); setTimeout(() => chord([392, 494], 0.16, 'triangle', 0.11), 130); setTimeout(() => chord([587, 740], 0.26, 'triangle', 0.12), 260); },
+  waveWin()   { chord([523, 659], 0.14, 'triangle', 0.12); setTimeout(() => chord([659, 831], 0.14, 'triangle', 0.12), 120); setTimeout(() => chord([784, 1047], 0.28, 'triangle', 0.13), 240); },
+  boss()      { tone(58, 1.0, 'sawtooth', 0.22, 40); tone(87, 0.95, 'sawtooth', 0.12, 55); tone(41, 1.1, 'sine', 0.16, 30); noise(1.0, 0.14, 300); tone(220, 0.9, 'sine', 0.05, 900); },
+  hurt()      { tone(200, 0.26, 'square', 0.16, 60); noise(0.22, 0.22, 640, 200); },
+  gameOver()  { chord([330, 415], 0.5, 'sawtooth', 0.16, 220); setTimeout(() => chord([165, 208], 0.8, 'sawtooth', 0.16, 120), 260); },
+  heal()      { chord([659, 988], 0.12, 'sine', 0.08); setTimeout(() => chord([880, 1319], 0.18, 'sine', 0.08), 90); },
+  levelUp()   { chord([523, 659], 0.1, 'triangle', 0.12); setTimeout(() => chord([659, 784], 0.1, 'triangle', 0.12), 90); setTimeout(() => chord([1047, 1319], 0.24, 'triangle', 0.13), 180); },
 };
+/* ---------- Ambientní dron (nízký evolující pad během běhu) ---------- */
+let droneNodes = null;
+function startDrone() {
+  if (!actx || muted || droneNodes || !out()) return;
+  try {
+    const t = actx.currentTime, g = actx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.045, t + 2.5);
+    const f = actx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 380; f.Q.value = 2;
+    const lfo = actx.createOscillator(), lfog = actx.createGain(); lfo.frequency.value = 0.05; lfog.gain.value = 200; lfo.connect(lfog); lfog.connect(f.frequency); lfo.start(t);
+    const oscs = [];
+    for (const [fr, ty, det] of [[55, 'sawtooth', 0], [55, 'sawtooth', 7], [82.41, 'triangle', -5], [110, 'sine', 3]]) { const o = actx.createOscillator(); o.type = ty; o.frequency.value = fr; if (o.detune) o.detune.value = det; o.connect(f); o.start(t); oscs.push(o); }
+    f.connect(g).connect(out());
+    droneNodes = { g, oscs, lfo };
+  } catch (e) {}
+}
+function stopDrone() {
+  if (!droneNodes) return; const dn = droneNodes; droneNodes = null;
+  try { const t = actx.currentTime; dn.g.gain.cancelScheduledValues(t); dn.g.gain.setValueAtTime(dn.g.gain.value, t); dn.g.gain.linearRampToValueAtTime(0.0001, t + 1.4); dn.oscs.forEach(o => o.stop(t + 1.5)); dn.lfo.stop(t + 1.5); } catch (e) {}
+}
 
 /* ---------- Persistence ---------- */
 function loadProfile() {
