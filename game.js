@@ -2061,6 +2061,7 @@ function render() {
   if (freezeTimer > 0) { ctx.fillStyle = 'rgba(140,220,255,0.12)'; ctx.fillRect(0, 0, VIEWW, VIEWH); }
   drawVignette();
   if (state === 'combat' || state === 'build') drawAmbient();   // atmosférické částice biomu
+  if (state === 'combat') drawComboGlow();                       // combo flow-state záře
   if (state === 'combat' || state === 'build') drawHud();
   if (banner) drawBanner();
   if (flash > 0.01) { ctx.fillStyle = `rgba(255,40,40,${flash})`; ctx.fillRect(0, 0, W, VIEWH); }
@@ -2072,6 +2073,15 @@ function biomeAmbient() {
   if (lum > 172 && c[2] >= c[0] - 10) return 'snow';
   if (c[0] > c[1] + 16 && c[0] >= c[2]) return 'ember';
   return 'mote';
+}
+// Combo „flow-state" — při dlouhé sérii zabití scéna zlatě žhne, při šílené sérii doruda (jsi v zóně).
+function drawComboGlow() {
+  const c = (run && run.combo) || 0; if (c < 8) return;
+  const intensity = clamp((c - 8) / 22, 0, 1), hot = c >= 22, pulse = 0.55 + Math.sin(animClock * 0.3) * 0.28;
+  const g = ctx.createRadialGradient(VIEWW / 2, VIEWH * 0.5, VIEWH * 0.38, VIEWW / 2, VIEWH * 0.5, VIEWH * 0.82);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, hot ? `rgba(255,110,30,${(0.10 + intensity * 0.24) * pulse})` : `rgba(255,196,86,${(0.05 + intensity * 0.16) * pulse})`);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, VIEWW, VIEWH);
 }
 function drawAmbient() {
   const kind = biomeAmbient(), N = kind === 'mote' ? 16 : 26, ac = animClock;
