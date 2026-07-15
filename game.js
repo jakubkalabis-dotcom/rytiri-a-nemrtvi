@@ -1956,9 +1956,10 @@ function render() {
   drawGroundFx();
   drawTraps();
   drawStructures();
-  // ztlumit POUZE prostředí (zem/stavby) do gotické tmy — postavy pak září na tmavém pozadí
+  // ztlumit POUZE prostředí (zem/stavby) do gotické tmy — postavy pak září na tmavém pozadí.
+  // Nádech je per-mapa (viz mapMoodTint) → každý biom si drží identitu.
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = '#665674'; ctx.fillRect(0, 0, VIEWW, VIEWH);
+  ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = mapMoodTint(); ctx.fillRect(0, 0, VIEWW, VIEWH);
   ctx.restore();
   drawPickups();
   drawWarriors();
@@ -1978,6 +1979,19 @@ function render() {
   if (state === 'combat' || state === 'build') drawHud();
   if (banner) drawBanner();
   if (flash > 0.01) { ctx.fillStyle = `rgba(255,40,40,${flash})`; ctx.fillRect(0, 0, W, VIEWH); }
+}
+// Per-mapa nálada: multiply tint odvozený z palety biomu (zachová identitu, ale drží tmu).
+let _moodMap = -1, _moodCol = '#665674';
+function mapMoodTint() {
+  if (_moodMap === currentMap) return _moodCol;
+  _moodMap = currentMap;
+  const pal = (MAPS[currentMap] && MAPS[currentMap].pal) || ['#404040', '#444', '#666', '#777'];
+  const c = hexRGB(pal[1] || pal[0]);
+  const mx = Math.max(c[0], c[1], c[2], 1), T = 150;                     // normalizace dominantní barvy na T (tma)
+  const lerp = (a, b, t) => Math.round(a + (b - a) * t);
+  // 28 % přimícháme gotickou fialovou → biomy se liší, ale drží jednotný temný tón
+  _moodCol = `rgb(${lerp(c[0] * T / mx, 96, 0.28)},${lerp(c[1] * T / mx, 82, 0.28)},${lerp(c[2] * T / mx, 112, 0.28)})`;
+  return _moodCol;
 }
 // Pochodňová světla (teplé pooly) — přisvětlí střed dění; tma prostředí se řeší v render().
 function drawGrade(cp) {
