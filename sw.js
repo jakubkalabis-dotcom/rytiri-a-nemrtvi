@@ -1,12 +1,12 @@
 /* Service worker – offline cache pro PWA „Rytíři a Nemrtví" */
-const CACHE = 'rytiri-v32';
+const CACHE = 'rytiri-v33';
 const SHELL = [
   './',
   './index.html',
-  './data.js?v=32',
-  './engine.js?v=32',
-  './game.js?v=32',
-  './net.js?v=32',
+  './data.js?v=33',
+  './engine.js?v=33',
+  './game.js?v=33',
+  './net.js?v=33',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',

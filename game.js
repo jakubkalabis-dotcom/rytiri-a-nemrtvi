@@ -947,6 +947,12 @@ function spawnEnemy(typeId) {
   };
   enemies.push(e);
   emitEv({ k: 'spawn', x: e.x, y: e.y });
+  // DRAMATICKÝ PŘÍCHOD BOSSE — rázová vlna, záblesk, otřes, kratičké zpomalení = událost
+  if (base.arch === 'BOSS') {
+    flash = Math.max(flash, base.final ? 0.6 : 0.4); shake = Math.min(13, shake + (base.final ? 12 : 8)); hitStop = Math.max(hitStop, base.final ? 9 : 6);
+    for (let k = 0; k < (base.final ? 3 : 2); k++) particles.push({ x: e.x, y: e.y, ring: true, r: 12 + k * 14, rMax: e.r * (4 + k), life: 1, decay: 0.045, color: base.final ? 'rgba(255,200,40,0.85)' : 'rgba(255,60,40,0.8)' });
+    if (sfx.boss) sfx.boss();
+  }
 }
 // Ephemerální událost pro guesta (kosmetika: exploze, sfx). Host je posílá dál.
 function emitEv(ev) { if (net.role === 'host') netEvents.push(ev); }
