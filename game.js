@@ -1181,8 +1181,15 @@ function killEnemy(e, killer) {
   // KILL-POP: jasný záblesk (pocit dopadu) — šťavnaté zabití
   particles.push({ x: e.x, y: e.y, ring: true, r: e.r * 0.5, rMax: e.r * (big ? 2.6 : 2.0), life: 1, decay: big ? 0.10 : 0.16, color: 'rgba(255,250,236,0.85)' });
   emitEv({ k: 'die', x: e.x, y: e.y, color: e.color, big: big ? 1 : 0, s: style });
-  shake = Math.min(9, shake + (e.arch === 'BOSS' ? 9 : e.arch === 'TANK' ? 3 : 1.2));
-  if (e.arch === 'BOSS') hitStop = 6;
+  shake = Math.min(13, shake + (e.arch === 'BOSS' ? 11 : e.arch === 'TANK' ? 3 : 1.2));
+  // BOSS PORAŽEN — zlatá oslava: výbuch, rázové vlny, zpomalení, nápis (payoff k dramatickému příchodu)
+  if (e.arch === 'BOSS') {
+    hitStop = Math.max(hitStop, e.def.final ? 15 : 10);
+    for (let k = 0; k < 4; k++) particles.push({ x: e.x, y: e.y, ring: true, r: 14 + k * 16, rMax: e.r * (5 + k * 1.5), life: 1, decay: 0.04, color: 'rgba(255,215,90,0.85)' });
+    burst(e.x, e.y, '#ffe08a', 44);
+    banner = { text: '⚜ ' + (e.def.name || 'BOSS').toUpperCase() + ' PORAŽEN! ⚜', t: 120 };
+    if (sfx.waveWin) sfx.waveWin();
+  }
   else if (big || e.elite) hitStop = Math.max(hitStop, e.elite ? 2 : 3);   // mikro-freeze = křupavost (jen velké/elity, ne davový trash)
   // elita „zhoubný" vybuchne, elita jindy → zaručený drop
   if (e.elite === 'zhoubny' || e.def.arch === 'EXPLODER' && false) aoeExplosion(e.x, e.y, 60, e.dmg, null, '#c060ff');
