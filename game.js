@@ -2789,6 +2789,19 @@ function hudTextBtn(r, label, size) {
   ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 1);
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
 }
+// výrazné zlaté akční tlačítko (START VLNY apod.)
+function hudGoldBtn(r, label, glow) {
+  const g = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
+  g.addColorStop(0, '#ffe089'); g.addColorStop(0.5, '#e7c256'); g.addColorStop(1, '#b6851f');
+  if (glow) { const pz = 0.4 + Math.sin(animClock * 0.2) * 0.3; ctx.save(); ctx.shadowColor = `rgba(255,205,90,${pz})`; ctx.shadowBlur = 12; }
+  ctx.fillStyle = g; roundRect(r.x, r.y, r.w, r.h, 9); ctx.fill();
+  if (glow) ctx.restore();
+  ctx.fillStyle = 'rgba(255,255,255,0.4)'; roundRect(r.x + 2, r.y + 2, r.w - 4, r.h * 0.42, 7); ctx.fill();
+  ctx.strokeStyle = '#8a6420'; ctx.lineWidth = 1.5; roundRect(r.x, r.y, r.w, r.h, 9); ctx.stroke();
+  ctx.fillStyle = '#3a2806'; ctx.font = 'bold 14px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 1);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+}
 function drawHud() {
   const me = localPlayer() || players[0];
   // horní kovové štítky: gemy + brána (životy hradu)
@@ -2921,29 +2934,29 @@ function drawStick(s, color) {
 }
 function drawBuildBar() {
   const items = paletteItems();
-  ctx.fillStyle = '#e8ecd8'; ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'left';
-  ctx.fillText('💎 ' + meGems() + '  ·  Táhni prstem = posun kamery · Klepni = ' + (upgradeMode ? 'VYLEPŠIT' : (buildSel ? 'postavit' : 'prodat')), 8, VIEWH + 18);
-  drawButton(BTN.upgrade, upgradeMode ? '🔧 VYLEPŠIT ✔' : '🔧 Vylepšit', upgradeMode);
+  // nápověda (parchmentový text)
+  ctx.fillStyle = '#c8b890'; ctx.font = 'bold 11px system-ui'; ctx.textAlign = 'left';
+  ctx.fillText('💎 ' + meGems() + '  ·  táhni = kamera · klepni = ' + (upgradeMode ? 'VYLEPŠIT' : (buildSel ? 'postavit' : 'prodat')), 8, VIEWH + 17);
+  hudToggle(BTN.upgrade, '🔧', upgradeMode ? 'OPRAVA ✔' : 'Vylepšit', upgradeMode);
   const size = 40, gap = 6; let x = 8, y = VIEWH + 26;
   paletteRects = [];
   for (const id of items) {
-    const def = defOf(id);
     const r = { x, y, w: size, h: size, id };
     paletteRects.push(r);
-    ctx.fillStyle = buildSel === id ? '#3a5a34' : '#20261c';
-    roundRect(x, y, size, size, 6); ctx.fill();
-    ctx.strokeStyle = buildSel === id ? '#8fd08f' : '#3a442c'; ctx.lineWidth = 2; roundRect(x, y, size, size, 6); ctx.stroke();
+    const sel = buildSel === id;
+    hudSlot(r, sel ? '#ffd35c' : '#4a3d24');
+    if (sel) { ctx.save(); ctx.shadowColor = 'rgba(255,211,92,0.6)'; ctx.shadowBlur = 8; ctx.strokeStyle = '#ffd35c'; ctx.lineWidth = 2; roundRect(x, y, size, size, 8); ctx.stroke(); ctx.restore(); }
     const kind = STRUCTURES[id] ? 'wall' : (WARRIORS[id] ? 'warrior' : 'trap');
-    ctx.save(); ctx.translate(x + 3, y + 2); paintIcon(ctx, kind, id, size - 6); ctx.restore();
-    ctx.fillStyle = '#fff'; ctx.font = 'bold 11px system-ui'; ctx.textAlign = 'right';
+    ctx.save(); ctx.translate(x + 3, y + 2); try { paintIcon(ctx, kind, id, size - 6); } catch (e) {} ctx.restore();
+    ctx.fillStyle = '#ffe9b0'; ctx.font = 'bold 11px system-ui'; ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
     ctx.fillText('×' + run.owned[id], x + size - 3, y + size - 3);
     x += size + gap;
     if (x + size > W - 140) { x = 8; y += size + gap; }
   }
-  if (!items.length) { ctx.fillStyle = '#8a9070'; ctx.font = '12px system-ui'; ctx.fillText('Nemáš co stavět — nakup v obchodu.', 8, VIEWH + 50); }
+  if (!items.length) { ctx.fillStyle = '#9a8a70'; ctx.font = '12px system-ui'; ctx.textAlign = 'left'; ctx.fillText('Nemáš co stavět — nakup v obchodu.', 8, VIEWH + 52); }
   const meReady = net.role === 'guest' ? readyGuest : readyHost;
   const label = !isCoop() ? '▶ START VLNY' : (meReady ? '✔ PŘIPRAVEN' : '▶ PŘIPRAVEN?');
-  drawButton(BTN.start, label, meReady);
+  hudGoldBtn(BTN.start, label, true);
   if (isCoop()) {
     const other = net.role === 'guest' ? readyHost : readyGuest;
     ctx.fillStyle = other ? '#8fd08f' : '#c0a060'; ctx.font = '11px system-ui'; ctx.textAlign = 'right';
