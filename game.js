@@ -1998,9 +1998,13 @@ function updatePickups(dt) {
       else pu.hold = 0;
       continue;
     }
-    for (const p of players) {
-      if (p.downed) continue;
-      if (dist(pu.x, pu.y, p.x, p.y) < (p.r + 14) * (p.passive.pickupMul || 1)) { applyPickup(pu, p); pu.dead = true; break; }
+    // magnetismus — nejbližší hráč v dosahu drop přitáhne (zrychluje) = uspokojivý „vysávací" pocit
+    let best = null, bd = 1e9;
+    for (const p of players) { if (p.downed) continue; const dd = dist(pu.x, pu.y, p.x, p.y); if (dd < bd) { bd = dd; best = p; } }
+    if (best) {
+      const pm = best.passive.pickupMul || 1, mag = 78 * pm;
+      if (bd < mag && bd > 1) { const k = clamp(1 - bd / mag, 0, 1), a = Math.atan2(best.y - pu.y, best.x - pu.x), spd = (1.4 + k * k * 6) * dt; pu.x += Math.cos(a) * spd; pu.y += Math.sin(a) * spd; }
+      if (bd < (best.r + 14) * pm) { applyPickup(pu, best); pu.dead = true; }
     }
   }
   pickups = pickups.filter(pu => !pu.dead && pu.t > 0);
