@@ -2301,6 +2301,12 @@ function drawEnemies() {
     const walkPh = animClock * (e.arch === 'RUNNER' ? 0.4 : 0.25) + e.x * 0.1;
     const bob = Math.sin(walkPh) * (e.arch === 'RUNNER' ? 1.6 : 1.0);
     drawShadow(e.x, e.y, e.r);
+    // hrozivá přítomnost bossů: temný ryk na zemi + pulzující barevná záře
+    if (e.arch === 'BOSS') {
+      const t = 0.5 + Math.sin(animClock * 0.12) * 0.35, mc = (e.def && e.def.final) ? '#ffcc33' : '#ff2a1a';
+      ctx.fillStyle = 'rgba(6,0,3,0.5)'; ctx.beginPath(); ctx.ellipse(e.x, e.y + e.r * 0.55, e.r * 1.7, e.r * 0.95, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.save(); ctx.globalAlpha = 0.12 + t * 0.14; ctx.fillStyle = mc; ctx.beginPath(); ctx.arc(e.x, e.y + bob, e.r * (1.5 + t * 0.15), 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    }
     if (e.elite) { const g = ELITES[e.elite].glow; ctx.fillStyle = g; ctx.globalAlpha = 0.25 + Math.sin(animClock * 0.2) * 0.1; ctx.beginPath(); ctx.arc(e.x, e.y + bob, e.r + 5, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; }
     // směr „obličeje" = k jádru (zombie se šourají dolů)
     const cx = (CORE.tx + CORE.w / 2) * TILE, cy = (CORE.ty + CORE.h / 2) * TILE;
@@ -2310,7 +2316,7 @@ function drawEnemies() {
     const lite = e.flash > 0 ? '#ffffff' : shade(e.color, 0.18);
     ctx.save(); ctx.translate(Math.round(e.x), Math.round(e.y + bob)); ctx.rotate(fa);
     if (e.spawnT > 0) ctx.globalAlpha = 1 - e.spawnT / 30;
-    if (e.arch === 'BOSS') drawBossMob(e, col, dark, lite, walkPh);
+    if (e.arch === 'BOSS') { const bs = 1 + Math.sin(animClock * 0.1) * 0.035; ctx.scale(bs, bs); drawBossMob(e, col, dark, lite, walkPh); }
     else if (e.arch === 'EXPLODER') drawCreeper(e, col, dark, walkPh);
     else if (e.typeId === 'ohar') drawHound(e, col, dark, walkPh);
     else drawZombie(e, col, dark, lite, walkPh);
