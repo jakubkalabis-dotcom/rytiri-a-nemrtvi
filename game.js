@@ -2078,12 +2078,26 @@ function render() {
   drawGrade(cp);
   if (freezeTimer > 0) { ctx.fillStyle = 'rgba(140,220,255,0.12)'; ctx.fillRect(0, 0, VIEWW, VIEWH); }
   drawVignette();
-  if (state === 'combat' || state === 'build') drawAmbient();   // atmosférické částice biomu
+  if (state === 'combat' || state === 'build') { drawFogDrift(); drawAmbient(); }   // plující mlha + částice biomu
   if (state === 'combat') drawComboGlow();                       // combo flow-state záře
   if (state === 'combat' || state === 'build') drawGateDanger(); // varování při padající bráně
   if (state === 'combat' || state === 'build') drawHud();
   if (banner) drawBanner();
   if (flash > 0.01) { ctx.fillStyle = `rgba(255,40,40,${flash})`; ctx.fillRect(0, 0, W, VIEWH); }
+}
+// Živá mlha — pomalu plující závoje na mapách s mlhou (moonlit mist nad tmavou zemí).
+function drawFogDrift() {
+  const map = MAPS[currentMap]; if (!map || !map.fog) return;
+  const hot = map.hell || biomeAmbient() === 'ember';
+  const base = hot ? '80,40,40' : (biomeAmbient() === 'snow' ? '200,214,232' : '150,150,168');
+  for (let i = 0; i < 3; i++) {
+    const x = ((animClock * (0.22 + i * 0.12) + i * 210) % (VIEWW + 460)) - 230;
+    const y = VIEWH * (0.18 + i * 0.3) + Math.sin(animClock * 0.02 + i * 2) * 26;
+    const a = 0.05 + 0.04 * (0.5 + Math.sin(animClock * 0.05 + i) * 0.5);
+    const g = ctx.createRadialGradient(x, y, 8, x, y, 230);
+    g.addColorStop(0, `rgba(${base},${a.toFixed(3)})`); g.addColorStop(1, `rgba(${base},0)`);
+    ctx.save(); ctx.translate(x, y); ctx.scale(1, 0.5); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, 230, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+  }
 }
 // Atmosférické částice biomu (procedurální, bez alokace) — prostředí žije.
 function biomeAmbient() {
