@@ -372,6 +372,18 @@ const PACTS = {
 };
 const PACT_KEYS = Object.keys(PACTS);
 
+/* ---------- META-PROGRESE (Svatyně) — trvalá vylepšení účtu za „duše" napříč běhy ----------
+   Duše se získávají po každém běhu (dle vlny+skóre) a utrácí v menu za permanentní bonusy.   */
+const META_UPGRADES = {
+  gems:   { name:'Dědictví',      icon:'💎', desc:'+15 startovních gemů za úroveň.',   per:15,   max:8 },
+  hp:     { name:'Odolnost rodu', icon:'❤', desc:'+6 % maximálního HP za úroveň.',     per:0.06, max:8 },
+  dmg:    { name:'Zděděná síla',  icon:'⚔', desc:'+4 % poškození za úroveň.',          per:0.04, max:8 },
+  luck:   { name:'Štěstěna',      icon:'🍀', desc:'+8 % gemů z nepřátel za úroveň.',    per:0.08, max:6 },
+  reaper: { name:'Žnec duší',     icon:'💀', desc:'+15 % duší získaných z běhu.',       per:0.15, max:6 },
+};
+const META_KEYS = Object.keys(META_UPGRADES);
+function metaCost(lvl) { return 8 + lvl * 7; }   // cena další úrovně v duších
+
 // Kněz – pasivní sekundární AOE: „Svatá záře" pravidelně pálí nemrtvé kolem něj.
 const PRIEST_NOVA = { dmg: 55, radius: 120, cd: 140 };   // 55 poškození (× svěcené) v okruhu 120 každých ~2,3 s
 const KNIGHT_BLOCK_TIME = 45;       // 0,75 s okno bloku (základ; +štít vylepšení)

@@ -104,9 +104,9 @@ function newRun(classIds) {
 }
 function makePlayer(cls, classId) {
   const pas = cls.passive || {};
-  const baseHp = Math.round(120 * cls.hpMod);
+  const baseHp = Math.round(120 * cls.hpMod * (1 + metaBonus('hp')));   // meta: Odolnost rodu
   const p = {
-    classId, class: cls, color: cls.color, gems: cls.startGems,   // vlastní peněženka
+    classId, class: cls, color: cls.color, gems: cls.startGems + Math.round(metaLvl('gems') * META_UPGRADES.gems.per),   // meta: Dědictví
     x: (CORE.tx + CORE.w / 2) * TILE, y: (CORE.ty - 1) * TILE, r: 12,
     baseHp, hpMax: baseHp, hp: baseHp,
     baseSpeed: 2.6 * cls.spdMod * (pas.moveSpeed || 1),
@@ -202,6 +202,10 @@ function rollPerkOffer(p) {
 // PAKTY: součin násobičů / součet přídavků přes aktivní pakty běhu
 function pactMul(key) { let m = 1; if (run && run.pacts) for (const id of run.pacts) { const v = PACTS[id] && PACTS[id][key]; if (v != null) m *= v; } return m; }
 function pactSum(key) { let s = 0; if (run && run.pacts) for (const id of run.pacts) { const v = PACTS[id] && PACTS[id][key]; if (v != null) s += v; } return s; }
+// META-progrese (Svatyně): trvalé bonusy účtu
+function metaLvl(k) { return (profile.meta && profile.meta[k]) || 0; }
+function metaBonus(k) { return metaLvl(k) * (META_UPGRADES[k] ? META_UPGRADES[k].per : 0); }
+function soulsFromRun() { return Math.max(1, Math.round(((run.wave || 0) * 2 + (run.score || 0) / 500) * (1 + metaBonus('reaper')))); }
 function grantPerkOffer() { for (const p of players) if (!p.perkOffer) p.perkOffer = rollPerkOffer(p); }
 /* ---- PAKTY: nabídka 3 před během a před každou mapou ---- */
 let pactReturn = 'shop';
@@ -271,12 +275,13 @@ function costOf(cost, cat) {
    ========================================================================== */
 function setState(s) {
   state = s;
-  if (s === 'menu' || s === 'class' || s === 'shop' || s === 'roundEnd' || s === 'gameOver' || s === 'victory' || s === 'host' || s === 'join' || s === 'wheel' || s === 'pact') {
+  if (s === 'menu' || s === 'class' || s === 'shop' || s === 'roundEnd' || s === 'gameOver' || s === 'victory' || s === 'host' || s === 'join' || s === 'wheel' || s === 'pact' || s === 'shrine') {
     overlay.classList.remove('hidden');
   } else {
     overlay.classList.add('hidden');
   }
-  if (s === 'pact') renderPact();
+  if (s === 'shrine') renderShrine();
+  else if (s === 'pact') renderPact();
   else if (s === 'wheel') renderWheelMenu();
   else if (s === 'menu') renderMenu();
   else if (s === 'class') renderClassSelect();
@@ -350,6 +355,7 @@ function renderMenu() {
     <button data-act="play">Hrát sám</button>
     <button data-act="hostgame" class="ghost">Hostovat co-op (2 hráči)</button>
     <button data-act="joingame" class="ghost">Připojit se ke hře</button>
+    <button data-act="shrine" class="ghost">💀 Svatyně duší${profile.souls ? ' (' + profile.souls + ')' : ''}</button>
     <div class="board"><h3>NEJLEPŠÍ SKÓRE</h3>${board}</div>`;
 }
 
@@ -629,13 +635,19 @@ function chooseWheel(key) {
 function scoreBoardHtml() {
   return loadScores().map((r, i) => `<div class="row"><span class="rank">${i + 1}.</span><span class="nm">${escapeHtml(r.name)}</span><span class="sc">vlna ${r.wave} · ${r.score}</span></div>`).join('') || '<div class="empty">—</div>';
 }
+function soulsLine() {
+  const e = (run && run._soulsEarned) || 0;
+  return `<div class="wallet" style="color:var(--arcane-2,#c88bff)">💀 Získáno <b>${e}</b> duší · celkem <b>${profile.souls || 0}</b> — utrať je ve Svatyni</div>`;
+}
 function renderGameOver() {
   const score = run ? run.score || 0 : 0;
   ovContent.innerHTML = `
     <h2>Brána padla</h2>
     <div class="wallet">Mapa <b>${currentMap + 1}/${NUM_MAPS}</b> · vlna <b>${run.wave}</b> · Skóre: <b>${score}</b></div>
+    ${soulsLine()}
+    <button data-act="shrine">💀 Svatyně (vylepšit napořád)</button>
     <div class="board"><h3>NEJLEPŠÍ SKÓRE</h3>${scoreBoardHtml()}</div>
-    <button data-act="menu">Zpět do menu</button>`;
+    <button data-act="menu" class="ghost">Zpět do menu</button>`;
 }
 function renderVictory() {
   const score = run ? run.score || 0 : 0;
@@ -644,8 +656,34 @@ function renderVictory() {
     <p>Prošel jsi všech <b>${NUM_MAPS}</b> map a v pekle jsi porazil <b>Pekelného pána</b>!
     Nemrtví jsou zahnáni a brána stojí.</p>
     <div class="wallet">Finální skóre: <b>${score}</b> · třída ${players.map(p => p.class.name).join(' + ')}</div>
+    ${soulsLine()}
+    <button data-act="shrine">💀 Svatyně (vylepšit napořád)</button>
     <div class="board"><h3>NEJLEPŠÍ SKÓRE</h3>${scoreBoardHtml()}</div>
-    <button data-act="menu">Do menu</button>`;
+    <button data-act="menu" class="ghost">Do menu</button>`;
+}
+function renderShrine() {
+  const cards = META_KEYS.map(k => {
+    const d = META_UPGRADES[k], lv = metaLvl(k), maxed = lv >= d.max, cost = metaCost(lv);
+    const can = (profile.souls || 0) >= cost && !maxed;
+    return `<div class="card ${maxed || !can ? 'dis' : ''}" ${maxed ? '' : `data-act="buymeta" data-id="${k}"`}>
+      <div class="scn">${d.icon} ${d.name}</div>
+      <div class="scd">${d.desc}</div>
+      <div class="upbar">${'▮'.repeat(lv) + '▯'.repeat(d.max - lv)}</div>
+      <div class="scc">${maxed ? 'MAX' : '💀 ' + cost}</div>
+    </div>`;
+  }).join('');
+  ovContent.innerHTML = `<h2>💀 Svatyně duší</h2>
+    <p>Trvalá vylepšení účtu za <b>duše</b> (získáváš je z každého běhu — čím dál dojdeš, tím víc). Platí ve všech dalších bězích.</p>
+    <div class="wallet" style="color:var(--arcane-2,#c88bff)">💀 Duše: <b>${profile.souls || 0}</b></div>
+    <div class="grid">${cards}</div>
+    <button data-act="menu" class="ghost">Zpět do menu</button>`;
+}
+function buyMeta(k) {
+  const d = META_UPGRADES[k]; if (!d) return;
+  const lv = metaLvl(k); if (lv >= d.max) return;
+  const cost = metaCost(lv); if ((profile.souls || 0) < cost) return;
+  profile.souls -= cost; profile.meta = profile.meta || {}; profile.meta[k] = lv + 1;
+  saveProfile(profile); sfx.buy(); renderShrine();
 }
 
 // Delegované klikání v overlay
@@ -661,6 +699,8 @@ overlay.addEventListener('click', e => {
   if (act === 'menu') { if (typeof netClose === 'function') netClose(); net.role = null; net.mode = 'solo'; setState('menu'); return; }
   if (act === 'copycode') { if (typeof netCopy === 'function') netCopy(el.dataset.which, el); return; }
   if (act === 'joinconnect') { if (typeof netJoinConnect === 'function') netJoinConnect(); return; }
+  if (act === 'shrine') { setState('shrine'); return; }
+  if (act === 'buymeta') { buyMeta(id); return; }
   if (act === 'pickclass') { pickClass(id); return; }
   if (act === 'tab') { shopTab = id; renderShop(); return; }   // lokální přepnutí záložky
   if (act === 'tobuild') { shopReady(); return; }              // ready-gate obchodu (co-op)
@@ -941,6 +981,7 @@ function weaponDmg(p, w) {
   d *= (pas.holyDmg || 1);
   d *= (pas.dmgMul || 1);                                             // perky: +% poškození
   d *= pactMul('dmg');                                               // pakt: Železná disciplína
+  d *= (1 + metaBonus('dmg'));                                       // meta: Zděděná síla
   const up = (run && run.upgrades) || {};
   d *= 1 + 0.08 * (up.dmg || 0);                                      // stat Síla
   d *= 1 + 0.10 * ((run.wUpgrades && run.wUpgrades[p.weaponId]) || 0); // vylepšení zbraně
@@ -1117,7 +1158,7 @@ function killEnemy(e, killer) {
   run.combo = (run.combo || 0) + 1; run.comboT = 180;
   const mult = comboMult();
   const eliteGem = e.elite ? 3 * pactMul('eliteGem') : 1;   // pakt Lovecká odměna
-  const gems = Math.max(1, Math.round((e.def.bounty || 4) * GEMS_PER_KILL_MUL * mult * eliteGem * pactMul('gem')));
+  const gems = Math.max(1, Math.round((e.def.bounty || 4) * GEMS_PER_KILL_MUL * mult * eliteGem * pactMul('gem') * (1 + metaBonus('luck'))));
   for (const q of players) q.gems = (q.gems || 0) + Math.max(1, Math.round(gems * (q.passive.gemMul || 1)));  // perk: +% gemů (per hráč)
   run.score = (run.score || 0) + Math.round((e.def.score || 10) * mult * (e.elite ? 3 : 1) * pactMul('score'));
   if (wave) { wave.kills++; wave.reward.kills++; }
@@ -1308,10 +1349,16 @@ function endWave() {
   setState('roundEnd');
   sfx.waveWin();
 }
+function grantSouls() {
+  const s = soulsFromRun(); run._soulsEarned = s;
+  profile.souls = (profile.souls || 0) + s; saveProfile(profile);
+  return s;
+}
 function doVictory() {
   run.won = true;
   const name = profile.settings.name || 'Rytíř';
   addScore(name, run.wave, run.score || 0);
+  grantSouls();
   saveProfile(profile);
   sfx.waveWin(); setTimeout(() => { try { sfx.levelUp(); } catch {} }, 300);
   setState('victory');
@@ -1319,6 +1366,7 @@ function doVictory() {
 function doGameOver() {
   const name = (profile.settings.name) || 'Rytíř';
   addScore(name, run.wave, run.score || 0);
+  grantSouls();
   saveProfile(profile);
   sfx.gameOver();
   setState('gameOver');

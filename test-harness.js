@@ -319,6 +319,29 @@ code += `
     assert(p.hpMax < hp0, 'arkany pact -10% maxHP ('+hp0+'->'+p.hpMax+')');
     log('pact maxHp ok'); }
 
+  // ---- 18) META-progrese: duše z běhu, nákup, bonusy do dalšího běhu ----
+  { profile.souls = 0; profile.meta = {};
+    newRun('rytir'); run.wave = 20; run.score = 5000;
+    const s = grantSouls(); assert(s > 0 && profile.souls === s, 'souls granted from run ('+s+')');
+    // nakup Dědictví (gems) + Odolnost (hp)
+    profile.souls = 999; buyMeta('gems'); buyMeta('gems'); buyMeta('hp');
+    assert(metaLvl('gems') === 2 && metaLvl('hp') === 1, 'meta upgrades bought');
+    const g0 = CLASSES.rytir.startGems;
+    newRun('rytir'); const p = players[0];
+    assert(p.gems > g0, 'meta gems bonus applied ('+g0+'->'+p.gems+')');
+    const baseNoMeta = Math.round(120 * CLASSES.rytir.hpMod);
+    assert(p.baseHp > baseNoMeta, 'meta HP bonus applied ('+baseNoMeta+'->'+p.baseHp+')');
+    // dmg bonus
+    profile.meta = { dmg: 5 }; newRun('rytir'); const p2 = players[0];
+    const d = weaponDmg(p2, WEAPONS[p2.weaponId]); profile.meta = {}; const d0 = weaponDmg(p2, WEAPONS[p2.weaponId]);
+    assert(d > d0, 'meta dmg bonus raises weapon damage');
+    profile.souls = 0; profile.meta = {};
+    log('meta-progrese ok (duše/nákup/bonusy)'); }
+
+  // ---- 19) Shrine UI renders ----
+  { profile.souls = 50; renderShrine(); assert(ovContent.innerHTML.includes('Svatyně'), 'shrine renders'); profile.souls = 0;
+    log('shrine UI ok'); }
+
   console.log('\\n==== TEST RESULTS ====');
   for (const r of results) console.log('  ✓ ' + r);
   console.log('==== ALL PASSED ====');
