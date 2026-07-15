@@ -2176,27 +2176,44 @@ function drawArena() {
 }
 function drawGate() {
   const cx = CORE.tx * TILE, cy = CORE.ty * TILE, cw = CORE.w * TILE, ch = CORE.h * TILE;
-  // stín
-  ctx.fillStyle = 'rgba(0,0,0,0.3)'; roundRect(cx + 3, cy + ch - 6, cw - 6, 10, 4); ctx.fill();
-  // hradba
-  ctx.fillStyle = '#6a7078'; roundRect(cx + 2, cy + 4, cw - 4, ch - 6, 4); ctx.fill();
-  ctx.fillStyle = '#7c828a'; roundRect(cx + 5, cy + 7, cw - 10, ch - 12, 3); ctx.fill();
-  // cimbuří
-  ctx.fillStyle = '#5a6068';
-  for (let i = 0; i < CORE.w * 2; i++) if (i % 2 === 0) ctx.fillRect(cx + 4 + i * 8, cy, 8, 8);
-  // brána (dřevo)
+  const midx = cx + cw / 2, pz = 0.5 + Math.sin(animClock * 0.08) * 0.16;
+  // teplá „aura bezpečí" za branou (ohniště domova)
+  const gl = ctx.createRadialGradient(midx, cy + ch * 0.5, 6, midx, cy + ch * 0.5, cw);
+  gl.addColorStop(0, `rgba(255,176,88,${0.13 * pz})`); gl.addColorStop(1, 'rgba(255,176,88,0)');
+  ctx.fillStyle = gl; ctx.fillRect(cx - cw * 0.6, cy - cw * 0.4, cw * 2.2, ch + cw);
+  ctx.fillStyle = 'rgba(0,0,0,0.34)'; roundRect(cx + 3, cy + ch - 6, cw - 6, 11, 4); ctx.fill();
+  // hradba — teplý tmavý kámen s přechodem + spáry
+  const sg = ctx.createLinearGradient(0, cy, 0, cy + ch); sg.addColorStop(0, '#585047'); sg.addColorStop(1, '#38332b');
+  ctx.fillStyle = sg; roundRect(cx + 2, cy + 4, cw - 4, ch - 6, 4); ctx.fill();
+  ctx.fillStyle = '#655c50'; roundRect(cx + 5, cy + 7, cw - 10, ch - 12, 3); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.16)'; ctx.lineWidth = 1;
+  for (let yy = cy + 16; yy < cy + ch - 6; yy += 9) { ctx.beginPath(); ctx.moveTo(cx + 6, yy); ctx.lineTo(cx + cw - 6, yy); ctx.stroke(); }
+  // cimbuří (s horním leskem)
+  for (let i = 0; i < CORE.w * 2; i++) if (i % 2 === 0) { ctx.fillStyle = '#463f36'; ctx.fillRect(cx + 4 + i * 8, cy, 8, 8); ctx.fillStyle = 'rgba(255,240,210,0.07)'; ctx.fillRect(cx + 4 + i * 8, cy, 8, 2); }
+  // brána (dřevo s přechodem + železné pásy)
   const gw = cw * 0.5, gx = cx + cw / 2 - gw / 2;
-  ctx.fillStyle = '#4a3420'; roundRect(gx, cy + 12, gw, ch - 16, 4); ctx.fill();
-  ctx.strokeStyle = '#2e2214'; ctx.lineWidth = 1;
+  const wg = ctx.createLinearGradient(0, cy + 12, 0, cy + ch - 4); wg.addColorStop(0, '#5a3c22'); wg.addColorStop(1, '#39270f');
+  ctx.fillStyle = wg; roundRect(gx, cy + 12, gw, ch - 16, 4); ctx.fill();
+  ctx.strokeStyle = '#291d0f'; ctx.lineWidth = 1;
   for (let i = 1; i < 4; i++) { ctx.beginPath(); ctx.moveTo(gx + i * gw / 4, cy + 12); ctx.lineTo(gx + i * gw / 4, cy + ch - 4); ctx.stroke(); }
-  // věže po stranách + vlajka
+  ctx.fillStyle = '#2a2620'; for (const yy of [cy + 18, cy + ch - 15]) ctx.fillRect(gx, yy, gw, 3);
+  // ZÁŘÍCÍ SVATÁ PEČEŤ na bráně (holy stronghold)
+  const ex = midx, ey = cy + ch * 0.5, er = Math.min(cw, ch) * 0.15;
+  ctx.save(); ctx.shadowColor = `rgba(255,205,95,${0.6 * pz})`; ctx.shadowBlur = 10;
+  ctx.fillStyle = '#3a2c12'; ctx.beginPath(); ctx.arc(ex, ey, er, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#e7c56a'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.strokeStyle = `rgba(255,216,120,${0.7 * pz + 0.25})`; ctx.lineWidth = 2.2;
+  ctx.beginPath(); ctx.moveTo(ex, ey - er * 0.62); ctx.lineTo(ex, ey + er * 0.62); ctx.moveTo(ex - er * 0.5, ey - er * 0.12); ctx.lineTo(ex + er * 0.5, ey - er * 0.12); ctx.stroke();
+  ctx.restore();
+  // věže po stranách
   for (const bx of [cx - 2, cx + cw - 10]) {
-    ctx.fillStyle = '#5a6068'; roundRect(bx, cy - 6, 12, ch + 6, 3); ctx.fill();
-    ctx.fillStyle = '#7c828a'; roundRect(bx + 2, cy - 4, 8, 8, 2); ctx.fill();
+    const tg = ctx.createLinearGradient(0, cy - 6, 0, cy + ch); tg.addColorStop(0, '#585047'); tg.addColorStop(1, '#38332b');
+    ctx.fillStyle = tg; roundRect(bx, cy - 6, 12, ch + 6, 3); ctx.fill();
+    ctx.fillStyle = '#655c50'; roundRect(bx + 2, cy - 4, 8, 8, 2); ctx.fill();
   }
-  // vlajka na levé věži
+  // vlajka (barva hráče)
   const fx = cx, fy = cy - 6;
-  ctx.strokeStyle = '#cfcfcf'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(fx + 6, fy); ctx.lineTo(fx + 6, fy - 16); ctx.stroke();
+  ctx.strokeStyle = '#b8b0a0'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(fx + 6, fy); ctx.lineTo(fx + 6, fy - 16); ctx.stroke();
   ctx.fillStyle = players[0] ? players[0].color : '#c8a45c';
   const fw = 12 + Math.sin(animClock * 0.15) * 2;
   ctx.beginPath(); ctx.moveTo(fx + 6, fy - 16); ctx.lineTo(fx + 6 + fw, fy - 13); ctx.lineTo(fx + 6, fy - 10); ctx.fill();
