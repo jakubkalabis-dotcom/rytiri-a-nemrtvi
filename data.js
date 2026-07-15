@@ -34,7 +34,9 @@ const MAPS = [
   { name: 'Stínový hvozd',   cols: 27, rows: 41, seed: 131, pal: ['#2a2e3c', '#333850', '#5a4a70', '#7a3adf'], fog: 'rgba(30,15,60,0.26)' },
   { name: 'Krvavé bažiny',   cols: 28, rows: 42, seed: 141, pal: ['#4a2626', '#582c2c', '#7a4a4a', '#c02828'], fog: 'rgba(90,15,15,0.2)' },
   { name: 'Brána podsvětí',  cols: 28, rows: 43, seed: 151, pal: ['#3c2436', '#482940', '#6a4864', '#b0308a'], fog: 'rgba(80,15,60,0.24)' },
-  { name: 'Peklo',           cols: 30, rows: 46, seed: 161, pal: ['#6a1e14', '#7c261a', '#a04030', '#ff7a20'], fog: 'rgba(120,25,5,0.22)', hell: true },
+  { name: 'Utopený chrám',   cols: 29, rows: 44, seed: 171, pal: ['#1e3a3e', '#244a4c', '#3a6a68', '#3ad0c8'], fog: 'rgba(10,50,55,0.24)' },
+  { name: 'Popelová pláň',   cols: 29, rows: 45, seed: 181, pal: ['#3a3634', '#444040', '#6a6460', '#ff7040'], fog: 'rgba(50,40,35,0.2)' },
+  { name: 'Peklo',           cols: 30, rows: 47, seed: 161, pal: ['#6a1e14', '#7c261a', '#a04030', '#ff7a20'], fog: 'rgba(120,25,5,0.22)', hell: true },
 ];
 const NUM_MAPS = MAPS.length;
 const WAVES_PER_MAP = 25;                // každá mapa = 25 vln; každá 5. vlna = sub-boss, 25. = mapový boss
@@ -156,6 +158,7 @@ const ENEMIES = {
   nekromant: { name:'Nekromant', arch:'BOSS',     hp:650, speed:0.55,dmg:24, atkRate:70, size:52, bounty:140,score:600, leak:5, color:'#a44ad0', summon:'chodec', summonRate:200 },
   abominace: { name:'Abominace', arch:'BOSS',     hp:1100,speed:0.4, dmg:34, atkRate:60, size:66, bounty:200,score:800, leak:6, color:'#9a6a34', enrage:true },
   lich:      { name:'Lich',      arch:'BOSS',     hp:820, speed:0.5, dmg:20, atkRate:55, size:50, bounty:220,score:900, leak:5, color:'#4a92c0', summon:'behac', summonRate:170, volley:true },
+  kostlivy_kral:{name:'Kostlivý král',arch:'BOSS', hp:1050,speed:0.5, dmg:30, atkRate:52, size:70, bounty:250,score:1000,leak:6, color:'#e6ddbe', summon:'delic', summonRate:130, volley:true, enrage:true },
   pekelny_pan:{name:'Pekelný pán',arch:'BOSS',    hp:3200,speed:0.5, dmg:44, atkRate:45, size:80, bounty:1000,score:5000,leak:20,color:'#ff4a1a', summon:'vybusny', summonRate:120, volley:true, enrage:true, final:true },
   // Sub-bossové (mini-bossové — objeví se každou 5. vlnu mimo 25.; po smrti dají týmu trvalý buff). arch BOSS + sub:true
   rytir_smrti:  { name:'Rytíř smrti',   arch:'BOSS', sub:true, hp:340, speed:0.7,  dmg:20, atkRate:46, size:40, bounty:70, score:260, leak:3, color:'#8a90a0', armored:true },
@@ -166,7 +169,7 @@ const ENEMIES = {
   kosteny_tyran:{ name:'Kostěný tyran', arch:'BOSS', sub:true, hp:400, speed:0.6,  dmg:22, atkRate:44, size:46, bounty:90, score:330, leak:4, color:'#b0a878', summon:'delic', summonRate:200, volley:true },   // přivolává Děliče + střílí vějíř
   pridatny_lecitel:{ name:'Kněz nemrtvých', arch:'BOSS', sub:true, hp:360, speed:0.5, dmg:14, atkRate:80, size:44, bounty:95, score:340, leak:4, color:'#a04ad0', heals:true, healAmt:14, healRate:60, healRadius:150, summon:'saman', summonRate:220 },   // léčí hordu + volá Šamany
 };
-const BOSS_CYCLE = ['nekromant', 'abominace', 'lich'];
+const BOSS_CYCLE = ['nekromant', 'abominace', 'lich', 'kostlivy_kral'];
 const SUB_BOSS_CYCLE = ['rytir_smrti', 'krvavy_reznik', 'morova_matka', 'kostej', 'masovy_golem', 'kosteny_tyran', 'pridatny_lecitel'];
 // Mapový boss (konec mapy, každá 25. vlna): cyklí 3 velké bossy přes mapy, finále = Pekelný pán.
 function mapBossForWave(wave) {
