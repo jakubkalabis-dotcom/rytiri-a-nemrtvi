@@ -115,6 +115,13 @@ const WEAPONS = {
   blesk_hul:     { name:'Blesková hůl',  arch:'HITSCAN',    dmg:18, range:320, rate:40, chain:3, ammo:'mana', ammoPerShot:24, tier:3, unlock:5, cost:230, cat:'ranged', color:'#9ad0ff' },
   ohniva_hul:    { name:'Ohnivá hůl',    arch:'THROWN_AOE', dmg:22, range:240, rate:56, projSpeed:7, aoeRadius:70, dot:{dps:10,dur:120}, ammo:'mana', ammoPerShot:34, tier:3, unlock:6, cost:260, cat:'ranged', color:'#ff7b3a' },
   mraziva_hul:   { name:'Mrazivá hůl',   arch:'PROJECTILE', dmg:12, range:300, rate:30, projSpeed:10, pierce:1, slow:{mul:0.45,dur:120}, ammo:'mana', ammoPerShot:18, tier:3, unlock:5, cost:240, cat:'ranged', color:'#8fe0ff' },
+  /* ===== FÁZE 3: nové zbraně ===== */
+  cep:             { name:'Cep',             arch:'MELEE_SWING', dmg:14, range:56, rate:34, spread:1.9,  knockback:5, ammo:'melee', tier:2, unlock:4, cost:135, cat:'melee', color:'#8f9298' },   // široký záběr = dav
+  trojzubec:       { name:'Trojzubec',       arch:'MELEE_SWING', dmg:18, range:88, rate:34, spread:0.4,  knockback:6, ammo:'melee', tier:3, unlock:6, cost:190, cat:'melee', color:'#c2b59b' },   // dlouhý dosah
+  svaty_samostril: { name:'Svatý samostříl', arch:'PROJECTILE', dmg:30, range:400, rate:48, projSpeed:15, pierce:3, knockback:4, ammo:'sipka', ammoPerShot:1, tier:3, unlock:7, cost:245, cat:'ranged', color:'#ffe6a0' },   // probíjí řadu
+  ledova_kuse:     { name:'Ledová kuše',     arch:'PROJECTILE', dmg:15, range:330, rate:42, projSpeed:13, pierce:1, slow:{mul:0.4,dur:150}, ammo:'sipka', ammoPerShot:1, tier:3, unlock:5, cost:180, cat:'ranged', color:'#a8e8ff' },   // mrazí
+  hromova_hul:     { name:'Hromová hůl',     arch:'HITSCAN',    dmg:22, range:340, rate:48, chain:5, ammo:'mana', ammoPerShot:30, tier:3, unlock:7, cost:280, cat:'ranged', color:'#c0a8ff' },   // řetězí přes 5 cílů
+  kartac:          { name:'Kartáč',          arch:'MULTISHOT',  dmg:6,  range:155, rate:44, projSpeed:12, spread:0.22, shots:6, pierce:0, knockback:3, ammo:'prach', ammoPerShot:2, tier:3, unlock:6, cost:230, cat:'ranged', color:'#e0b060' },   // brokovnice: dav zblízka
 };
 
 // Vizuální tvar každé zbraně (kreslí se blokově, viz drawWeaponBlocky).
@@ -127,6 +134,7 @@ const WEAPON_SHAPE = {
   prak: 'sling', ostep: 'spear', vrhaci_nuz: 'dagger', vrhaci_sekera: 'axe',
   musketa: 'musket', bomba: 'bomb', recky_ohen: 'bomb',
   blesk_hul: 'staff', ohniva_hul: 'staff', mraziva_hul: 'staff',
+  cep: 'flail', trojzubec: 'spear', svaty_samostril: 'crossbow', ledova_kuse: 'crossbow', hromova_hul: 'staff', kartac: 'musket',
 };
 
 /* ---------- Nepřátelé (nemrtví) ---------- */

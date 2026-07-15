@@ -357,6 +357,39 @@ code += `
     assert(p.hp===hp1, 'uhnutí z kruhu = bez zásahu');
     log('boss drtivý úder ok (zásah / uhnutí)'); }
 
+  // ---- 21) Dělič: po smrti se rozdělí na Dělíčky, a vlna přesto skončí ----
+  { newRun('rytir'); startWave(); const n0 = enemies.length;
+    spawnEnemy('delic'); const dl = enemies[enemies.length-1]; dl.spawnT=0;
+    const before = enemies.filter(e=>!e.dead).length;
+    dl.hp = 0; killEnemy(dl, players[0]);
+    const kids = enemies.filter(e=>!e.dead && e.typeId==='delicek').length;
+    assert(kids === ENEMIES.delic.splits, 'Dělič se rozdělil na '+ENEMIES.delic.splits+' ('+kids+')');
+    // dítě už se nedělí
+    const kid = enemies.find(e=>e.typeId==='delicek'); kid.hp=0; killEnemy(kid, players[0]);
+    const kids2 = enemies.filter(e=>!e.dead && e.typeId==='delicek').length;
+    assert(kids2 === ENEMIES.delic.splits - 1, 'Dělíček se už nedělí');
+    log('dělič ok (split '+kids+', dítě se nedělí)'); }
+
+  // ---- 22) vlna s Děličem řádně skončí (endWave přes enemies.length===0) ----
+  { newRun('rytir'); run.wave=17; startWave();   // wave 18 – běžná, s Děliči v poolu
+    let g=0; while (state==='combat' && g++<20000) updateCombat(1);
+    assert(state !== 'combat', 'vlna s Děliči skončila (state='+state+')');
+    log('vlna s Děliči korektně skončí'); }
+
+  // ---- 23) Fáze 3: nové zbraně střílí bez chyby a produkují střely/zásah ----
+  { newRun('lovec'); startWave(); const p=players[0]; p.x=300;p.y=300; p.aimAngle=0;
+    for (const kk in AMMO) run.ammo[kk]=999; p.mana=p.manaMax=999;
+    const news=['cep','trojzubec','svaty_samostril','ledova_kuse','hromova_hul','kartac'];
+    for (const wid of news) {
+      assert(WEAPONS[wid], 'zbraň '+wid+' existuje'); assert(WEAPON_SHAPE[wid], 'tvar '+wid);
+      spawnEnemy('chodec'); const e=enemies[enemies.length-1]; e.x=p.x+40; e.y=p.y; e.spawnT=0;
+      p.weaponId=wid; const nb=bullets.length;
+      try { fireWeapon(p, WEAPONS[wid], 0); } catch(err){ throw new Error(wid+' fireWeapon HÁŽE: '+err.message); }
+      const w=WEAPONS[wid];
+      if (w.arch!=='MELEE_SWING' && w.arch!=='HITSCAN') assert(bullets.length>nb, wid+' vytvořil střelu');
+    }
+    log('nové zbraně ok ('+news.length+' vystřeleno bez chyby)'); }
+
   console.log('\\n==== TEST RESULTS ====');
   for (const r of results) console.log('  ✓ ' + r);
   console.log('==== ALL PASSED ====');
