@@ -2080,6 +2080,7 @@ function render() {
   drawVignette();
   if (state === 'combat' || state === 'build') drawAmbient();   // atmosférické částice biomu
   if (state === 'combat') drawComboGlow();                       // combo flow-state záře
+  if (state === 'combat' || state === 'build') drawGateDanger(); // varování při padající bráně
   if (state === 'combat' || state === 'build') drawHud();
   if (banner) drawBanner();
   if (flash > 0.01) { ctx.fillStyle = `rgba(255,40,40,${flash})`; ctx.fillRect(0, 0, W, VIEWH); }
@@ -2091,6 +2092,14 @@ function biomeAmbient() {
   if (lum > 172 && c[2] >= c[0] - 10) return 'snow';
   if (c[0] > c[1] + 16 && c[0] >= c[2]) return 'ember';
   return 'mote';
+}
+// Varování: brána (jádro) má málo životů → rudé pulzující okraje = napětí + jasný signál.
+function drawGateDanger() {
+  const lv = (run && run.lives) || 99; if (lv > 4) return;
+  const inten = clamp((5 - lv) / 4, 0, 1), pulse = 0.4 + Math.abs(Math.sin(animClock * 0.35)) * 0.6;
+  const g = ctx.createRadialGradient(VIEWW / 2, VIEWH / 2, VIEWH * 0.34, VIEWW / 2, VIEWH / 2, VIEWH * 0.82);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, `rgba(210,20,30,${(0.14 + inten * 0.28) * pulse})`);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, VIEWW, VIEWH);
 }
 // Combo „flow-state" — při dlouhé sérii zabití scéna zlatě žhne, při šílené sérii doruda (jsi v zóně).
 function drawComboGlow() {
