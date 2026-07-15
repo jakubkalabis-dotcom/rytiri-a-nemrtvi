@@ -2044,9 +2044,34 @@ function render() {
   drawGrade(cp);
   if (freezeTimer > 0) { ctx.fillStyle = 'rgba(140,220,255,0.12)'; ctx.fillRect(0, 0, VIEWW, VIEWH); }
   drawVignette();
+  if (state === 'combat' || state === 'build') drawAmbient();   // atmosférické částice biomu
   if (state === 'combat' || state === 'build') drawHud();
   if (banner) drawBanner();
   if (flash > 0.01) { ctx.fillStyle = `rgba(255,40,40,${flash})`; ctx.fillRect(0, 0, W, VIEWH); }
+}
+// Atmosférické částice biomu (procedurální, bez alokace) — prostředí žije.
+function biomeAmbient() {
+  const m = MAPS[currentMap] || {}; if (m.hell) return 'ember';
+  const c = hexRGB((m.pal && m.pal[0]) || '#444'), lum = (c[0] + c[1] + c[2]) / 3;
+  if (lum > 172 && c[2] >= c[0] - 10) return 'snow';
+  if (c[0] > c[1] + 16 && c[0] >= c[2]) return 'ember';
+  return 'mote';
+}
+function drawAmbient() {
+  const kind = biomeAmbient(), N = kind === 'mote' ? 16 : 26, ac = animClock;
+  for (let i = 0; i < N; i++) {
+    const sx = ((i * 131) % 100) / 100, base = ((i * 67) % 100) / 100; let x, y, r, col, a;
+    if (kind === 'snow') {
+      y = ((ac * 0.35 + i * 41) % (VIEWH + 20)) - 10; x = sx * VIEWW + Math.sin(ac * 0.02 + i) * 14; r = 1 + (i % 3) * 0.6; a = 0.5; col = `rgba(224,238,255,${a})`;
+    } else if (kind === 'ember') {
+      y = VIEWH + 16 - ((ac * 0.5 + i * 33) % (VIEWH + 48)); x = sx * VIEWW + Math.sin(ac * 0.03 + i * 1.3) * 16; r = 1.2 + (i % 3) * 0.8; a = (0.5 + 0.4 * Math.sin(ac * 0.1 + i)).toFixed(2);
+      ctx.save(); ctx.shadowColor = 'rgba(255,140,40,0.9)'; ctx.shadowBlur = 5; col = `rgba(255,${190 + (i * 11 % 55)},90,${a})`;
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.restore(); continue;
+    } else {
+      x = sx * VIEWW + Math.sin(ac * 0.015 + i) * 22; y = base * VIEWH + Math.cos(ac * 0.012 + i * 1.7) * 18; r = 0.8 + (i % 2) * 0.6; a = (0.14 + 0.12 * Math.sin(ac * 0.08 + i)).toFixed(2); col = `rgba(255,240,206,${a})`;
+    }
+    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
 }
 // Per-mapa nálada: multiply tint odvozený z palety biomu (zachová identitu, ale drží tmu).
 let _moodMap = -1, _moodCol = '#665674';
