@@ -426,12 +426,13 @@ function tone(freq, dur, type = 'square', vol = 0.15, slideTo = null) {
   g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   o.connect(g).connect(out()); o.start(t); o.stop(t + dur + 0.02);
 }
-function noise(dur, vol = 0.3, filterFreq = 900, hp = 0) {
+function noise(dur, vol = 0.3, filterFreq = 900, hp = 0, filterEnd = 0) {
   if (!actx || muted) return;
   const t = actx.currentTime, s = actx.createBufferSource(); s.buffer = noiseBuf;
   const g = actx.createGain(), f = actx.createBiquadFilter();
-  f.type = 'lowpass'; f.frequency.value = filterFreq;
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  f.type = 'lowpass'; f.frequency.setValueAtTime(filterFreq, t);
+  if (filterEnd) f.frequency.exponentialRampToValueAtTime(Math.max(60, filterEnd), t + dur);   // sweep = „whoosh"
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   let chain = s.connect(f);
   if (hp) { const h = actx.createBiquadFilter(); h.type = 'highpass'; h.frequency.value = hp; chain = chain.connect(h); }
   chain.connect(g).connect(out()); s.start(t); s.stop(t + dur);
@@ -439,23 +440,28 @@ function noise(dur, vol = 0.3, filterFreq = 900, hp = 0) {
 // akord (více tónů naráz) — pro příjemné UI/level-up zvuky
 function chord(freqs, dur, type = 'triangle', vol = 0.1, slide = null) { for (const f of freqs) tone(f, dur, type, vol, slide); }
 const sfx = {
-  swing()     { noise(0.16, 0.13, 3400, 800); tone(280, 0.09, 'triangle', 0.05, 150); },
-  bow()       { noise(0.05, 0.06, 5000, 2000); tone(520, 0.1, 'triangle', 0.07, 240); },
-  crossbow()  { tone(360, 0.07, 'square', 0.08, 150); noise(0.06, 0.09, 4200, 1500); },
-  gun()       { noise(0.04, 0.5, 6000, 1200); noise(0.26, 0.42, 1100); tone(90, 0.24, 'sawtooth', 0.18, 38); },   // klik + tělo + dunivý spodek
-  magic()     { tone(560, 0.16, 'sine', 0.09, 1300); tone(1120, 0.14, 'sine', 0.04, 2100); },
-  throwsnd()  { noise(0.1, 0.11, 3200, 900); },
-  boom()      { tone(160, 0.5, 'sawtooth', 0.18, 38); tone(80, 0.55, 'sine', 0.16, 30); noise(0.5, 0.42, 820); noise(0.06, 0.4, 5000, 1500); },
-  hitFlesh()  { noise(0.12, 0.18, 620, 120); tone(150, 0.09, 'square', 0.06, 70); },   // masitá rána
-  enemyDie()  { noise(0.18, 0.22, 700); tone(130, 0.16, 'sawtooth', 0.08, 52); tone(300, 0.06, 'square', 0.04, 120); },
-  groan()     { tone(84, 0.55, 'sawtooth', 0.05, 56); tone(126, 0.5, 'sawtooth', 0.03, 84); },
-  place()     { tone(220, 0.08, 'square', 0.1); setTimeout(() => tone(340, 0.09, 'square', 0.1), 65); noise(0.05, 0.06, 2500, 600); },
+  // SEK MEČEM — svištivý whoosh (padající sweep) + kovový svist
+  swing()     { noise(0.17, 0.22, 4200, 300, 700); tone(1250, 0.07, 'triangle', 0.05, 480); },
+  bow()       { noise(0.05, 0.08, 6000, 2500); tone(560, 0.11, 'triangle', 0.07, 260); },       // luk: tětiva + let šípu
+  crossbow()  { tone(340, 0.06, 'square', 0.09, 140); noise(0.07, 0.11, 5000, 1800, 900); },     // kuše: cvak
+  gun()       { noise(0.03, 0.6, 7000, 1500); noise(0.3, 0.5, 1300, 0, 400); tone(80, 0.26, 'sawtooth', 0.2, 34); },  // rána: klik+výšleh+dunění
+  magic()     { tone(520, 0.18, 'sine', 0.09, 1500); tone(1040, 0.16, 'sine', 0.045, 2400); noise(0.1, 0.05, 6000, 3000); },  // třpyt
+  throwsnd()  { noise(0.11, 0.14, 3600, 700, 1200); },                                            // hod: krátký whoosh
+  boom()      { tone(150, 0.55, 'sawtooth', 0.2, 34); tone(75, 0.6, 'sine', 0.18, 28); noise(0.55, 0.5, 900, 0, 200); noise(0.05, 0.45, 6000, 1800); },
+  // MASITÝ ZÁSAH — tupá rána do těla + čvachtnutí
+  hitFlesh()  { noise(0.11, 0.28, 520, 90); tone(130, 0.1, 'sine', 0.09, 62); tone(320, 0.05, 'triangle', 0.03, 150); },
+  // SMRT MOBA — čvachtavý splat + nízké klesnutí
+  enemyDie()  { noise(0.22, 0.3, 850, 120, 260); tone(115, 0.18, 'sawtooth', 0.09, 44); tone(360, 0.09, 'sine', 0.05, 90); },
+  // GROWL zombie — chraplavý mrtvolný sten
+  groan()     { tone(78, 0.5, 'sawtooth', 0.07, 52); tone(117, 0.46, 'sawtooth', 0.04, 80); tone(60, 0.55, 'sine', 0.05, 44); noise(0.4, 0.05, 500, 80); },
+  growl()     { tone(90 + Math.random() * 20, 0.32, 'sawtooth', 0.055, 60); noise(0.28, 0.04, 420, 70); },  // krátký vrčivý dech (spawn mobů)
+  place()     { tone(210, 0.08, 'square', 0.1); setTimeout(() => tone(330, 0.09, 'square', 0.1), 60); noise(0.06, 0.12, 2200, 400); },  // tesání/úder kladiva
   buy()       { chord([523, 784], 0.1, 'triangle', 0.09); setTimeout(() => chord([659, 988], 0.14, 'triangle', 0.09), 85); },
-  coreHit()   { tone(180, 0.34, 'sawtooth', 0.2, 60); noise(0.3, 0.22, 460); tone(70, 0.4, 'sine', 0.12, 40); },
+  coreHit()   { tone(170, 0.36, 'sawtooth', 0.2, 55); noise(0.32, 0.26, 440, 0, 160); tone(66, 0.42, 'sine', 0.13, 38); },  // náraz do brány
   waveStart() { chord([294, 370], 0.16, 'triangle', 0.11); setTimeout(() => chord([392, 494], 0.16, 'triangle', 0.11), 130); setTimeout(() => chord([587, 740], 0.26, 'triangle', 0.12), 260); },
   waveWin()   { chord([523, 659], 0.14, 'triangle', 0.12); setTimeout(() => chord([659, 831], 0.14, 'triangle', 0.12), 120); setTimeout(() => chord([784, 1047], 0.28, 'triangle', 0.13), 240); },
-  boss()      { tone(58, 1.0, 'sawtooth', 0.22, 40); tone(87, 0.95, 'sawtooth', 0.12, 55); tone(41, 1.1, 'sine', 0.16, 30); noise(1.0, 0.14, 300); tone(220, 0.9, 'sine', 0.05, 900); },
-  hurt()      { tone(200, 0.26, 'square', 0.16, 60); noise(0.22, 0.22, 640, 200); },
+  boss()      { tone(56, 1.0, 'sawtooth', 0.22, 38); tone(84, 0.95, 'sawtooth', 0.12, 52); tone(40, 1.1, 'sine', 0.17, 28); noise(1.0, 0.16, 320, 0, 120); tone(210, 0.9, 'sine', 0.05, 800); },
+  hurt()      { tone(190, 0.24, 'square', 0.15, 56); noise(0.2, 0.24, 600, 180); tone(150, 0.14, 'sawtooth', 0.05, 80); },
   gameOver()  { chord([330, 415], 0.5, 'sawtooth', 0.16, 220); setTimeout(() => chord([165, 208], 0.8, 'sawtooth', 0.16, 120), 260); },
   heal()      { chord([659, 988], 0.12, 'sine', 0.08); setTimeout(() => chord([880, 1319], 0.18, 'sine', 0.08), 90); },
   levelUp()   { chord([523, 659], 0.1, 'triangle', 0.12); setTimeout(() => chord([659, 784], 0.1, 'triangle', 0.12), 90); setTimeout(() => chord([1047, 1319], 0.24, 'triangle', 0.13), 180); },

@@ -292,8 +292,8 @@ function setState(s) {
   else if (s === 'host' && typeof renderHostLobby === 'function') renderHostLobby();
   else if (s === 'join' && typeof renderJoinLobby === 'function') renderJoinLobby();
   else if (s === 'build') { banner = { text: 'FÁZE STAVĚNÍ', t: 90 }; }
-  // ambientní dron běží během aktivního běhu (boj/stavění), jinak ztichne
-  if (typeof startDrone === 'function') { if (s === 'combat' || s === 'build') startDrone(); else stopDrone(); }
+  // ambientní dron je defaultně VYPNutý (byl otravný) — jen zajistíme ztišení
+  if (typeof stopDrone === 'function') stopDrone();
   // hostitel po každém přechodu okamžitě sesynchronizuje guesta
   if (typeof netPush === 'function' && net.role === 'host' && net.connected) netPush();
 }
@@ -949,6 +949,7 @@ function spawnEnemy(typeId) {
   };
   enemies.push(e);
   emitEv({ k: 'spawn', x: e.x, y: e.y });
+  if (base.arch !== 'BOSS' && sfx.growl && Math.random() < 0.08) sfx.growl();   // občasný mrtvolný vrč (horda žije)
   // DRAMATICKÝ PŘÍCHOD BOSSE — rázová vlna, záblesk, otřes, kratičké zpomalení = událost
   if (base.arch === 'BOSS') {
     flash = Math.max(flash, base.final ? 0.6 : 0.4); shake = Math.min(13, shake + (base.final ? 12 : 8)); hitStop = Math.max(hitStop, base.final ? 9 : 6);
@@ -3315,7 +3316,7 @@ window.addEventListener('keydown', e => {
   const k = e.key.toLowerCase(); keys[k] = true;
   if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault();
   if (k === 'p') togglePause();
-  if (k === 'm') { muted = !muted; profile.settings.muted = muted; saveProfile(profile); if (muted) stopDrone(); else { initAudio(); if (state === 'combat' || state === 'build') startDrone(); } }
+  if (k === 'm') { muted = !muted; profile.settings.muted = muted; saveProfile(profile); if (muted) stopDrone(); else initAudio(); }
   if (k === 'q' && run) localCycleWeapon();
   if (k === 'e' && run) localUseAbility();
 });
