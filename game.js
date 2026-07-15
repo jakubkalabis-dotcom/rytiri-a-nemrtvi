@@ -3199,5 +3199,14 @@ requestAnimationFrame(loop);
 
 // Service worker (PWA)
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  // Automatická aktualizace: jakmile nový service worker převezme kontrolu, jednou přenačti
+  // stránku → hráč vždy dostane nejnovější verzi bez ručního mazání cache.
+  let _swReloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (_swReloaded) return; _swReloaded = true; location.reload(); });
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      reg.update();
+      setInterval(() => reg.update().catch(() => {}), 60000);   // kontrola nové verze každou minutu
+    }).catch(() => {});
+  });
 }
