@@ -419,6 +419,8 @@ function enemyDesc(id, e) {
   parts.push(A[e.arch] || '');
   if (e.armored) parts.push('Brnění: sníženému poškození odolává.');
   if (e.splits) parts.push('Po smrti se ROZDĚLÍ na ' + e.splits + ' malé rychlé (Dělíčky).');
+  if (e.heals) parts.push('LÉČÍ okolní nemrtvé (' + e.healAmt + ' HP v okruhu ' + e.healRadius + ') — zabij ho první!');
+  if (e.frenzy) parts.push('ZUŘIVOST: čím míň má HP, tím je rychlejší (až 2,2×).');
   if (e.arch === 'BOSS') {
     parts.push('💥 Drtivý úder: nadechne se a plošně udeří (2,2× poškození) — uhni z výstražného kruhu!');
     if (e.summon) parts.push('Přivolává další nemrtvé (' + (ENEMIES[e.summon] ? ENEMIES[e.summon].name : e.summon) + ').');
@@ -1796,6 +1798,15 @@ function updateEnemies(dt) {
       }
     }
 
+    // ŠAMAN / Kněz nemrtvých: pravidelně léčí okolní nemrtvé (priorita zabít!)
+    if (e.def.heals) {
+      e.healCool = (e.healCool == null ? e.def.healRate : e.healCool) - dt;
+      if (e.healCool <= 0) {
+        e.healCool = e.def.healRate; let any = false;
+        for (const o of enemyHash.query(e.x, e.y, e.def.healRadius)) if (!o.dead && o !== e && o.hp < o.hpMax) { o.hp = Math.min(o.hpMax, o.hp + e.def.healAmt); o.flash = Math.max(o.flash, 3); any = true; }
+        if (any) particles.push({ x: e.x, y: e.y, ring: true, r: 6, rMax: e.def.healRadius, life: 1, decay: 0.06, color: 'rgba(120,255,150,0.4)' });
+      }
+    }
     // separace od ostatních nepřátel (aby se nehromadili)
     const near = enemyHash.query(e.x, e.y, e.r * 2);
     for (const o of near) {
@@ -1805,7 +1816,9 @@ function updateEnemies(dt) {
     }
 
     if (e.spawnT > 0) e.spawnT -= dt;   // krátká „nezranitelnost" objevení (jen vizuál)
-    const spd = e.speed * e.slowMul * (freezeTimer > 0 ? 0 : 1);
+    // ZUŘIVEC: čím míň HP, tím rychlejší (frenzy)
+    const frenzy = e.def.frenzy ? (1 + (1 - clamp(e.hp / e.hpMax, 0, 1)) * 1.2) : 1;
+    const spd = e.speed * e.slowMul * frenzy * (freezeTimer > 0 ? 0 : 1);
     // past „smola" pod nohama
     const trap = traps.find(t => t.def.arch === 'SLOW' && t.tx === Math.floor(e.x / TILE) && t.ty === Math.floor(e.y / TILE));
     const slowField = trap ? trap.def.slow.mul : 1;

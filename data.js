@@ -150,6 +150,8 @@ const ENEMIES = {
   vybusny:   { name:'Výbušný',   arch:'EXPLODER', hp:16,  speed:1.15,dmg:34, atkRate:0,  size:26, bounty:10, score:30,  leak:1, color:'#54a83f', aoeRadius:72 },
   delic:     { name:'Dělič',     arch:'WALKER',   hp:42,  speed:0.6, dmg:8,  atkRate:46, size:30, bounty:12, score:34,  leak:1, color:'#b25cd0', splits:3, splitId:'delicek' },
   delicek:   { name:'Dělíček',   arch:'RUNNER',   hp:7,   speed:1.5, dmg:4,  atkRate:26, size:15, bounty:2,  score:6,   leak:1, color:'#c88ce0' },   // jen ze štěpení Děliče
+  saman:     { name:'Šaman',     arch:'RANGED',   hp:36,  speed:0.55,dmg:4,  atkRate:150,size:26, bounty:16, score:42,  leak:1, color:'#c060e0', keepDist:210, projSpeed:3.5, heals:true, healAmt:7, healRate:78, healRadius:120 },  // léčí okolní nemrtvé!
+  strasak:   { name:'Zuřivec',   arch:'RUNNER',   hp:44,  speed:0.9, dmg:11, atkRate:30, size:28, bounty:13, score:40,  leak:1, color:'#e04a3a', frenzy:true },   // čím míň HP, tím rychlejší
   // Bossové (cyklují se – viz bossForWave)
   nekromant: { name:'Nekromant', arch:'BOSS',     hp:650, speed:0.55,dmg:24, atkRate:70, size:52, bounty:140,score:600, leak:5, color:'#a44ad0', summon:'chodec', summonRate:200 },
   abominace: { name:'Abominace', arch:'BOSS',     hp:1100,speed:0.4, dmg:34, atkRate:60, size:66, bounty:200,score:800, leak:6, color:'#9a6a34', enrage:true },
@@ -161,9 +163,11 @@ const ENEMIES = {
   morova_matka: { name:'Morová matka',  arch:'BOSS', sub:true, hp:360, speed:0.5,  dmg:16, atkRate:60, size:44, bounty:80, score:300, leak:4, color:'#6ab04a', summon:'behac', summonRate:150 },
   kostej:       { name:'Kostěj',        arch:'BOSS', sub:true, hp:320, speed:0.55, dmg:18, atkRate:50, size:40, bounty:80, score:300, leak:3, color:'#c8c0a0', volley:true },
   masovy_golem: { name:'Masový golem',  arch:'BOSS', sub:true, hp:520, speed:0.34, dmg:30, atkRate:64, size:52, bounty:90, score:340, leak:5, color:'#9a5a4a' },
+  kosteny_tyran:{ name:'Kostěný tyran', arch:'BOSS', sub:true, hp:400, speed:0.6,  dmg:22, atkRate:44, size:46, bounty:90, score:330, leak:4, color:'#b0a878', summon:'delic', summonRate:200, volley:true },   // přivolává Děliče + střílí vějíř
+  pridatny_lecitel:{ name:'Kněz nemrtvých', arch:'BOSS', sub:true, hp:360, speed:0.5, dmg:14, atkRate:80, size:44, bounty:95, score:340, leak:4, color:'#a04ad0', heals:true, healAmt:14, healRate:60, healRadius:150, summon:'saman', summonRate:220 },   // léčí hordu + volá Šamany
 };
 const BOSS_CYCLE = ['nekromant', 'abominace', 'lich'];
-const SUB_BOSS_CYCLE = ['rytir_smrti', 'krvavy_reznik', 'morova_matka', 'kostej', 'masovy_golem'];
+const SUB_BOSS_CYCLE = ['rytir_smrti', 'krvavy_reznik', 'morova_matka', 'kostej', 'masovy_golem', 'kosteny_tyran', 'pridatny_lecitel'];
 // Mapový boss (konec mapy, každá 25. vlna): cyklí 3 velké bossy přes mapy, finále = Pekelný pán.
 function mapBossForWave(wave) {
   if (isFinalWave(wave)) return 'pekelny_pan';
@@ -220,6 +224,8 @@ function waveComposition(wave) {
   if (p >= 2.5) w.plivac  = 0.12 + Math.min(0.35, (p - 2.5) * 0.03);
   if (p >= 3.0) w.vybusny = 0.10 + Math.min(0.34, (p - 3.0) * 0.03);
   if (p >= 3.5) w.delic   = 0.08 + Math.min(0.22, (p - 3.5) * 0.025);   // Dělič — po smrti se rozdělí
+  if (p >= 4.0) w.saman   = 0.06 + Math.min(0.14, (p - 4.0) * 0.02);    // Šaman — léčí hordu
+  if (p >= 4.5) w.strasak = 0.08 + Math.min(0.22, (p - 4.5) * 0.025);   // Zuřivec — zrychluje s poškozením
   return w;
 }
 function isBossWave(wave) { return wave % 5 === 0; }   // jakákoli bossovská vlna (sub i mapový)

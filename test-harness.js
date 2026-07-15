@@ -401,6 +401,19 @@ code += `
     assert(!warriors.some(w=>w.defId==='kostlivec'), 'kostlivci po čase vypršeli');
     log('nekromant ok (kostlivci vyvoláni i vypršeli)'); }
 
+  // ---- 25) Fáze 3: Šaman léčí okolní nemrtvé; nové sub-bossy v cyklu ----
+  { newRun('rytir'); startWave();
+    spawnEnemy('saman'); const sh=enemies[enemies.length-1]; sh.x=300;sh.y=300;sh.spawnT=0; sh.healCool=1;
+    spawnEnemy('chodec'); const wounded=enemies[enemies.length-1]; wounded.x=320;wounded.y=300;wounded.spawnT=0; wounded.hp=1;
+    for (let f=0; f<90; f++) updateCombat(1);
+    assert(wounded.dead || wounded.hp > 1, 'Šaman vyléčil raněného ('+wounded.hp+')');
+    assert(ENEMIES.saman && ENEMIES.strasak, 'noví nepřátelé existují');
+    assert(SUB_BOSS_CYCLE.includes('kosteny_tyran') && SUB_BOSS_CYCLE.includes('pridatny_lecitel'), 'nové sub-bossy v cyklu');
+    // frenzy nespadne
+    newRun('rytir'); startWave(); spawnEnemy('strasak'); const fr=enemies[enemies.length-1]; fr.hp=5; fr.spawnT=0;
+    try { for(let f=0;f<20;f++) updateCombat(1); } catch(e){ throw new Error('frenzy crash: '+e.message); }
+    log('šaman léčí + frenzy + nové sub-bossy ok'); }
+
   console.log('\\n==== TEST RESULTS ====');
   for (const r of results) console.log('  ✓ ' + r);
   console.log('==== ALL PASSED ====');
