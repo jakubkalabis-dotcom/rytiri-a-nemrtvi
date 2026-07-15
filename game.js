@@ -2005,12 +2005,19 @@ function drawGrade(cp) {
   for (const t of turrets) pool(t.x, t.y, 70, 'rgba(255,210,120,0.07)');
   ctx.restore();
 }
+let _vigMap = -2;
 function drawVignette() {
-  if (!vignetteCache) {
-    vignetteCache = document.createElement('canvas'); vignetteCache.width = VIEWW; vignetteCache.height = VIEWH;
+  if (!vignetteCache || _vigMap !== currentMap) {
+    _vigMap = currentMap;
+    if (!vignetteCache) { vignetteCache = document.createElement('canvas'); vignetteCache.width = VIEWW; vignetteCache.height = VIEWH; }
+    // okraje laděné do barvy biomu (peklo doruda, mráz domodra, poušť doambrova…)
+    const pal = (MAPS[currentMap] && MAPS[currentMap].pal) || ['#100', '#201018', '#333', '#444'];
+    const c = hexRGB(pal[1] || pal[0]); const mx = Math.max(c[0], c[1], c[2], 1), T = 58;
+    const er = Math.min(255, (c[0] * T / mx | 0) + 22), eg = (c[1] * T / mx | 0) + 3, eb = (c[2] * T / mx | 0) + 8;   // + krvavý nádech
     const g = vignetteCache.getContext('2d');
-    const rg = g.createRadialGradient(VIEWW / 2, VIEWH * 0.46, VIEWH * 0.30, VIEWW / 2, VIEWH * 0.5, VIEWH * 0.75);
-    rg.addColorStop(0, 'rgba(0,0,0,0)'); rg.addColorStop(0.7, 'rgba(18,4,12,0.28)'); rg.addColorStop(1, 'rgba(12,2,8,0.62)');
+    g.clearRect(0, 0, VIEWW, VIEWH);
+    const rg = g.createRadialGradient(VIEWW / 2, VIEWH * 0.46, VIEWH * 0.30, VIEWW / 2, VIEWH * 0.5, VIEWH * 0.76);
+    rg.addColorStop(0, 'rgba(0,0,0,0)'); rg.addColorStop(0.68, `rgba(${er},${eg},${eb},0.30)`); rg.addColorStop(1, `rgba(${(er * 0.6) | 0},${(eg * 0.5) | 0},${(eb * 0.6) | 0},0.66)`);
     g.fillStyle = rg; g.fillRect(0, 0, VIEWW, VIEWH);
   }
   ctx.drawImage(vignetteCache, 0, 0);
