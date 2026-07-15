@@ -140,6 +140,8 @@ const ENEMIES = {
   brnenec:   { name:'Brněnec',   arch:'TANK',     hp:70,  speed:0.6, dmg:12, atkRate:50, size:30, bounty:12, score:40,  leak:1, color:'#8aa0b8', armored:true },
   plivac:    { name:'Plivač',    arch:'RANGED',   hp:18,  speed:0.5, dmg:7,  atkRate:90, size:24, bounty:8,  score:25,  leak:1, color:'#5fc584', projSpeed:4.2, keepDist:170 },
   vybusny:   { name:'Výbušný',   arch:'EXPLODER', hp:16,  speed:1.15,dmg:34, atkRate:0,  size:26, bounty:10, score:30,  leak:1, color:'#54a83f', aoeRadius:72 },
+  delic:     { name:'Dělič',     arch:'WALKER',   hp:42,  speed:0.6, dmg:8,  atkRate:46, size:30, bounty:12, score:34,  leak:1, color:'#b25cd0', splits:3, splitId:'delicek' },
+  delicek:   { name:'Dělíček',   arch:'RUNNER',   hp:7,   speed:1.5, dmg:4,  atkRate:26, size:15, bounty:2,  score:6,   leak:1, color:'#c88ce0' },   // jen ze štěpení Děliče
   // Bossové (cyklují se – viz bossForWave)
   nekromant: { name:'Nekromant', arch:'BOSS',     hp:650, speed:0.55,dmg:24, atkRate:70, size:52, bounty:140,score:600, leak:5, color:'#a44ad0', summon:'chodec', summonRate:200 },
   abominace: { name:'Abominace', arch:'BOSS',     hp:1100,speed:0.4, dmg:34, atkRate:60, size:66, bounty:200,score:800, leak:6, color:'#9a6a34', enrage:true },
@@ -209,6 +211,7 @@ function waveComposition(wave) {
   if (p >= 2.0) w.brnenec = 0.10 + Math.min(0.34, (p - 2.0) * 0.035);
   if (p >= 2.5) w.plivac  = 0.12 + Math.min(0.35, (p - 2.5) * 0.03);
   if (p >= 3.0) w.vybusny = 0.10 + Math.min(0.34, (p - 3.0) * 0.03);
+  if (p >= 3.5) w.delic   = 0.08 + Math.min(0.22, (p - 3.5) * 0.025);   // Dělič — po smrti se rozdělí
   return w;
 }
 function isBossWave(wave) { return wave % 5 === 0; }   // jakákoli bossovská vlna (sub i mapový)

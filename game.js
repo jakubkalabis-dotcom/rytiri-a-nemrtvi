@@ -416,6 +416,7 @@ function enemyDesc(id, e) {
     EXPLODER: 'Při kontaktu vybuchne — plošné poškození!', BOSS: 'Boss.' };
   parts.push(A[e.arch] || '');
   if (e.armored) parts.push('Brnění: sníženému poškození odolává.');
+  if (e.splits) parts.push('Po smrti se ROZDĚLÍ na ' + e.splits + ' malé rychlé (Dělíčky).');
   if (e.arch === 'BOSS') {
     parts.push('💥 Drtivý úder: nadechne se a plošně udeří (2,2× poškození) — uhni z výstražného kruhu!');
     if (e.summon) parts.push('Přivolává další nemrtvé (' + (ENEMIES[e.summon] ? ENEMIES[e.summon].name : e.summon) + ').');
@@ -915,10 +916,10 @@ function pickWeighted(weights) {
   for (const k in weights) { r -= weights[k]; if (r <= 0) return k; }
   return 'chodec';
 }
-function spawnEnemy(typeId) {
+function spawnEnemy(typeId, ovX, ovY, isSplit) {
   const base = ENEMIES[typeId];
   const sc = enemyScale(run.wave);
-  const s = SPAWNS[(Math.random() * SPAWNS.length) | 0];
+  const s = (ovX != null) ? { x: ovX, y: ovY } : SPAWNS[(Math.random() * SPAWNS.length) | 0];
   const mapIdx = mapForWave(run.wave);
   // Škálování: mapoví bossové rostou podle pořadí mapy; sub-bossové mírněji; běžní přes enemyScale.
   let hpMul, spdMul;
@@ -945,11 +946,12 @@ function spawnEnemy(typeId) {
     atkRate: base.atkRate, atkCool: 0, fireCool: 60, wallCool: 0,
     color: base.color, flash: 0, elite,
     slowMul: 1, slowTimer: 0, dotDps: 0, dotTimer: 0,
-    summonCool: base.summonRate || 0,
+    summonCool: base.summonRate || 0, _isSplit: !!isSplit,
   };
+  if (isSplit) e.spawnT = 6;   // split se objeví rychle
   enemies.push(e);
   emitEv({ k: 'spawn', x: e.x, y: e.y });
-  if (base.arch !== 'BOSS' && sfx.growl && Math.random() < 0.08) sfx.growl();   // občasný mrtvolný vrč (horda žije)
+  if (base.arch !== 'BOSS' && !isSplit && sfx.growl && Math.random() < 0.08) sfx.growl();   // občasný mrtvolný vrč (horda žije)
   // DRAMATICKÝ PŘÍCHOD BOSSE — rázová vlna, záblesk, otřes, kratičké zpomalení = událost
   if (base.arch === 'BOSS') {
     flash = Math.max(flash, base.final ? 0.6 : 0.4); shake = Math.min(13, shake + (base.final ? 12 : 8)); hitStop = Math.max(hitStop, base.final ? 9 : 6);
@@ -1167,6 +1169,12 @@ function registerTurretKill() {
 function killEnemy(e, killer) {
   if (e.dead) return;
   e.dead = true;
+  // DĚLIČ: po smrti se rozdělí na malé rychlé (jen původní, ne už samotné děti)
+  if (e.def.splits && e.def.splitId && !e._isSplit && wave) {
+    const n = e.def.splits;
+    for (let k = 0; k < n; k++) { const a = k / n * Math.PI * 2 + Math.random() * 0.5; spawnEnemy(e.def.splitId, e.x + Math.cos(a) * 12, e.y + Math.sin(a) * 12, true); }
+    // wave.total NEupravovat: konec vlny řídí enemies.length===0, děti se dopočítají samy
+  }
   // combo → násobič skóre a gemů
   run.combo = (run.combo || 0) + 1; run.comboT = 180;
   const mult = comboMult();
