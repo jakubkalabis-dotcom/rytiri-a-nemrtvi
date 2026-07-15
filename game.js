@@ -1136,6 +1136,9 @@ function damageEnemy(e, dmg, w, p, crit) {
   if (p && p.passive.freezeChance && Math.random() < p.passive.freezeChance) { e.slowMul = Math.min(e.slowMul || 1, 0.4); e.slowTimer = Math.max(e.slowTimer || 0, 120); }
   spawnFloater(e.x, e.y - e.r, Math.round(dmg), crit);
   burst(e.x, e.y, '#ffd0d0', crit ? 6 : 3);
+  if (crit) {   // krit = žhavé jiskry navíc (jen krity, ať se dav nezaplaví)
+    for (let k = 0; k < 7; k++) { const a = Math.random() * Math.PI * 2, sp = 1.8 + Math.random() * 3.2; particles.push({ x: e.x, y: e.y - e.r * 0.3, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 0.6, life: 1, decay: 0.09 + Math.random() * 0.06, size: 1.6 + Math.random() * 1.4, color: k % 2 ? '#fff2b0' : '#ffd35c', grav: 0.06 }); }
+  }
   emitEv({ k: 'hit', x: e.x, y: e.y - e.r, d: Math.round(dmg), c: crit ? 1 : 0 });
   sfx.hitFlesh();
   if (e.hp <= 0) {
@@ -3138,10 +3141,20 @@ function drawBuildBar() {
 }
 let paletteRects = [];
 function drawBanner() {
-  ctx.globalAlpha = clamp(banner.t / 40, 0, 1); ctx.textAlign = 'center';
-  ctx.fillStyle = banner.warn ? '#ff5c8a' : '#f0e0a0'; ctx.font = 'bold 26px system-ui';
-  ctx.fillText(banner.text, W / 2, VIEWH * 0.42);
-  ctx.globalAlpha = 1; ctx.textAlign = 'left';
+  if (banner._t0 == null) banner._t0 = banner.t;
+  const el = banner._t0 - banner.t;                       // uplynulé snímky od objevení
+  const scale = 0.72 + clamp(el / 8, 0, 1) * 0.28;        // vjezd (scale-in)
+  const a = Math.min(clamp(el / 4, 0, 1), clamp(banner.t / 26, 0, 1));
+  ctx.save();
+  ctx.globalAlpha = a; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.translate(W / 2, VIEWH * 0.40); ctx.scale(scale, scale);
+  ctx.font = 'bold 27px system-ui';
+  ctx.lineWidth = 5; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(0,0,0,0.82)'; ctx.strokeText(banner.text, 0, 0);   // tmavý obrys = čitelnost
+  const g = ctx.createLinearGradient(0, -16, 0, 16);
+  if (banner.warn) { g.addColorStop(0, '#ff9bb4'); g.addColorStop(1, '#c81e3a'); ctx.shadowColor = 'rgba(224,30,52,0.7)'; }
+  else { g.addColorStop(0, '#fff2c8'); g.addColorStop(1, '#e7c56a'); ctx.shadowColor = 'rgba(234,186,78,0.6)'; }
+  ctx.shadowBlur = 12; ctx.fillStyle = g; ctx.fillText(banner.text, 0, 0);
+  ctx.restore();
 }
 
 /* ============================================================================

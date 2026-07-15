@@ -369,6 +369,12 @@ const PACTS = {
   masakr:     { name:'Řež',                icon:'💥', desc:'Kombo roste 2× rychleji (víc gemů i skóre), ale nepřátelé +8 % poškození.', comboRate:2.0, enemyDmg:1.08 },
   pevnost:    { name:'Poslední pevnost',   icon:'🏰', desc:'Brána má +8 životů, ale nepřátelé jsou o 10 % rychlejší.',   gateBonus:8, enemySpd:1.10 },
   arkany:     { name:'Prokletí many',      icon:'🔮', desc:'+35 % regenerace many a −15 % cooldown schopností, ale −10 % max HP.', manaRegen:1.35, cd:0.85, maxHp:0.90 },
+  vlcihlad:   { name:'Vlčí hlad',          icon:'🐺', desc:'+28 % poškození, ale nepřátelé udělí o 12 % víc.',         dmg:1.28, enemyDmg:1.12 },
+  zatraceni:  { name:'Zatracení',          icon:'☠', desc:'+60 % počet nepřátel, ale +25 % gemů i XP.',              count:1.60, gem:1.25, xp:1.25 },
+  krveproliti:{ name:'Krveprolití',        icon:'🩸', desc:'Elity 3× častěji, ale bossové +25 % HP.',                  eliteChance:3.0, bossHp:1.25 },
+  lakomec:    { name:'Lakomec',            icon:'🪙', desc:'+100 % dropů z nepřátel, ale −15 % max HP.',               drop:2.0, maxHp:0.85 },
+  najezd:     { name:'Bleskový nájezd',    icon:'⚡', desc:'Nepřátelé se spawnují o 35 % rychleji, ale +30 % gemů.',   spawn:0.65, gem:1.30 },
+  posedlost:  { name:'Posedlost',          icon:'👁', desc:'−15 % cooldown schopností a +25 % many, ale nepřátelé +15 % HP.', cd:0.85, manaRegen:1.25, enemyHp:1.15 },
 };
 const PACT_KEYS = Object.keys(PACTS);
 
