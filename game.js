@@ -2323,6 +2323,7 @@ function drawBossMob(e, col, dark, lite, ph) {
   ctx.beginPath(); ctx.arc(R * 0.22, -R * 0.18, R * 0.11, 0, Math.PI * 2); ctx.arc(R * 0.22, R * 0.18, R * 0.11, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
 }
 // ztmavení/zesvětlení hex barvy
+function hexA(hex, a) { if (!hex || hex[0] !== '#') return hex; const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16); return `rgba(${r},${g},${b},${a})`; }
 function shade(hex, amt) {
   if (!hex || hex[0] !== '#') return hex;
   let r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
@@ -2758,6 +2759,36 @@ function drawWaveTrack() {
   ctx.beginPath(); ctx.moveTo(px, ty - 2); ctx.lineTo(px + 4, ty + th / 2); ctx.lineTo(px, ty + th + 2); ctx.lineTo(px - 4, ty + th / 2); ctx.closePath(); ctx.fill(); ctx.stroke();
   ctx.textAlign = 'left';
 }
+/* ---- Kovaný ovládací panel (spodní lišta) ---- */
+function hudSlot(r, accent) {
+  const g = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
+  g.addColorStop(0, '#241b13'); g.addColorStop(1, '#0d0910');
+  ctx.fillStyle = g; roundRect(r.x, r.y, r.w, r.h, 8); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 1.5; roundRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2, 7); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,240,200,0.05)'; roundRect(r.x + 2, r.y + 2, r.w - 4, Math.max(1, r.h * 0.34), 6); ctx.fill();
+  ctx.strokeStyle = accent || '#4a3d24'; ctx.lineWidth = 1.2; roundRect(r.x, r.y, r.w, r.h, 8); ctx.stroke();
+}
+function hudToggle(r, icon, label, on) {
+  const g = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
+  if (on) { g.addColorStop(0, '#2c4824'); g.addColorStop(1, '#12200d'); } else { g.addColorStop(0, '#241616'); g.addColorStop(1, '#120a0a'); }
+  ctx.fillStyle = g; roundRect(r.x, r.y, r.w, r.h, 8); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.05)'; roundRect(r.x + 2, r.y + 2, r.w - 4, r.h * 0.34, 6); ctx.fill();
+  ctx.strokeStyle = on ? '#7fd489' : '#6a3a3a'; ctx.lineWidth = 1.4; roundRect(r.x, r.y, r.w, r.h, 8); ctx.stroke();
+  // stavová kontrolka (svítí když zapnuto)
+  const dx = r.x + r.w - 9, dy = r.y + 8;
+  if (on) { ctx.save(); ctx.shadowColor = 'rgba(130,230,110,0.9)'; ctx.shadowBlur = 6; }
+  ctx.fillStyle = on ? '#9cf07a' : '#7a4a4a'; ctx.beginPath(); ctx.arc(dx, dy, 3, 0, Math.PI * 2); ctx.fill();
+  if (on) ctx.restore();
+  ctx.fillStyle = on ? '#eaf3e0' : '#a08a80'; ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(icon + ' ' + label, r.x + r.w / 2, r.y + r.h / 2 + 1);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+}
+function hudTextBtn(r, label, size) {
+  hudSlot(r);
+  ctx.fillStyle = '#d6c8a8'; ctx.font = (size || 13) + 'px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 1);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+}
 function drawHud() {
   const me = localPlayer() || players[0];
   // horní kovové štítky: gemy + brána (životy hradu)
@@ -2790,23 +2821,37 @@ function drawHud() {
     ctx.fillText('☠ ' + (boss.def.name || 'BOSS').toUpperCase() + '  ' + Math.max(0, Math.ceil(boss.hp)) + '/' + boss.hpMax, W / 2, by + 6.5);
     ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   }
-  // HUD pás pozadí — kámen s kovanou horní hranou
-  ctx.fillStyle = '#0f1309'; ctx.fillRect(0, VIEWH, W, HUD_H);
-  ctx.fillStyle = '#171c0f'; ctx.fillRect(0, VIEWH + 3, W, HUD_H - 3);
-  const eg = ctx.createLinearGradient(0, VIEWH, 0, VIEWH + 4); eg.addColorStop(0, '#6a5a34'); eg.addColorStop(1, '#2a2414');
-  ctx.fillStyle = eg; ctx.fillRect(0, VIEWH, W, 3);
+  // HUD pás pozadí — tepaný kovový panel s horní zlatou lištou a nýty
+  const py = VIEWH;
+  const bgg = ctx.createLinearGradient(0, py, 0, H);
+  bgg.addColorStop(0, '#1b1510'); bgg.addColorStop(0.5, '#100b12'); bgg.addColorStop(1, '#08060c');
+  ctx.fillStyle = bgg; ctx.fillRect(0, py, W, HUD_H);
+  const eg = ctx.createLinearGradient(0, py, 0, py + 5); eg.addColorStop(0, '#d0a338'); eg.addColorStop(0.5, '#8a6a24'); eg.addColorStop(1, '#3a2c12');
+  ctx.fillStyle = eg; ctx.fillRect(0, py, W, 4);
+  ctx.fillStyle = 'rgba(255,224,150,0.55)'; ctx.fillRect(0, py, W, 1);
+  const sh = ctx.createLinearGradient(0, py + 4, 0, py + 18); sh.addColorStop(0, 'rgba(0,0,0,0.45)'); sh.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = sh; ctx.fillRect(0, py + 4, W, 14);
+  ctx.fillStyle = '#3a2f1a'; for (const rx of [7, W - 7]) { ctx.beginPath(); ctx.arc(rx, py + 11, 2.6, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = 'rgba(255,220,150,0.25)'; ctx.beginPath(); ctx.arc(rx - 0.6, py + 10.4, 1, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#3a2f1a'; }
 
   if (state === 'combat') {
     const w = activeWeapon(me);
     const ammoTxt = w.ammo === 'melee' ? '∞' : (w.ammo === 'mana' ? Math.floor(me.mana) + '⚡' : (run.ammo[w.ammo] || 0));
-    drawButton(BTN.weapon, (w.cat === 'melee' ? '🗡 ' : '🏹 ') + w.name, false);
-    ctx.fillStyle = (w.ammo !== 'melee' && w.ammo !== 'mana' && (run.ammo[w.ammo] || 0) === 0) ? '#ff7a6a' : '#b0c090';
-    ctx.font = '11px system-ui'; ctx.textAlign = 'left';
-    ctx.fillText('munice: ' + ammoTxt, BTN.weapon.x + 6, BTN.weapon.y + BTN.weapon.h - 3);
-    drawButton(BTN.switch2, '⇄ zbraň', false);
-    drawButton(BTN.autoaim, (profile.settings.autoaim ? '🎯 míř' : '🎯 vyp'), profile.settings.autoaim);
-    drawButton(BTN.autofire, (profile.settings.autofire ? '🔥 palba' : '🔥 vyp'), profile.settings.autofire);
-    drawButton(BTN.pause, '⏸', false);
+    const lowAmmo = (w.ammo !== 'melee' && w.ammo !== 'mana' && (run.ammo[w.ammo] || 0) === 0);
+    // — slot zbraně: ikona + název + munice —
+    const wr = BTN.weapon; hudSlot(wr, lowAmmo ? '#8a3a2a' : '#4a3d24');
+    ctx.save(); ctx.beginPath(); roundRect(wr.x + 3, wr.y + 3, wr.h - 6, wr.h - 6, 6); ctx.clip();
+    ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(wr.x + 3, wr.y + 3, wr.h - 6, wr.h - 6);
+    ctx.translate(wr.x + 2, wr.y + 1); try { paintIcon(ctx, 'weapon', me.weaponId, wr.h - 2); } catch (e) {} ctx.restore();
+    ctx.fillStyle = '#efe6d0'; ctx.font = 'bold 12.5px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(w.name, wr.x + wr.h, wr.y + wr.h * 0.36);
+    ctx.fillStyle = lowAmmo ? '#ff8a6a' : '#c8b06a'; ctx.font = '10.5px system-ui';
+    ctx.fillText((w.ammo === 'mana' ? '⚡ ' : '⁙ ') + ammoTxt, wr.x + wr.h, wr.y + wr.h * 0.74);
+    ctx.textBaseline = 'alphabetic';
+    // — přepínače —
+    hudToggle(BTN.autoaim, '🎯', profile.settings.autoaim ? 'míř' : 'vyp', profile.settings.autoaim);
+    hudToggle(BTN.autofire, '🔥', profile.settings.autofire ? 'pal' : 'vyp', profile.settings.autofire);
+    hudTextBtn(BTN.pause, '⏸', 16);
+    hudTextBtn(BTN.switch2, '⇄  Vyměnit zbraň', 13);
     drawAbilityButton(me);
     // HP hráče — kovaná lišta se „zpožděným" duchem po zásahu + číselný stav
     if (me._hpBar == null) me._hpBar = me.hp;
@@ -2835,17 +2880,29 @@ function drawAbilityButton(me) {
   if (me.classId === 'berserk') { ready = me.clanCd <= 0 && !me._clanActive && me.hp <= me.hpMax * BERSERK_HP_GATE; frac = me.clanCd > 0 ? me.clanCd / CLAN_COOLDOWN : 0; extra = me._clanActive ? 'klan v poli' : (me.hp > me.hpMax * BERSERK_HP_GATE ? '≤50% HP' : ''); }
   else if (me.classId === 'alchymista') { ready = (me.potions || 0) > 0 && me.abomT <= 0; frac = 0; extra = me.abomT > 0 ? Math.ceil(me.abomT / 60) + 's' : '🧪' + (me.potions || 0) + ' (' + (me.bile || 0) + '/' + BILE_PER_POTION + ')'; }
   else if (me.classId === 'knez') { ready = !me.resurrectUsed; frac = 0; extra = me.resurrectUsed ? 'příště v dalším kole' : ''; }
-  // pulzující zlatá záře, když je schopnost připravená
-  if (ready) { const pz = 0.5 + Math.sin(animClock * 0.25) * 0.4; ctx.save(); ctx.shadowColor = `rgba(255,200,80,${pz})`; ctx.shadowBlur = 12; }
+  const cc = me.color || '#e7c56a';
+  // pulzující barevná záře, když je schopnost připravená
+  if (ready) { const pz = 0.45 + Math.sin(animClock * 0.25) * 0.35; ctx.save(); ctx.shadowColor = hexA(cc, pz); ctx.shadowBlur = 14; }
   const g = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
-  if (ready) { g.addColorStop(0, '#7a5a1e'); g.addColorStop(1, '#4a3410'); } else { g.addColorStop(0, '#221a10'); g.addColorStop(1, '#14100a'); }
-  ctx.fillStyle = g; roundRect(r.x, r.y, r.w, r.h, 8); ctx.fill();
+  if (ready) { g.addColorStop(0, shade(cc, -0.35)); g.addColorStop(1, shade(cc, -0.68)); } else { g.addColorStop(0, '#211a12'); g.addColorStop(1, '#100c0a'); }
+  ctx.fillStyle = g; roundRect(r.x, r.y, r.w, r.h, 9); ctx.fill();
   if (ready) ctx.restore();
-  ctx.fillStyle = 'rgba(255,255,255,0.08)'; roundRect(r.x + 2, r.y + 2, r.w - 4, Math.max(1, r.h * 0.38), 6); ctx.fill();
-  ctx.strokeStyle = ready ? '#ffd35c' : '#4a3a2a'; ctx.lineWidth = ready ? 2 : 1.5; roundRect(r.x, r.y, r.w, r.h, 8); ctx.stroke();
-  if (frac > 0) { ctx.save(); roundRect(r.x, r.y, r.w, r.h, 8); ctx.clip(); ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(r.x, r.y, r.w * frac, r.h); ctx.restore(); }
-  ctx.fillStyle = ready ? '#fff2cc' : '#8a7a5a'; ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText((ab ? ab.icon : '✦') + ' ' + (ab ? ab.name : '') + (extra ? ' · ' + extra : ''), r.x + r.w / 2, r.y + r.h / 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.10)'; roundRect(r.x + 2, r.y + 2, r.w - 4, Math.max(1, r.h * 0.36), 7); ctx.fill();
+  ctx.strokeStyle = ready ? cc : '#4a3a2a'; ctx.lineWidth = ready ? 2 : 1.4; roundRect(r.x, r.y, r.w, r.h, 9); ctx.stroke();
+  // kruhový odznak s ikonou vlevo
+  const bx = r.x + r.h * 0.5 + 3, by = r.y + r.h / 2, br = r.h * 0.38;
+  ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fillStyle = ready ? shade(cc, -0.5) : '#17110b'; ctx.fill();
+  ctx.strokeStyle = ready ? cc : '#4a3a2a'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle = ready ? '#fff6dc' : '#7a6a52'; ctx.font = Math.round(br * 1.3) + 'px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(ab ? ab.icon : '✦', bx, by + 1);
+  // název + stav
+  const tx = bx + br + 6;
+  ctx.textAlign = 'left'; ctx.fillStyle = ready ? '#fff4d4' : '#9a8a6a'; ctx.font = 'bold 13px system-ui';
+  ctx.fillText(ab ? ab.name : '', tx, by - (extra ? 5 : 0));
+  if (extra) { ctx.fillStyle = ready ? 'rgba(255,240,200,0.75)' : '#8a7a5a'; ctx.font = '10px system-ui'; ctx.fillText(extra, tx, by + 8); }
+  // spodní lišta cooldownu (plní se jak schopnost dobíhá)
+  if (frac > 0) { const bw = r.w - 12; ctx.fillStyle = 'rgba(0,0,0,0.5)'; roundRect(r.x + 6, r.y + r.h - 6, bw, 3, 1.5); ctx.fill(); ctx.fillStyle = shade(cc, 0.1); roundRect(r.x + 6, r.y + r.h - 6, bw * (1 - frac), 3, 1.5); ctx.fill(); }
+  else if (ready) { ctx.fillStyle = hexA(cc, 0.9); ctx.font = 'bold 9px system-ui'; ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic'; ctx.fillText('PŘIPRAVENO', r.x + r.w - 8, r.y + r.h - 5); }
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
 }
 function drawStick(s, color) {
