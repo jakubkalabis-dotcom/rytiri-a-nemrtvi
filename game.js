@@ -36,9 +36,11 @@ function applyLocalInput() {
 }
 let bullets = [], eBullets = [], groundFx = [], particles = [], effects = [];
 let pickups = [], floaters = [], decals = [], netEvents = [];
+let edgeFlashes = [];   // směrové damage-viněty (od hrany, ze které přišel zásah hráče)
 let freezeTimer = 0, animClock = 0, hitStop = 0;
 let lastTime = performance.now();
 let shake = 0, flash = 0, banner = null;
+let telegraphActive = false;   // true, když právě běží boss telegraf (drtivý úder) — ambient pak ztlumen
 let wave = null;      // stav probíhající vlny
 
 const overlay = document.getElementById('overlay');
@@ -90,7 +92,7 @@ function newRun(classIds) {
   for (const wid of run.ownedWeapons) grantAmmoFor(wid, 2);
   enemies = []; walls = []; turrets = []; traps = []; warriors = [];
   bullets = []; eBullets = []; groundFx = []; particles = []; effects = [];
-  pickups = []; floaters = []; decals = []; netEvents = []; freezeTimer = 0;
+  pickups = []; floaters = []; decals = []; netEvents = []; freezeTimer = 0; edgeFlashes = [];
   run.combo = 0; run.comboT = 0;
   loadMap(0);
   players.length = 0;
@@ -825,7 +827,7 @@ function advanceToMap(i) {
   // NOVÁ MAPA = čerstvá obrana: zdi, věže, pasti i spojenci se NEPŘENÁŠEJÍ — hráč staví znovu.
   // Ekonomika, vylepšení, zbraně a munice (objekt `run`) zůstávají.
   loadMap(i);
-  enemies = []; bullets = []; eBullets = []; groundFx = []; pickups = []; decals = []; particles = [];
+  enemies = []; bullets = []; eBullets = []; groundFx = []; pickups = []; decals = []; particles = []; edgeFlashes = [];
   walls = []; turrets = []; traps = []; warriors = [];
   flowDirty = true;
   const cx = (CORE.tx + CORE.w / 2) * TILE;
@@ -1149,6 +1151,21 @@ function hitscan(p, w, aim, range, dmg) {
   }
 }
 
+// Směr rány (útočník → cíl): z rychlosti střely/úderu, jinak z pozice útočníka. Bez zdroje (AOE/DOT) = null.
+function hitDirection(e, w, p) {
+  if (w && (w.vx || w.vy)) { const d = Math.hypot(w.vx, w.vy) || 1; return { x: w.vx / d, y: w.vy / d }; }
+  if (p) { const dx = e.x - p.x, dy = e.y - p.y, d = Math.hypot(dx, dy); if (d > 0.01) return { x: dx / d, y: dy / d }; }
+  return null;
+}
+// Krvavý výron SMĚREM rány (ne symetrický oblak) — bez známého směru spadne zpět na plný kruh.
+function directionalBurst(x, y, dir, color, n, glow) {
+  const baseA = dir ? Math.atan2(dir.y, dir.x) : Math.random() * Math.PI * 2;
+  const spread = dir ? 1.0 : Math.PI * 2;
+  for (let i = 0; i < n; i++) {
+    const a = baseA + (Math.random() - 0.5) * spread, s = Math.random() * 3 + 0.8;
+    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 1, decay: 0.03 + Math.random() * 0.03, size: 2 + Math.random() * 2, color, glow: !!glow });
+  }
+}
 function damageEnemy(e, dmg, w, p, crit) {
   // zvěd: bodnutí do zad — první útok v neviditelnosti
   let backstab = false;
@@ -1163,16 +1180,21 @@ function damageEnemy(e, dmg, w, p, crit) {
   // pancéřovaní pohltí část poškození
   if (e.def.armored || (e.elite === 'pancerovany')) dmg *= 0.7;
   e.hp -= dmg;
-  e.flash = 5;
+  e.flash = 3;   // krátký světlý OBRYS (viz drawEnemies) — ne dlouhá plná bílá silueta, dav se nesmí zbělat
   if (crit == null && p) crit = p._lastCrit;
   if (w && w.dot) { e.dotDps = Math.max(e.dotDps, w.dot.dps * ((p && p.passive.dotDmg) || 1)); e.dotTimer = w.dot.dur; }
   if (w && w.slow) { e.slowMul = w.slow.mul; e.slowTimer = w.slow.dur; }
   // perk: mrazivé zásahy — šance zpomalit zasaženého
   if (p && p.passive.freezeChance && Math.random() < p.passive.freezeChance) { e.slowMul = Math.min(e.slowMul || 1, 0.4); e.slowTimer = Math.max(e.slowTimer || 0, 120); }
-  spawnFloater(e.x, e.y - e.r, Math.round(dmg), crit);
-  burst(e.x, e.y, '#ffd0d0', crit ? 6 : 3);
-  if (crit) {   // krit = žhavé jiskry navíc (jen krity, ať se dav nezaplaví)
-    for (let k = 0; k < 7; k++) { const a = Math.random() * Math.PI * 2, sp = 1.8 + Math.random() * 3.2; particles.push({ x: e.x, y: e.y - e.r * 0.3, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 0.6, life: 1, decay: 0.09 + Math.random() * 0.06, size: 1.6 + Math.random() * 1.4, color: k % 2 ? '#fff2b0' : '#ffd35c', grav: 0.06 }); }
+  // mikro-knockback + krev VE SMĚRU zásahu — dopad se dá "cítit", ne jen vidět číslo
+  const dir = hitDirection(e, w, p);
+  if (dir) { e.x += dir.x * 1.6; e.y += dir.y * 1.6; }
+  pushDamageFloater(e.x, e.y - e.r, dmg, crit);
+  directionalBurst(e.x, e.y, dir, '#ffd0d0', crit ? 6 : 3);
+  if (crit) {   // krit = žhavé jiskry navíc (jen krity, ať se dav nezaplaví) + aditivní prstenec + ostřejší cink
+    for (let k = 0; k < 7; k++) { const a = Math.random() * Math.PI * 2, sp = 1.8 + Math.random() * 3.2; particles.push({ x: e.x, y: e.y - e.r * 0.3, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 0.6, life: 1, decay: 0.09 + Math.random() * 0.06, size: 1.6 + Math.random() * 1.4, color: k % 2 ? '#fff2b0' : '#ffd35c', grav: 0.06, glow: true }); }
+    particles.push({ x: e.x, y: e.y - e.r * 0.3, ring: true, r: 2, rMax: e.r * 1.6, life: 1, decay: 0.12, color: '#fff2b0', glow: true });
+    if (typeof tone === 'function') tone(1500, 0.05, 'triangle', 0.05, 2200);   // vyšší "cink" navrch úderu — krit se cítí ostřeji
   }
   emitEv({ k: 'hit', x: e.x, y: e.y - e.r, d: Math.round(dmg), c: crit ? 1 : 0 });
   sfx.hitFlesh();
@@ -1196,6 +1218,14 @@ function registerTurretKill() {
     openWheelMenu();
   }
 }
+// Otřes při zabití: jen za DŮLEŽITÉ cíle. Obyčejný trash davu nesmí zatřást kamerou při
+// každém klepnutí — jinak se otřes „ohluchne" a přestane signalizovat, co je opravdu velké.
+function killShake(e) {
+  if (e.arch === 'BOSS') return 11;
+  if (e.arch === 'TANK') return 3;
+  if (e.elite) return 1.2;
+  return 0;
+}
 function killEnemy(e, killer) {
   if (e.dead) return;
   e.dead = true;
@@ -1216,7 +1246,7 @@ function killEnemy(e, killer) {
   if (gemQ) gemQ.gems = (gemQ.gems || 0) + Math.max(1, Math.round(gems * (gemQ.passive.gemMul || 1)));  // perk: +% gemů
   run.score = (run.score || 0) + Math.round((e.def.score || 10) * mult * (e.elite ? 3 : 1) * pactMul('score'));
   if (wave) { wave.kills++; wave.reward.kills++; }
-  addXp(xpForKill(e.def) * (e.elite ? 3 : 1) * ((killer && killer.passive && killer.passive.xpMul) || 1) * pactMul('xp'));  // perk + pakt: +% XP
+  addXp(xpForKill(e.def) * (e.elite ? 3 : 1) * ((killer && killer.passive && killer.passive.xpMul) || 1) * pactMul('xp'), killer);  // perk + pakt: +% XP
   // perk: výbušné zabití — šance na výbuch v okolí
   if (killer && killer.passive && killer.passive.explodeChance && Math.random() < killer.passive.explodeChance)
     aoeExplosion(e.x, e.y, 55, 20, null, '#ffb020');
@@ -1228,7 +1258,7 @@ function killEnemy(e, killer) {
   // KILL-POP: jasný záblesk (pocit dopadu) — šťavnaté zabití
   particles.push({ x: e.x, y: e.y, ring: true, r: e.r * 0.5, rMax: e.r * (big ? 2.6 : 2.0), life: 1, decay: big ? 0.10 : 0.16, color: 'rgba(255,250,236,0.85)' });
   emitEv({ k: 'die', x: e.x, y: e.y, color: e.color, big: big ? 1 : 0, s: style });
-  shake = Math.min(13, shake + (e.arch === 'BOSS' ? 11 : e.arch === 'TANK' ? 3 : 1.2));
+  shake = Math.min(13, shake + killShake(e));
   // BOSS PORAŽEN — zlatá oslava: výbuch, rázové vlny, zpomalení, nápis (payoff k dramatickému příchodu)
   if (e.arch === 'BOSS') {
     hitStop = Math.max(hitStop, e.def.final ? 15 : 10);
@@ -1248,15 +1278,25 @@ function killEnemy(e, killer) {
 }
 // Násobič combo: 1× → až ~3× při dlouhé sérii
 function comboMult() { return 1 + Math.min(2, (run.combo || 0) * 0.05 * pactMul('comboRate')); }   // pakt Řež: rychlejší růst
-function addXp(n) {
+function addXp(n, srcPlayer) {
   profile.xp += n;
   while (profile.xp >= xpToLevel(profile.playerLevel)) {
     profile.xp -= xpToLevel(profile.playerLevel);
     profile.playerLevel++;
     banner = { text: 'ÚROVEŇ ' + profile.playerLevel + '!', t: 90 };
     sfx.levelUp();
+    levelUpNova(srcPlayer);
   }
   saveProfile(profile);
+}
+// Světelná nova z pozice hráče při postupu na úroveň — aditivní prstenec + rozstřik jisker (payoff za level-up).
+function levelUpNova(p) {
+  p = p || localPlayer() || players[0]; if (!p) return;
+  for (let i = 0; i < 22; i++) {
+    const a = (i / 22) * Math.PI * 2, s = 2.2 + Math.random() * 1.4;
+    particles.push({ x: p.x, y: p.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 1, decay: 0.025, size: 2.4, color: '#fff2b0', glow: true });
+  }
+  particles.push({ x: p.x, y: p.y, ring: true, r: 4, rMax: 70, life: 1, decay: 0.045, color: '#ffe58a', glow: true });
 }
 
 /* ---------- Cílení ---------- */
@@ -1306,16 +1346,18 @@ function zombieDeath(x, y, color, big, style) {
   }
   sfx.enemyDie();
 }
-function burst(x, y, color, n = 10) {
+// glow=true → částice se v drawParticles kreslí aditivně (globalCompositeOperation 'lighter'), takže
+// žhavé/magické efekty opravdu SVÍTÍ místo aby jen ležely na sobě jako ploché tvary.
+function burst(x, y, color, n = 10, glow) {
   for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2, s = Math.random() * 3 + 0.5;
-    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 1, decay: 0.03 + Math.random() * 0.03, size: 2 + Math.random() * 2, color });
+    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 1, decay: 0.03 + Math.random() * 0.03, size: 2 + Math.random() * 2, color, glow: !!glow });
   }
 }
-function explode(x, y, color, n = 14) {
-  burst(x, y, color, n);
-  particles.push({ x, y, ring: true, r: 3, rMax: 20 + n, life: 1, decay: 0.07, color });
-  // trocha „dýmu"
+function explode(x, y, color, n = 14, glow) {
+  burst(x, y, color, n, glow);
+  particles.push({ x, y, ring: true, r: 3, rMax: 20 + n, life: 1, decay: 0.07, color, glow: !!glow });
+  // trocha „dýmu" (dým nikdy nesvítí, i když je výbuch žhavý)
   for (let i = 0; i < Math.min(6, n / 3); i++) {
     const a = Math.random() * Math.PI * 2, s = Math.random() * 1.5;
     particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 0.4, life: 1, decay: 0.02, size: 4 + Math.random() * 4, color: 'rgba(40,40,40,0.5)', smoke: true });
@@ -1324,6 +1366,50 @@ function explode(x, y, color, n = 14) {
 // Plovoucí číslo poškození
 function spawnFloater(x, y, dmg, crit) {
   floaters.push({ x: x + (Math.random() - 0.5) * 6, y, txt: '' + dmg, t: crit ? 46 : 34, max: crit ? 46 : 34, crit: !!crit, vy: crit ? -1.1 : -0.8 });
+}
+const FLOATER_MERGE_DIST = 16;    // px – nekritické floatery blíž než toto se SČÍTAJÍ do jednoho čísla
+const FLOATER_MERGE_WINDOW = 14;  // ticků – jak dlouho lze do floateru ještě přičítat další zásah
+const FLOATER_TRASH_LIMIT = 14;   // max. souběžných nekritických ("trash") floaterů na obrazovce
+// Najde existující slučitelný trash floater pro (x,y), jinak -1. Čistá funkce → snadno testovatelná.
+function findMergeableFloater(list, x, y) {
+  for (let i = list.length - 1; i >= 0; i--) {
+    const f = list[i];
+    if (f.crit || f.pickup || !(f.mergeT > 0)) continue;
+    if (Math.abs(f.x - x) < FLOATER_MERGE_DIST && Math.abs(f.y - y) < FLOATER_MERGE_DIST) return i;
+  }
+  return -1;
+}
+// Index nejbližšího trash floateru (bez ohledu na vzdálenost) — použije se jako pojistka proti přetečení počtu.
+function nearestTrashFloater(list, x, y) {
+  let bi = -1, bd = Infinity;
+  for (let i = 0; i < list.length; i++) {
+    const f = list[i]; if (f.crit || f.pickup) continue;
+    const d = (f.x - x) ** 2 + (f.y - y) ** 2;
+    if (d < bd) { bd = d; bi = i; }
+  }
+  return bi;
+}
+// Plovoucí číslo poškození pro zásah do nepřítele — potlačuje záplavu trash-čísel: blízké nekritické
+// zásahy do stejného místa v krátkém okně se SČÍTAJÍ do jednoho floateru; při dosažení stropu aktivních
+// trash-floaterů se nový zásah přičte k nejbližšímu, místo aby vznikal další. Krity mají VŽDY svůj vlastní,
+// výrazný floater (nikdy se neslučují a nepodléhají stropu).
+function pushDamageFloater(x, y, dmg, crit) {
+  if (!crit) {
+    let i = findMergeableFloater(floaters, x, y);
+    if (i === -1) {
+      const trashCount = floaters.reduce((n, f) => n + (!f.crit && !f.pickup ? 1 : 0), 0);
+      if (trashCount >= FLOATER_TRASH_LIMIT) i = nearestTrashFloater(floaters, x, y);
+    }
+    if (i !== -1) {
+      const f = floaters[i];
+      f.dmg = (f.dmg || 0) + dmg; f.txt = '' + Math.round(f.dmg);
+      f.t = Math.max(f.t, 20); f.mergeT = FLOATER_MERGE_WINDOW;
+      return f;
+    }
+  }
+  const f = { x: x + (Math.random() - 0.5) * 6, y, txt: '' + Math.round(dmg), dmg, t: crit ? 46 : 34, max: crit ? 46 : 34, crit: !!crit, vy: crit ? -1.1 : -0.8, mergeT: crit ? 0 : FLOATER_MERGE_WINDOW };
+  floaters.push(f);
+  return f;
 }
 // Trvalá krvavá skvrna na zemi
 function spawnDecal(x, y, r) {
@@ -1341,8 +1427,8 @@ function dropPickup(x, y, guaranteed) {
   pickups.push({ id, x, y, t: 600, bob: Math.random() * 6 });
 }
 function aoeExplosion(x, y, radius, dmg, dot, srcColor) {
-  explode(x, y, srcColor || '#ff8a3a', 24);
-  particles.push({ x, y, ring: true, r: 6, rMax: radius, life: 1, decay: 0.05, color: '#ffd0a0' });
+  explode(x, y, srcColor || '#ff8a3a', 24, true);
+  particles.push({ x, y, ring: true, r: 6, rMax: radius, life: 1, decay: 0.05, color: '#ffd0a0', glow: true });
   const cand = enemyHash.query(x, y, radius);
   for (const e of cand) {
     if (e.dead) continue;
@@ -1657,7 +1743,8 @@ function updatePlayerCombat(p, dt) {
     else p.cool = 20; // prázdno – krátká prodleva
   }
 }
-function damagePlayer(p, amount, src) {
+// hitAngle (volitelný): úhel od hráče K ÚTOČNÍKOVI — když chybí, dopočte se ze `src`, jinak náhodně.
+function damagePlayer(p, amount, src, hitAngle) {
   if (p.inv > 0) return;
   // rytíř: aktivní blok štítem vykryje VŠECHNY útoky (i střely) + volitelně odrazí
   if (p.blockT > 0) {
@@ -1675,7 +1762,13 @@ function damagePlayer(p, amount, src) {
   // perk: trny — vrací část poškození útočníkovi zblízka
   if (p.passive.thorns && src && !src.dead) damageEnemy(src, dmg * p.passive.thorns, null, p);
   p.hp -= dmg; p.inv = 45;
-  flash = 0.5; shake = Math.min(9, shake + 5); sfx.hurt();
+  // SMĚROVÁ damage-viněta od hrany, ze které útok přišel — full-screen rudý záblesk je vyhrazen jen VELKÝM zásahům
+  // (>15 % max HP), malé zásahy dostanou pouze viněru na příslušné hraně (nešíleně bliká celá obrazovka pořád).
+  const ang = hitAngle != null ? hitAngle : (src ? Math.atan2(src.y - p.y, src.x - p.x) : Math.random() * Math.PI * 2);
+  const bigHit = dmg > p.hpMax * 0.15;
+  edgeFlashes.push({ ang, t: 26, max: 26, big: bigHit });
+  if (bigHit) flash = Math.max(flash, 0.5);
+  shake = Math.min(9, shake + 5); sfx.hurt();
   burst(p.x, p.y, '#ff6a6a', 12);
   if (navigator.vibrate && profile.settings.haptics) navigator.vibrate(40);
   if (p.hp <= 0) {
@@ -2053,7 +2146,7 @@ function updateGroundFx(dt) {
     g.dur -= dt;
     const cand = enemyHash.query(g.x, g.y, g.radius);
     for (const e of cand) { if (!e.dead && dist(g.x, g.y, e.x, e.y) <= g.radius + e.r) { e.hp -= g.dps * dt / 60; if (e.hp <= 0) killEnemy(e); } }
-    if (Math.random() < 0.4) burst(g.x + (Math.random() - 0.5) * g.radius, g.y + (Math.random() - 0.5) * g.radius, g.color, 1);
+    if (Math.random() < 0.4) burst(g.x + (Math.random() - 0.5) * g.radius, g.y + (Math.random() - 0.5) * g.radius, g.color, 1, true);   // hořící zem svítí
   }
   groundFx = groundFx.filter(g => g.dur > 0);
 }
@@ -2091,7 +2184,7 @@ function updateEnemyBullets(dt) {
     if (blocksProjectile(tx, ty)) { b.dead = true; continue; }
     if (b.x < -20 || b.x > ARENA_W + 20 || b.y < -20 || b.y > ARENA_H + 20) { b.dead = true; continue; }
     for (const p of players) {
-      if (!p.downed && p.inv <= 0 && hitCircle(b, p)) { damagePlayer(p, b.dmg); b.dead = true; break; }
+      if (!p.downed && p.inv <= 0 && hitCircle(b, p)) { damagePlayer(p, b.dmg, null, Math.atan2(-b.vy, -b.vx)); b.dead = true; break; }
     }
     for (const wr of warriors) { if (hitCircle(b, wr)) { wr.hp -= b.dmg; wr.flash = 5; b.dead = true; break; } }
   }
@@ -2107,7 +2200,7 @@ function updateParticles(dt) {
   particles = particles.filter(p => p.life > 0);
 }
 function updateFloaters(dt) {
-  for (const f of floaters) { f.y += f.vy * dt; f.vy *= 0.94; f.t -= dt; }
+  for (const f of floaters) { f.y += f.vy * dt; f.vy *= 0.94; f.t -= dt; if (f.mergeT > 0) f.mergeT -= dt; }
   floaters = floaters.filter(f => f.t > 0);
 }
 function updatePickups(dt) {
@@ -2152,6 +2245,8 @@ function applyPickup(pu, p) {
 function updateEffects(dt) {
   for (const e of effects) e.t -= dt;
   effects = effects.filter(e => e.t > 0);
+  for (const f of edgeFlashes) f.t -= dt;
+  edgeFlashes = edgeFlashes.filter(f => f.t > 0);
 }
 
 /* ============================================================================
@@ -2195,9 +2290,21 @@ function render() {
   if (state === 'combat' || state === 'build') { drawFogDrift(); drawAmbient(); }   // plující mlha + částice biomu
   if (state === 'combat') drawComboGlow();                       // combo flow-state záře
   if (state === 'combat' || state === 'build') drawGateDanger(); // varování při padající bráně
+  drawEdgeFlashes();                          // směrové damage-viněty od hrany, ze které přišel zásah
   if (state === 'combat' || state === 'build') drawHud();
   if (banner) drawBanner();
-  if (flash > 0.01) { ctx.fillStyle = `rgba(255,40,40,${flash})`; ctx.fillRect(0, 0, W, VIEWH); }
+  if (flash > 0.01) { ctx.fillStyle = `rgba(255,40,40,${flash})`; ctx.fillRect(0, 0, W, VIEWH); }   // jen VELKÉ zásahy (>15 % max HP)
+}
+// Směrová viněta: tmavě rudý půlměsíc na hraně obrazovky odpovídající směru útočníka — čitelnější
+// než plný červený flash a nezakrývá dění uprostřed při běžných škrábancích.
+function drawEdgeFlashes() {
+  for (const f of edgeFlashes) {
+    const a = clamp(f.t / f.max, 0, 1) * (f.big ? 0.55 : 0.4);
+    const ex = VIEWW / 2 + Math.cos(f.ang) * VIEWW * 0.7, ey = VIEWH / 2 + Math.sin(f.ang) * VIEWH * 0.7;
+    const g = ctx.createRadialGradient(ex, ey, 10, ex, ey, Math.max(VIEWW, VIEWH) * 0.75);
+    g.addColorStop(0, `rgba(220,20,20,${a})`); g.addColorStop(1, 'rgba(220,20,20,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, VIEWW, VIEWH);
+  }
 }
 // Živá mlha — pomalu plující závoje na mapách s mlhou (moonlit mist nad tmavou zemí).
 function drawFogDrift() {
@@ -2225,17 +2332,19 @@ function biomeAmbient() {
 function drawGateDanger() {
   const lv = (run && run.lives) || 99; if (lv > 4) return;
   const inten = clamp((5 - lv) / 4, 0, 1), pulse = 0.4 + Math.abs(Math.sin(animClock * 0.35)) * 0.6;
+  const dim = telegraphActive ? 0.4 : 1;   // boss telegraf musí zůstat čitelný — ambient efekty ustoupí
   const g = ctx.createRadialGradient(VIEWW / 2, VIEWH / 2, VIEWH * 0.34, VIEWW / 2, VIEWH / 2, VIEWH * 0.82);
-  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, `rgba(210,20,30,${(0.14 + inten * 0.28) * pulse})`);
+  g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, `rgba(210,20,30,${(0.14 + inten * 0.28) * pulse * dim})`);
   ctx.fillStyle = g; ctx.fillRect(0, 0, VIEWW, VIEWH);
 }
 // Combo „flow-state" — při dlouhé sérii zabití scéna zlatě žhne, při šílené sérii doruda (jsi v zóně).
 function drawComboGlow() {
   const c = (run && run.combo) || 0; if (c < 8) return;
   const intensity = clamp((c - 8) / 22, 0, 1), hot = c >= 22, pulse = 0.55 + Math.sin(animClock * 0.3) * 0.28;
+  const dim = telegraphActive ? 0.4 : 1;   // boss telegraf musí zůstat čitelný — ambient efekty ustoupí
   const g = ctx.createRadialGradient(VIEWW / 2, VIEWH * 0.5, VIEWH * 0.38, VIEWW / 2, VIEWH * 0.5, VIEWH * 0.82);
   g.addColorStop(0, 'rgba(0,0,0,0)');
-  g.addColorStop(1, hot ? `rgba(255,110,30,${(0.10 + intensity * 0.24) * pulse})` : `rgba(255,196,86,${(0.05 + intensity * 0.16) * pulse})`);
+  g.addColorStop(1, hot ? `rgba(255,110,30,${(0.10 + intensity * 0.24) * pulse * dim})` : `rgba(255,196,86,${(0.05 + intensity * 0.16) * pulse * dim})`);
   ctx.fillStyle = g; ctx.fillRect(0, 0, VIEWW, VIEWH);
 }
 function drawAmbient() {
@@ -2323,12 +2432,20 @@ function drawArena() {
   }
   drawGate();
 }
+// Lineárně interpoluje mezi dvěma hex barvami (t=0 → a, t=1 → b), vrací hex string. Pro pohasínání „svaté pečeti".
+function mixHex(a, b, t) {
+  t = clamp(t, 0, 1); const ca = hexRGB(a), cb = hexRGB(b);
+  const h = v => clamp(Math.round(v), 0, 255).toString(16).padStart(2, '0');
+  return `#${h(ca[0] + (cb[0] - ca[0]) * t)}${h(ca[1] + (cb[1] - ca[1]) * t)}${h(ca[2] + (cb[2] - ca[2]) * t)}`;
+}
 function drawGate() {
   const cx = CORE.tx * TILE, cy = CORE.ty * TILE, cw = CORE.w * TILE, ch = CORE.h * TILE;
   const midx = cx + cw / 2, pz = 0.5 + Math.sin(animClock * 0.08) * 0.16;
-  // teplá „aura bezpečí" za branou (ohniště domova)
+  // „Živá" brána: vizuál chátrá s ubývajícími životy jádra (run.lives, max orientačně 20 — nad tím vypadá plně zdravě).
+  const lifeRatio = clamp(((run && run.lives) || 20) / 20, 0, 1), damage = 1 - lifeRatio;
+  // teplá „aura bezpečí" za branou (ohniště domova) — s ubývajícím životem řídne
   const gl = ctx.createRadialGradient(midx, cy + ch * 0.5, 6, midx, cy + ch * 0.5, cw);
-  gl.addColorStop(0, `rgba(255,176,88,${0.13 * pz})`); gl.addColorStop(1, 'rgba(255,176,88,0)');
+  gl.addColorStop(0, `rgba(255,176,88,${0.13 * pz * (0.4 + lifeRatio * 0.6)})`); gl.addColorStop(1, 'rgba(255,176,88,0)');
   ctx.fillStyle = gl; ctx.fillRect(cx - cw * 0.6, cy - cw * 0.4, cw * 2.2, ch + cw);
   ctx.fillStyle = 'rgba(0,0,0,0.34)'; roundRect(cx + 3, cy + ch - 6, cw - 6, 11, 4); ctx.fill();
   // hradba — teplý tmavý kámen s přechodem + spáry
@@ -2337,8 +2454,24 @@ function drawGate() {
   ctx.fillStyle = '#655c50'; roundRect(cx + 5, cy + 7, cw - 10, ch - 12, 3); ctx.fill();
   ctx.strokeStyle = 'rgba(0,0,0,0.16)'; ctx.lineWidth = 1;
   for (let yy = cy + 16; yy < cy + ch - 6; yy += 9) { ctx.beginPath(); ctx.moveTo(cx + 6, yy); ctx.lineTo(cx + cw - 6, yy); ctx.stroke(); }
-  // cimbuří (s horním leskem)
-  for (let i = 0; i < CORE.w * 2; i++) if (i % 2 === 0) { ctx.fillStyle = '#463f36'; ctx.fillRect(cx + 4 + i * 8, cy, 8, 8); ctx.fillStyle = 'rgba(255,240,210,0.07)'; ctx.fillRect(cx + 4 + i * 8, cy, 8, 2); }
+  // cimbuří (s horním leskem) — postupně ubývá (vylámané), deterministicky dle indexu ať se drží mezi snímky
+  for (let i = 0; i < CORE.w * 2; i++) if (i % 2 === 0) {
+    if (((i * 53 + 7) % 23) / 23 < damage * 0.9) continue;
+    ctx.fillStyle = '#463f36'; ctx.fillRect(cx + 4 + i * 8, cy, 8, 8); ctx.fillStyle = 'rgba(255,240,210,0.07)'; ctx.fillRect(cx + 4 + i * 8, cy, 8, 2);
+  }
+  // praskliny a spáleniny na hradbě — přibývají s poškozením (seedovaně, ne nový náhodný vzor každý snímek)
+  if (damage > 0.04) {
+    const cracks = 1 + Math.round(damage * 8), rs = mulberry32(0x9e17 + CORE.tx * 131 + CORE.ty * 977);
+    ctx.save(); ctx.strokeStyle = 'rgba(18,12,8,0.55)'; ctx.lineWidth = 1;
+    for (let i = 0; i < cracks; i++) {
+      let px = cx + 6 + rs() * (cw - 12), py = cy + 8 + rs() * (ch - 14);
+      ctx.beginPath(); ctx.moveTo(px, py);
+      for (let s = 0; s < 3; s++) { px += (rs() - 0.5) * 11; py += (rs() - 0.5) * 8; ctx.lineTo(px, py); }
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(20,10,6,0.28)'; ctx.beginPath(); ctx.arc(px, py, 2 + rs() * 2.4, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
   // brána (dřevo s přechodem + železné pásy)
   const gw = cw * 0.5, gx = cx + cw / 2 - gw / 2;
   const wg = ctx.createLinearGradient(0, cy + 12, 0, cy + ch - 4); wg.addColorStop(0, '#5a3c22'); wg.addColorStop(1, '#39270f');
@@ -2346,12 +2479,14 @@ function drawGate() {
   ctx.strokeStyle = '#291d0f'; ctx.lineWidth = 1;
   for (let i = 1; i < 4; i++) { ctx.beginPath(); ctx.moveTo(gx + i * gw / 4, cy + 12); ctx.lineTo(gx + i * gw / 4, cy + ch - 4); ctx.stroke(); }
   ctx.fillStyle = '#2a2620'; for (const yy of [cy + 18, cy + ch - 15]) ctx.fillRect(gx, yy, gw, 3);
-  // ZÁŘÍCÍ SVATÁ PEČEŤ na bráně (holy stronghold)
+  // ZÁŘÍCÍ SVATÁ PEČEŤ na bráně (holy stronghold) — s ubývajícím životem POHASÍNÁ (alpha i saturace k šedi)
   const ex = midx, ey = cy + ch * 0.5, er = Math.min(cw, ch) * 0.15;
-  ctx.save(); ctx.shadowColor = `rgba(255,205,95,${0.6 * pz})`; ctx.shadowBlur = 10;
+  const sealCol = mixHex('#e7c56a', '#6a6258', damage), sealGlow = mixHex('#ffd878', '#8a8278', damage);
+  const sealA = 0.25 + lifeRatio * 0.75;
+  ctx.save(); ctx.shadowColor = `rgba(255,205,95,${0.6 * pz * sealA})`; ctx.shadowBlur = 6 + lifeRatio * 6;
   ctx.fillStyle = '#3a2c12'; ctx.beginPath(); ctx.arc(ex, ey, er, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = '#e7c56a'; ctx.lineWidth = 2; ctx.stroke();
-  ctx.strokeStyle = `rgba(255,216,120,${0.7 * pz + 0.25})`; ctx.lineWidth = 2.2;
+  ctx.strokeStyle = sealCol; ctx.lineWidth = 2; ctx.stroke();
+  ctx.strokeStyle = hexA(sealGlow, clamp((0.7 * pz + 0.25) * sealA, 0, 1)); ctx.lineWidth = 2.2;
   ctx.beginPath(); ctx.moveTo(ex, ey - er * 0.62); ctx.lineTo(ex, ey + er * 0.62); ctx.moveTo(ex - er * 0.5, ey - er * 0.12); ctx.lineTo(ex + er * 0.5, ey - er * 0.12); ctx.stroke();
   ctx.restore();
   // věže po stranách
@@ -2360,12 +2495,15 @@ function drawGate() {
     ctx.fillStyle = tg; roundRect(bx, cy - 6, 12, ch + 6, 3); ctx.fill();
     ctx.fillStyle = '#655c50'; roundRect(bx + 2, cy - 4, 8, 8, 2); ctx.fill();
   }
-  // vlajka (barva hráče)
+  // vlajka (barva hráče) — zbědovaná/menší při málo životech
   const fx = cx, fy = cy - 6;
-  ctx.strokeStyle = '#b8b0a0'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(fx + 6, fy); ctx.lineTo(fx + 6, fy - 16); ctx.stroke();
+  ctx.strokeStyle = '#b8b0a0'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(fx + 6, fy); ctx.lineTo(fx + 6, fy - 16 * (0.6 + lifeRatio * 0.4)); ctx.stroke();
   ctx.fillStyle = players[0] ? players[0].color : '#c8a45c';
-  const fw = 12 + Math.sin(animClock * 0.15) * 2;
-  ctx.beginPath(); ctx.moveTo(fx + 6, fy - 16); ctx.lineTo(fx + 6 + fw, fy - 13); ctx.lineTo(fx + 6, fy - 10); ctx.fill();
+  ctx.globalAlpha = 0.5 + lifeRatio * 0.5;
+  const fw = (12 + Math.sin(animClock * 0.15) * 2) * (0.6 + lifeRatio * 0.4);
+  const fyTop = fy - 16 * (0.6 + lifeRatio * 0.4);
+  ctx.beginPath(); ctx.moveTo(fx + 6, fyTop); ctx.lineTo(fx + 6 + fw, fyTop + 3); ctx.lineTo(fx + 6, fyTop + 6); ctx.fill();
+  ctx.globalAlpha = 1;
   // pochodně (blikají)
   for (const tx of [cx + 2, cx + cw - 4]) drawTorch(tx, cy + 6);
 }
@@ -2515,10 +2653,13 @@ function drawTraps() {
     if (t.level) drawLevelBadge(t.tx * TILE + TILE - 4, t.ty * TILE + 4);
   }
 }
-// Telegraf drtivého úderu bosse — výstražná plocha, která se plní (uhni z ní!)
+// Telegraf drtivého úderu bosse — výstražná plocha, která se plní (uhni z ní!). Nastavuje `telegraphActive`,
+// aby okolní ambient efekty (combo záře, varování brány) ustoupily a telegraf zůstal ostře čitelný.
 function drawTelegraphs() {
+  telegraphActive = false;
   for (const e of enemies) {
     if (e.dead || !(e.slamWind > 0)) continue;
+    telegraphActive = true;
     const rad = e.slamR || 74, prog = 1 - e.slamWind / (e.slamWindMax || 80), x = e.slamX, y = e.slamY;
     if (!onScreen(x, y, rad)) continue;
     ctx.save();
@@ -2528,8 +2669,15 @@ function drawTelegraphs() {
     ctx.beginPath(); ctx.arc(x, y, rad * prog, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = `rgba(255,${(70 + prog * 130) | 0},40,${0.55 + Math.sin(animClock * 0.5) * 0.3})`; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2); ctx.stroke();
-    // varovné rýhy (kříž) když je skoro hotovo
-    if (prog > 0.6) { ctx.globalAlpha = (prog - 0.6) * 2; ctx.beginPath(); ctx.moveTo(x - rad, y); ctx.lineTo(x + rad, y); ctx.moveTo(x, y - rad); ctx.lineTo(x, y + rad); ctx.stroke(); }
+    ctx.restore();
+    // BÍLO-ŽHAVÝ prstenec (postupující s "nádechem") + zaměřovací kříž — aditivně, ať telegraf
+    // vždy přebije okolní ambient efekty a hráč přesně vidí, kam a KDY to dopadne.
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const hot = clamp(0.5 + Math.sin(animClock * 0.5) * 0.22 + prog * 0.35, 0, 1);
+    ctx.strokeStyle = `rgba(255,255,255,${hot})`; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(x, y, rad * Math.max(0.06, prog), 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = `rgba(255,244,224,${clamp(0.25 + prog * 0.65, 0, 1)})`; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x - rad, y); ctx.lineTo(x + rad, y); ctx.moveTo(x, y - rad); ctx.lineTo(x, y + rad); ctx.stroke();
     ctx.restore();
   }
 }
@@ -2562,6 +2710,15 @@ function drawWarriors() {
     ctx.fillStyle = '#5cff8a'; ctx.fillRect(wr.x - 12, wr.y - wr.r - 9, 24 * (wr.hp / wr.hpMax), 3);
   }
 }
+// Ikona prioritního cíle nad hlavou nepřítele — léčitel/dělič mají přednost (jsou akčně nejnaléhavější),
+// jinak obyčejná elita dostane svou hvězdu. Čistá funkce → snadno testovatelná.
+function enemyMarkerIcon(e) {
+  const def = e.def || {};
+  if (def.heals) return '✚';
+  if (def.splits) return '⚔';
+  if (e.elite) return '★';
+  return null;
+}
 function drawEnemies() {
   for (const e of enemies) {
     if (!onScreen(e.x, e.y, e.r + 30)) continue;
@@ -2579,9 +2736,7 @@ function drawEnemies() {
     // směr „obličeje" = k jádru (zombie se šourají dolů)
     const cx = (CORE.tx + CORE.w / 2) * TILE, cy = (CORE.ty + CORE.h / 2) * TILE;
     const fa = Math.atan2(cy - e.y, cx - e.x);
-    const col = e.flash > 0 ? '#ffffff' : e.color;
-    const dark = e.flash > 0 ? '#ffffff' : shade(e.color, -0.32);
-    const lite = e.flash > 0 ? '#ffffff' : shade(e.color, 0.18);
+    const col = e.color, dark = shade(e.color, -0.32), lite = shade(e.color, 0.18);
     ctx.save(); ctx.translate(Math.round(e.x), Math.round(e.y + bob)); ctx.rotate(fa);
     if (e.spawnT > 0) ctx.globalAlpha = 1 - e.spawnT / 30;
     if (e.arch === 'BOSS') { const bs = 1 + Math.sin(animClock * 0.1) * 0.035; ctx.scale(bs, bs); drawBossMob(e, col, dark, lite, walkPh); }
@@ -2589,12 +2744,27 @@ function drawEnemies() {
     else if (e.typeId === 'ohar') drawHound(e, col, dark, walkPh);
     else drawZombie(e, col, dark, lite, walkPh);
     ctx.restore(); ctx.globalAlpha = 1;
+    // zásahový flash = KRÁTKÝ SVĚTLÝ OBRYS (ne plná bílá silueta) — dav se nesmí zbělat při rychlé palbě
+    if (e.flash > 0) {
+      ctx.save(); ctx.globalAlpha = clamp(e.flash / 3, 0, 1); ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(e.x, e.y + bob, e.r + 1.5, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+    }
     if (e.spawnT <= 0 && e.flash <= 0) rimLight(e.x, e.y + bob, e.r);   // světelný okraj shora
     if (freezeTimer > 0) { ctx.strokeStyle = '#bfefff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(e.x, e.y + bob, e.r + 2, 0, Math.PI * 2); ctx.stroke(); }
     // HP proužek
     if (e.hp < e.hpMax && e.arch !== 'BOSS') {
       ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(e.x - e.r, e.y - e.r - 8, e.r * 2, 3);
       ctx.fillStyle = e.elite ? ELITES[e.elite].glow : '#ff8a4a'; ctx.fillRect(e.x - e.r, e.y - e.r - 8, e.r * 2 * (e.hp / e.hpMax), 3);
+    }
+    // ikona prioritního cíle (elita/léčitel/dělič) — hráč hned pozná, koho zabít nejdřív
+    const marker = enemyMarkerIcon(e);
+    if (marker) {
+      const mCol = (e.def && e.def.heals) ? '#8fff9a' : (e.def && e.def.splits) ? '#ffd35c' : ((ELITES[e.elite] && ELITES[e.elite].glow) || '#ffe08a');
+      const my = e.y - e.r - 15;
+      ctx.font = 'bold 11px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillText(marker, e.x, my + 1);
+      ctx.fillStyle = mCol; ctx.fillText(marker, e.x, my);
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     }
   }
 }
@@ -2621,7 +2791,7 @@ function drawZombie(e, col, dark, lite, ph) {
 }
 function drawCreeper(e, col, dark, ph) {
   const R = e.r, lp = Math.sin(ph * 1.4);
-  const green = e.flash > 0 ? '#ffffff' : '#5fbf47', gd = e.flash > 0 ? '#ffffff' : '#3f8a30';
+  const green = '#5fbf47', gd = '#3f8a30';
   rrect(-R * 0.58 + lp * R * 0.18, -R * 0.55, R * 0.34, R * 0.34, R * 0.12, gd);
   rrect(-R * 0.58 - lp * R * 0.18, R * 0.22, R * 0.34, R * 0.34, R * 0.12, gd);
   rrect(R * 0.28 - lp * R * 0.18, -R * 0.55, R * 0.34, R * 0.34, R * 0.12, gd);
@@ -2636,7 +2806,7 @@ function drawCreeper(e, col, dark, ph) {
 }
 function drawHound(e, col, dark, ph) {
   const R = e.r, lp = Math.sin(ph);
-  const body = e.flash > 0 ? '#ffffff' : '#a05442', bd = e.flash > 0 ? '#ffffff' : '#6e3c2c';
+  const body = '#a05442', bd = '#6e3c2c';
   rrect(-R * 0.3 + lp * R * 0.4, -R * 0.55, R * 0.24, R * 0.4, R * 0.1, bd);
   rrect(-R * 0.3 - lp * R * 0.4, R * 0.15, R * 0.24, R * 0.4, R * 0.1, bd);
   rrect(R * 0.35 - lp * R * 0.4, -R * 0.55, R * 0.24, R * 0.4, R * 0.1, bd);
@@ -2733,8 +2903,9 @@ function drawEffects() {
       ctx.beginPath(); ctx.moveTo(e.x1, e.y1); ctx.lineTo(e.x2, e.y2); ctx.stroke();
       ctx.globalAlpha = 1;
     } else if (e.type === 'muzzle') {
+      // aditivní záblesk ústí zbraně — svítí místo aby jen plochou barvou zakryl, co je pod ním
       ctx.globalAlpha = clamp(e.t / 4, 0, 1); ctx.fillStyle = '#fff6c0';
-      ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(e.a);
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.translate(e.x, e.y); ctx.rotate(e.a);
       ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(10, -4); ctx.lineTo(14, 0); ctx.lineTo(10, 4); ctx.fill();
       ctx.restore(); ctx.globalAlpha = 1;
     } else if (e.type === 'nova') {
@@ -3039,12 +3210,26 @@ function drawBuildGhost() {
   }
 }
 function drawParticles() {
+  // 1. průchod: normální (neaditivní) částice — krev, kosti, dým...
   for (const p of particles) {
+    if (p.glow) continue;
     if (!onScreen(p.x, p.y, 30)) continue;
     ctx.globalAlpha = Math.max(0, p.life);
     if (p.ring) { ctx.strokeStyle = p.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.stroke(); }
     else { ctx.fillStyle = p.color; const s = p.size || 3; ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s); }
   }
+  ctx.globalAlpha = 1;
+  // 2. průchod: aditivní (glow) — žhavé jiskry/výbuchy/meteory/krit-prstenec se SČÍTAJÍ = opravdu svítí.
+  // Jediný extra průchod navíc (ne per-částice save/restore) → zanedbatelný dopad na výkon.
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  for (const p of particles) {
+    if (!p.glow) continue;
+    if (!onScreen(p.x, p.y, 30)) continue;
+    ctx.globalAlpha = Math.max(0, p.life);
+    if (p.ring) { ctx.strokeStyle = p.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.stroke(); }
+    else { ctx.fillStyle = p.color; const s = p.size || 3; ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s); }
+  }
+  ctx.restore();
   ctx.globalAlpha = 1;
 }
 

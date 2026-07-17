@@ -228,7 +228,7 @@ function applyState(s) {
   if (s.ev) for (const ev of s.ev) guestEvent(ev);
   // stav / overlay
   if (s.st !== state) {
-    if (s.st === 'combat' || s.st === 'build') { particles = []; floaters = []; decals = []; }
+    if (s.st === 'combat' || s.st === 'build') { particles = []; floaters = []; decals = []; edgeFlashes = []; }
     setState(s.st);
     lastShopSig = shopSig(run);
   } else if (s.st === 'shop') {

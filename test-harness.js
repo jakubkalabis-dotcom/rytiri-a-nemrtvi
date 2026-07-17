@@ -497,6 +497,50 @@ code += `
     assert(p2.gems === 0, 'D12: druhý hráč gemy NEdostal, aby nedocházelo k duplikaci (' + p2.gems + ')');
     log('D12 coop gemy ok: jen killer dostává odměnu (p1=' + p1.gems + ', p2=' + p2.gems + ')'); }
 
+  // ---- 31) FÁZE 2 (game feel): killShake — otřes jen za DŮLEŽITÉ zabití, obyčejný trash = 0 ----
+  { assert(killShake({ arch: 'BOSS' }) === 11, 'killShake boss=11');
+    assert(killShake({ arch: 'TANK' }) === 3, 'killShake tank=3');
+    assert(killShake({ elite: 'zhoubny' }) === 1.2, 'killShake elite=1.2');
+    assert(killShake({ arch: 'WALKER' }) === 0, 'killShake obyčejný trash=0');
+    log('killShake ok (boss/tank/elite třesou, trash ne)'); }
+
+  // ---- 32) pushDamageFloater: blízké rychlé trash-zásahy se SLUČUJÍ, počet nikdy nepřeteče strop; krity NE ----
+  { floaters.length = 0;
+    for (let i = 0; i < 40; i++) pushDamageFloater(100, 100, 5, false);   // stejné místo, rychle za sebou
+    const trash = floaters.filter(f => !f.crit);
+    assert(trash.length === 1, 'blízké trash zásahy se sloučily do 1 floateru (' + trash.length + ')');
+    assert(trash[0].dmg === 200, 'sloučené poškození se sečetlo (5×40=200, je ' + trash[0].dmg + ')');
+    floaters.length = 0;
+    for (let i = 0; i < 40; i++) pushDamageFloater(100 + i * 40, 100, 3, false);   // rozházené daleko od sebe → neslučitelné
+    assert(floaters.filter(f => !f.crit).length <= FLOATER_TRASH_LIMIT, 'strop trash-floaterů se drží (' + floaters.length + ' <= ' + FLOATER_TRASH_LIMIT + ')');
+    floaters.length = 0;
+    for (let i = 0; i < 5; i++) pushDamageFloater(100, 100, 9, true);   // krity se nikdy neslučují
+    assert(floaters.filter(f => f.crit).length === 5, 'krity si vždy drží vlastní floater (' + floaters.filter(f=>f.crit).length + ')');
+    log('spawnFloater throttling ok (merge/strop/krity)'); }
+
+  // ---- 33) hitDirection: směr rány ze střely (vx/vy) nebo z pozice útočníka; bez zdroje null ----
+  { const e = { x: 100, y: 100 };
+    const dBullet = hitDirection(e, { vx: 3, vy: 0 }, null);
+    assert(dBullet && Math.abs(dBullet.x - 1) < 1e-6 && Math.abs(dBullet.y) < 1e-6, 'hitDirection ze střely ok');
+    const dPlayer = hitDirection(e, null, { x: 90, y: 100 });
+    assert(dPlayer && dPlayer.x > 0.99, 'hitDirection z pozice útočníka ok');
+    assert(hitDirection(e, null, null) === null, 'hitDirection bez zdroje = null');
+    log('hitDirection ok (střela/útočník/bez zdroje)'); }
+
+  // ---- 34) mixHex: interpolace barev pro pohasínající svatou pečeť brány (t=0→a, t=1→b, mimo rozsah se ořízne) ----
+  { assert(mixHex('#e7c56a', '#6a6258', 0) === '#e7c56a', 'mixHex t=0 vrací první barvu');
+    assert(mixHex('#e7c56a', '#6a6258', 1) === '#6a6258', 'mixHex t=1 vrací druhou barvu');
+    assert(mixHex('#000000', '#ffffff', 2) === '#ffffff', 'mixHex ořízne t>1');
+    log('mixHex ok (interpolace barev pečeti)'); }
+
+  // ---- 35) enemyMarkerIcon: prioritní ikona nad hlavou — léčitel/dělič mají přednost před obyčejnou elitou ----
+  { assert(enemyMarkerIcon({ def: { heals: true } }) === '✚', 'léčitel = ✚');
+    assert(enemyMarkerIcon({ def: { splits: 3 } }) === '⚔', 'dělič = ⚔');
+    assert(enemyMarkerIcon({ def: {}, elite: 'zhoubny' }) === '★', 'elita = ★');
+    assert(enemyMarkerIcon({ def: { heals: true }, elite: 'zhoubny' }) === '✚', 'léčitel má přednost před elitou');
+    assert(enemyMarkerIcon({ def: {} }) === null, 'obyčejný nepřítel bez markeru');
+    log('enemyMarkerIcon ok (priorita léčitel/dělič/elita)'); }
+
   console.log('\\n==== TEST RESULTS ====');
   for (const r of results) console.log('  ✓ ' + r);
   console.log('==== ALL PASSED ====');
