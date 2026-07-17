@@ -10,6 +10,14 @@ muted = profile.settings.muted;
 let run = null;       // aktuální hra (viz newRun)
 const players = [];
 let enemies = [], walls = [], turrets = [], traps = [], warriors = [];
+// Stabilní ID nepřátel (FÁZE 3 co-op): guest podle nich páruje entity mezi po sobě jdoucími
+// síťovými snímky (rx/ry vyhlazování), protože applyState() vytváří u enemies pokaždé nové objekty.
+// Jedinečné jen v rámci jednoho běhu — reset na 1 dělá newRun().
+let nextEnemyId = 1;
+// V9 perf: tileIndex → past. Udržovaná při stavění/prodeji/expiraci pastí (viz placeAt/sellAt/updateTraps),
+// aby se v updateEnemies (volá se pro každého nepřítele) nemuselo lineárně procházet celé pole traps.
+// Transientní — vždy rebuildovatelná z traps, nepersistuje se.
+let trapGrid = new Map();
 
 /* ---------- Co-op / síť ---------- */
 // role: null = solo; 'host' = hostitel (počítá simulaci); 'guest' = připojený druhý hráč (jen vykresluje)
@@ -90,7 +98,8 @@ function newRun(classIds) {
   // sdílené vlastněné zbraně = sjednocení startovních zbraní hráčů
   for (const cid of classIds) for (const wid of CLASSES[cid].start) if (!run.ownedWeapons.includes(wid)) run.ownedWeapons.push(wid);
   for (const wid of run.ownedWeapons) grantAmmoFor(wid, 2);
-  enemies = []; walls = []; turrets = []; traps = []; warriors = [];
+  enemies = []; walls = []; turrets = []; traps = []; warriors = []; trapGrid.clear();
+  nextEnemyId = 1;   // nový běh = nová sada ID (unikátnost stačí v rámci jednoho běhu)
   bullets = []; eBullets = []; groundFx = []; particles = []; effects = [];
   pickups = []; floaters = []; decals = []; netEvents = []; freezeTimer = 0; edgeFlashes = [];
   run.combo = 0; run.comboT = 0;
@@ -111,6 +120,7 @@ function makePlayer(cls, classId) {
   const p = {
     classId, class: cls, color: cls.color, gems: cls.startGems + Math.round(metaLvl('gems') * META_UPGRADES.gems.per),   // meta: Dědictví
     x: (CORE.tx + CORE.w / 2) * TILE, y: (CORE.ty - 1) * TILE, r: 12,
+    rx: (CORE.tx + CORE.w / 2) * TILE, ry: (CORE.ty - 1) * TILE,   // render-pozice (transientní); u guesta se vyhlazuje k x/y
     baseHp, hpMax: baseHp, hp: baseHp,
     baseSpeed: 2.6 * cls.spdMod * (pas.moveSpeed || 1),
     weaponId: cls.start[0], cool: 0, aimAngle: -Math.PI / 2, inv: 0, downed: false,
@@ -828,7 +838,7 @@ function advanceToMap(i) {
   // Ekonomika, vylepšení, zbraně a munice (objekt `run`) zůstávají.
   loadMap(i);
   enemies = []; bullets = []; eBullets = []; groundFx = []; pickups = []; decals = []; particles = []; edgeFlashes = [];
-  walls = []; turrets = []; traps = []; warriors = [];
+  walls = []; turrets = []; traps = []; warriors = []; trapGrid.clear();
   flowDirty = true;
   const cx = (CORE.tx + CORE.w / 2) * TILE;
   players.forEach((p, idx) => { p.x = cx + (idx === 0 ? -20 : 20); p.y = (CORE.ty - 1) * TILE; });
@@ -859,9 +869,11 @@ function placeAt(tx, ty) {
     (STRUCTURES[buildSel] ? walls : turrets).push(obj);
     flowDirty = true;
   } else if (TRAPS[buildSel]) {
-    // pozemní past (neblokuje)
-    if (traps.some(t => t.tx === tx && t.ty === ty)) return;
-    traps.push({ def, defId: buildSel, tx, ty, x, y, hp: def.hp || 0, dur: def.dur || Infinity, cool: 0, hitCd: 0 });
+    // pozemní past (neblokuje) — nejvýš jedna na dlaždici
+    if (trapGrid.has(i)) return;
+    const trapObj = { def, defId: buildSel, tx, ty, x, y, hp: def.hp || 0, dur: def.dur || Infinity, cool: 0, hitCd: 0 };
+    traps.push(trapObj);
+    trapGrid.set(i, trapObj);
   } else if (WARRIORS[buildSel]) {
     if (warriors.length >= MAX_WARRIORS) { banner = { text: 'LIMIT SPOJENCŮ (' + MAX_WARRIORS + ')!', t: 60, warn: true }; return; }
     warriors.push({ def, defId: buildSel, x, y, r: 12, hp: def.hp, hpMax: def.hp, homeX: x, homeY: y, cool: 0, aim: 0, flash: 0 });
@@ -881,8 +893,8 @@ function sellAt(tx, ty, seller) {
     walls = walls.filter(w => w !== s); turrets = turrets.filter(w => w !== s);
     refund(s.defId, seller); flowDirty = true; return true;
   }
-  const ti = traps.findIndex(t => t.tx === tx && t.ty === ty);
-  if (ti >= 0) { refund(traps[ti].defId, seller); traps.splice(ti, 1); return true; }
+  const trap = trapGrid.get(i);
+  if (trap) { refund(trap.defId, seller); trapGrid.delete(i); traps.splice(traps.indexOf(trap), 1); return true; }
   const wi = warriors.findIndex(w => Math.floor(w.x / TILE) === tx && Math.floor(w.y / TILE) === ty);
   if (wi >= 0) { refund(warriors[wi].defId, seller); warriors.splice(wi, 1); return true; }
   return false;
@@ -970,8 +982,10 @@ function spawnEnemy(typeId, ovX, ovY, isSplit) {
   }
   const hp = Math.round(base.hp * hpMul);
   const e = {
+    id: nextEnemyId++,   // stabilní ID pro párování mezi síťovými snímky (co-op render-vyhlazení)
     typeId, arch: base.arch, def: base,
     x: s.x, y: s.y, r: base.size / 2, spawnT: 22,
+    rx: s.x, ry: s.y,   // render-pozice (transientní, neserializuje se); u guesta se vyhlazuje k x/y
     hp, hpMax: hp,
     speed: base.speed * spdMul,
     dmg: base.dmg * dmgMul,
@@ -1488,8 +1502,10 @@ function updateCombat(dt) {
       wave.spawnCool = wave.interval || Math.max(10, 40 - run.wave * 1.2) * (wave.spawnMul || 1);
     }
   }
-  // konec vlny
-  enemies = enemies.filter(e => !e.dead);
+  // konec vlny — V9 perf: swap-remove místo filter (pořadí nepřátel nikde nezávisí, viz report May)
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    if (enemies[i].dead) { enemies[i] = enemies[enemies.length - 1]; enemies.pop(); }
+  }
   if (wave.spawned >= wave.total && enemies.length === 0) return endWave();
   // konec hry jen když padne brána (padlí hráči se oživí další vlnu)
   if (run.lives <= 0) return doGameOver();
@@ -1836,6 +1852,22 @@ function escapeStuck(e) {
 }
 
 /* ---------- Nepřátelé ---------- */
+// V9 perf: SpatialHash.query() (engine.js) alokuje nové pole při KAŽDÉM volání. V updateEnemies se
+// volá pro každého živého nepřítele (léčení šamana + separace od okolí), tedy potenciálně mnohokrát
+// za snímek. Sdílený buffer se jen přepisuje (length=0) — žádná nová alokace za frame. Bezpečné, protože
+// se výsledek vždy hned a synchronně spotřebuje (for-of) a nikdy se nedrží napříč voláními.
+const _enemyQueryBuf = [];
+function queryHashInto(hash, x, y, r) {
+  _enemyQueryBuf.length = 0;
+  const minx = Math.floor((x - r) / hash.cell), maxx = Math.floor((x + r) / hash.cell);
+  const miny = Math.floor((y - r) / hash.cell), maxy = Math.floor((y + r) / hash.cell);
+  for (let cx = minx; cx <= maxx; cx++)
+    for (let cy = miny; cy <= maxy; cy++) {
+      const arr = hash.map.get(hash.key(cx, cy));
+      if (arr) for (const e of arr) _enemyQueryBuf.push(e);
+    }
+  return _enemyQueryBuf;
+}
 function updateEnemies(dt) {
   for (const e of enemies) {
     if (e.dead) continue;
@@ -1925,12 +1957,12 @@ function updateEnemies(dt) {
       e.healCool = (e.healCool == null ? e.def.healRate : e.healCool) - dt;
       if (e.healCool <= 0) {
         e.healCool = e.def.healRate; let any = false;
-        for (const o of enemyHash.query(e.x, e.y, e.def.healRadius)) if (!o.dead && o !== e && o.hp < o.hpMax) { o.hp = Math.min(o.hpMax, o.hp + e.def.healAmt); o.flash = Math.max(o.flash, 3); any = true; }
+        for (const o of queryHashInto(enemyHash, e.x, e.y, e.def.healRadius)) if (!o.dead && o !== e && o.hp < o.hpMax) { o.hp = Math.min(o.hpMax, o.hp + e.def.healAmt); o.flash = Math.max(o.flash, 3); any = true; }
         if (any) particles.push({ x: e.x, y: e.y, ring: true, r: 6, rMax: e.def.healRadius, life: 1, decay: 0.06, color: 'rgba(120,255,150,0.4)' });
       }
     }
     // separace od ostatních nepřátel (aby se nehromadili)
-    const near = enemyHash.query(e.x, e.y, e.r * 2);
+    const near = queryHashInto(enemyHash, e.x, e.y, e.r * 2);
     for (const o of near) {
       if (o === e || o.dead) continue;
       const ox = e.x - o.x, oy = e.y - o.y, od = Math.hypot(ox, oy);
@@ -1941,9 +1973,9 @@ function updateEnemies(dt) {
     // ZUŘIVEC: čím míň HP, tím rychlejší (frenzy)
     const frenzy = e.def.frenzy ? (1 + (1 - clamp(e.hp / e.hpMax, 0, 1)) * 1.2) : 1;
     const spd = e.speed * e.slowMul * frenzy * (enraged ? 1.4 : 1) * (freezeTimer > 0 ? 0 : 1);
-    // past „smola" pod nohama
-    const trap = traps.find(t => t.def.arch === 'SLOW' && t.tx === Math.floor(e.x / TILE) && t.ty === Math.floor(e.y / TILE));
-    const slowField = trap ? trap.def.slow.mul : 1;
+    // past „smola" pod nohama — V9 perf: O(1) mřížkový lookup místo traps.find (lineární O(n) po dlaždici)
+    const trap = trapGrid.get(tileIndex(Math.floor(e.x / TILE), Math.floor(e.y / TILE)));
+    const slowField = (trap && trap.def.arch === 'SLOW') ? trap.def.slow.mul : 1;
     const nx = e.x + dx * spd * slowField * dt, ny = e.y + dy * spd * slowField * dt;
 
     // útok na zeď/věž v cestě
@@ -1993,7 +2025,11 @@ function updateEnemies(dt) {
       if (navigator.vibrate && profile.settings.haptics) navigator.vibrate(60);
     }
   }
-  warriors = warriors.filter(w => w.hp > 0);
+  // V9 perf: swap-remove místo filter (pořadí válečníků nikde nezávisí — jen se každý snímek
+  // vykreslují/cílí přes plný for-of, žádný kód nespoléhá na jejich index; viz report May).
+  for (let i = warriors.length - 1; i >= 0; i--) {
+    if (warriors[i].hp <= 0) { warriors[i] = warriors[warriors.length - 1]; warriors.pop(); }
+  }
 }
 function explodeEnemy(e, target) {
   e.dead = true;
@@ -2047,7 +2083,11 @@ function updateWarriors(dt) {
   }
   // úklid vypršelých dočasných spojenců (klan i kostlivci); klan odchod řešíme podle vlastníka níže
   for (const w of warriors) if (w.temp != null && w.temp <= 0) { w.hp = 0; burst(w.x, w.y, (w.def && w.def.color) || '#d8d0b0', 12); }
-  warriors = warriors.filter(w => w.hp > 0);
+  // V9 perf: swap-remove místo filter (stejný vzor jako již v updateEnemies) — pořadí válečníků
+  // nikde nezávisí, viz komentář u swap-remove v updateEnemies.
+  for (let i = warriors.length - 1; i >= 0; i--) {
+    if (warriors[i].hp <= 0) { warriors[i] = warriors[warriors.length - 1]; warriors.pop(); }
+  }
   // po odchodu VŠECH sekerníků: 40s cooldown a odblokování dalšího volání
   for (const p of players) {
     if (p._clanActive && !warriors.some(w => w.clanOwner === p)) { p._clanActive = false; p.clanCd = CLAN_COOLDOWN; banner = { text: 'Klan odešel — cooldown 40 s.', t: 60 }; }
@@ -2121,6 +2161,8 @@ function updateTraps(dt) {
     if (e.hp <= 0) killEnemy(e);
   }
   // pasti jsou trvalé v rámci mapy; odstraní se jen výslovně časované (dur)
+  // (udrž trapGrid v synchronu, jinak by na uvolněné dlaždici zůstal zastaralý záznam)
+  for (const t of traps) if (t.def.arch === 'DOT_AOE' && t.dur <= 0) trapGrid.delete(tileIndex(t.tx, t.ty));
   traps = traps.filter(t => !(t.def.arch === 'DOT_AOE' && t.dur <= 0));
 }
 // D11: pasivní oprava (Inženýr, passive.canRepair) — poškozené zdi/věže v okruhu 90 px
@@ -2255,6 +2297,7 @@ function updateEffects(dt) {
 function render() {
   ctx.clearRect(0, 0, W, H);
   if (state === 'menu' || state === 'class' || state === 'host' || state === 'join' || state === 'gameOver' || state === 'victory') { drawMenuBg(); return; }
+  updateRenderPositions();   // FÁZE 3 co-op: rx/ry = vyhlazené (guest) / přesné (sólo, host) render-pozice
   const cp = localPlayer();
   if (cp && state !== 'build') updateCamera(cp.x, cp.y, 1);   // ve stavění kamerou hýbe hráč ručně
   else clampCamera();
@@ -2720,24 +2763,28 @@ function enemyMarkerIcon(e) {
   return null;
 }
 function drawEnemies() {
+  // POZOR co-op FÁZE 3: kreslí se z e.rx/e.ry (render-pozice), NE z e.x/e.y (autoritativní simulace).
+  // U sóla/hostitele updateRenderPositions() nastavuje rx/ry == x/y KAŽDÝ snímek (přímé přiřazení,
+  // beze změny hodnoty) → vizuál je bit-identický s původním chováním. U guesta se rx/ry plynule
+  // vyhlazují k x/y (viz net.js), takže se nepřítel mezi ~30Hz snímky nezasekává.
   for (const e of enemies) {
-    if (!onScreen(e.x, e.y, e.r + 30)) continue;
+    if (!onScreen(e.rx, e.ry, e.r + 30)) continue;
     const walkAmp = e.arch === 'RUNNER' ? 1 : 0.6;
-    const walkPh = animClock * (e.arch === 'RUNNER' ? 0.4 : 0.25) + e.x * 0.1;
+    const walkPh = animClock * (e.arch === 'RUNNER' ? 0.4 : 0.25) + e.rx * 0.1;
     const bob = Math.sin(walkPh) * (e.arch === 'RUNNER' ? 1.6 : 1.0);
-    drawShadow(e.x, e.y, e.r);
+    drawShadow(e.rx, e.ry, e.r);
     // hrozivá přítomnost bossů: temný ryk na zemi + pulzující barevná záře
     if (e.arch === 'BOSS') {
       const t = 0.5 + Math.sin(animClock * 0.12) * 0.35, mc = (e.def && e.def.final) ? '#ffcc33' : '#ff2a1a';
-      ctx.fillStyle = 'rgba(6,0,3,0.5)'; ctx.beginPath(); ctx.ellipse(e.x, e.y + e.r * 0.55, e.r * 1.7, e.r * 0.95, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.save(); ctx.globalAlpha = 0.12 + t * 0.14; ctx.fillStyle = mc; ctx.beginPath(); ctx.arc(e.x, e.y + bob, e.r * (1.5 + t * 0.15), 0, Math.PI * 2); ctx.fill(); ctx.restore();
+      ctx.fillStyle = 'rgba(6,0,3,0.5)'; ctx.beginPath(); ctx.ellipse(e.rx, e.ry + e.r * 0.55, e.r * 1.7, e.r * 0.95, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.save(); ctx.globalAlpha = 0.12 + t * 0.14; ctx.fillStyle = mc; ctx.beginPath(); ctx.arc(e.rx, e.ry + bob, e.r * (1.5 + t * 0.15), 0, Math.PI * 2); ctx.fill(); ctx.restore();
     }
-    if (e.elite) { const g = ELITES[e.elite].glow; ctx.fillStyle = g; ctx.globalAlpha = 0.25 + Math.sin(animClock * 0.2) * 0.1; ctx.beginPath(); ctx.arc(e.x, e.y + bob, e.r + 5, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; }
+    if (e.elite) { const g = ELITES[e.elite].glow; ctx.fillStyle = g; ctx.globalAlpha = 0.25 + Math.sin(animClock * 0.2) * 0.1; ctx.beginPath(); ctx.arc(e.rx, e.ry + bob, e.r + 5, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; }
     // směr „obličeje" = k jádru (zombie se šourají dolů)
     const cx = (CORE.tx + CORE.w / 2) * TILE, cy = (CORE.ty + CORE.h / 2) * TILE;
-    const fa = Math.atan2(cy - e.y, cx - e.x);
+    const fa = Math.atan2(cy - e.ry, cx - e.rx);
     const col = e.color, dark = shade(e.color, -0.32), lite = shade(e.color, 0.18);
-    ctx.save(); ctx.translate(Math.round(e.x), Math.round(e.y + bob)); ctx.rotate(fa);
+    ctx.save(); ctx.translate(Math.round(e.rx), Math.round(e.ry + bob)); ctx.rotate(fa);
     if (e.spawnT > 0) ctx.globalAlpha = 1 - e.spawnT / 30;
     if (e.arch === 'BOSS') { const bs = 1 + Math.sin(animClock * 0.1) * 0.035; ctx.scale(bs, bs); drawBossMob(e, col, dark, lite, walkPh); }
     else if (e.arch === 'EXPLODER') drawCreeper(e, col, dark, walkPh);
@@ -2747,23 +2794,23 @@ function drawEnemies() {
     // zásahový flash = KRÁTKÝ SVĚTLÝ OBRYS (ne plná bílá silueta) — dav se nesmí zbělat při rychlé palbě
     if (e.flash > 0) {
       ctx.save(); ctx.globalAlpha = clamp(e.flash / 3, 0, 1); ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(e.x, e.y + bob, e.r + 1.5, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+      ctx.beginPath(); ctx.arc(e.rx, e.ry + bob, e.r + 1.5, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
     }
-    if (e.spawnT <= 0 && e.flash <= 0) rimLight(e.x, e.y + bob, e.r);   // světelný okraj shora
-    if (freezeTimer > 0) { ctx.strokeStyle = '#bfefff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(e.x, e.y + bob, e.r + 2, 0, Math.PI * 2); ctx.stroke(); }
+    if (e.spawnT <= 0 && e.flash <= 0) rimLight(e.rx, e.ry + bob, e.r);   // světelný okraj shora
+    if (freezeTimer > 0) { ctx.strokeStyle = '#bfefff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(e.rx, e.ry + bob, e.r + 2, 0, Math.PI * 2); ctx.stroke(); }
     // HP proužek
     if (e.hp < e.hpMax && e.arch !== 'BOSS') {
-      ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(e.x - e.r, e.y - e.r - 8, e.r * 2, 3);
-      ctx.fillStyle = e.elite ? ELITES[e.elite].glow : '#ff8a4a'; ctx.fillRect(e.x - e.r, e.y - e.r - 8, e.r * 2 * (e.hp / e.hpMax), 3);
+      ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(e.rx - e.r, e.ry - e.r - 8, e.r * 2, 3);
+      ctx.fillStyle = e.elite ? ELITES[e.elite].glow : '#ff8a4a'; ctx.fillRect(e.rx - e.r, e.ry - e.r - 8, e.r * 2 * (e.hp / e.hpMax), 3);
     }
     // ikona prioritního cíle (elita/léčitel/dělič) — hráč hned pozná, koho zabít nejdřív
     const marker = enemyMarkerIcon(e);
     if (marker) {
       const mCol = (e.def && e.def.heals) ? '#8fff9a' : (e.def && e.def.splits) ? '#ffd35c' : ((ELITES[e.elite] && ELITES[e.elite].glow) || '#ffe08a');
-      const my = e.y - e.r - 15;
+      const my = e.ry - e.r - 15;
       ctx.font = 'bold 11px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillText(marker, e.x, my + 1);
-      ctx.fillStyle = mCol; ctx.fillText(marker, e.x, my);
+      ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillText(marker, e.rx, my + 1);
+      ctx.fillStyle = mCol; ctx.fillText(marker, e.rx, my);
       ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     }
   }
@@ -2919,39 +2966,42 @@ function drawEffects() {
   }
 }
 function drawPlayers() {
+  // POZOR co-op FÁZE 3: kreslí se z p.rx/p.ry (render-pozice), NE z p.x/p.y (autoritativní pozice).
+  // U sóla/hostitele jsou rx/ry každý snímek totožné s x/y (viz updateRenderPositions), u guesta
+  // se plynule vyhlazují — viz stejná poznámka u drawEnemies().
   const lp = localPlayer();
   for (const p of players) {
     if (p.downed) {
-      drawShadow(p.x, p.y, p.r);
+      drawShadow(p.rx, p.ry, p.r);
       ctx.globalAlpha = 0.3; ctx.fillStyle = p.color;
-      ctx.beginPath(); ctx.arc(p.x, p.y - Math.sin(animClock * 0.1) * 2, p.r, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(p.rx, p.ry - Math.sin(animClock * 0.1) * 2, p.r, 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = 1;
       ctx.fillStyle = '#fff'; ctx.font = '13px system-ui'; ctx.textAlign = 'center';
-      ctx.fillText('✝', p.x, p.y - p.r - 6); ctx.textAlign = 'left';
+      ctx.fillText('✝', p.rx, p.ry - p.r - 6); ctx.textAlign = 'left';
       continue;
     }
-    drawShadow(p.x, p.y, p.r);
+    drawShadow(p.rx, p.ry, p.r);
     const bob = Math.sin(p.walk) * 1.5;
     const blink = p.inv > 0 && Math.floor(p.inv / 5) % 2;
     // aury schopností
-    if (p.shieldT > 0) { ctx.strokeStyle = `rgba(120,200,255,${0.5 + Math.sin(animClock * 0.3) * 0.3})`; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(p.x, p.y + bob, p.r + 6, 0, Math.PI * 2); ctx.stroke(); }
-    if (p.rageT > 0) { ctx.fillStyle = `rgba(255,60,40,${0.15 + Math.sin(animClock * 0.4) * 0.1})`; ctx.beginPath(); ctx.arc(p.x, p.y + bob, p.r + 8, 0, Math.PI * 2); ctx.fill(); }
-    if (p.buffPower > 0 || p.buffRapid > 0) { ctx.strokeStyle = p.buffPower > 0 ? 'rgba(255,120,230,0.6)' : 'rgba(120,220,255,0.6)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p.x, p.y + bob, p.r + 4, 0, Math.PI * 2); ctx.stroke(); }
-    if (isCoop() && p === lp) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(p.x, p.y + bob, p.r + 9, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
+    if (p.shieldT > 0) { ctx.strokeStyle = `rgba(120,200,255,${0.5 + Math.sin(animClock * 0.3) * 0.3})`; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(p.rx, p.ry + bob, p.r + 6, 0, Math.PI * 2); ctx.stroke(); }
+    if (p.rageT > 0) { ctx.fillStyle = `rgba(255,60,40,${0.15 + Math.sin(animClock * 0.4) * 0.1})`; ctx.beginPath(); ctx.arc(p.rx, p.ry + bob, p.r + 8, 0, Math.PI * 2); ctx.fill(); }
+    if (p.buffPower > 0 || p.buffRapid > 0) { ctx.strokeStyle = p.buffPower > 0 ? 'rgba(255,120,230,0.6)' : 'rgba(120,220,255,0.6)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p.rx, p.ry + bob, p.r + 4, 0, Math.PI * 2); ctx.stroke(); }
+    if (isCoop() && p === lp) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(p.rx, p.ry + bob, p.r + 9, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
     // alchymista: proměna v abominaci — jiné tělo + žíravá aura
-    if (p.abomT > 0) { drawAbomination(p.x, p.y + bob, p.r, p.aimAngle, p.walk); continue; }
+    if (p.abomT > 0) { drawAbomination(p.rx, p.ry + bob, p.r, p.aimAngle, p.walk); continue; }
     if (blink) continue;
     const w0 = WEAPONS[p.weaponId] || {};
     const atk = clamp(p.atkAnim / 10, 0, 1);
     if (p.invisT > 0) ctx.globalAlpha = 0.28;   // zvěd: neviditelnost (poloprůhledný)
-    drawBlockyHumanoid(p.x, p.y + bob, p.r, p.aimAngle, p.walk, atk, {
+    drawBlockyHumanoid(p.rx, p.ry + bob, p.r, p.aimAngle, p.walk, atk, {
       skin: '#d8a878', shirt: p.color, dark: shade(p.color, -0.4), hat: shade(p.color, 0.22), pants: '#39344f',
       weaponShape: WEAPON_SHAPE[p.weaponId] || (w0.cat === 'melee' ? 'sword' : 'bow'), weaponColor: w0.color,
     });
     ctx.globalAlpha = 1;
-    if (p.invisT <= 0) rimLight(p.x, p.y + bob, p.r);   // světelný okraj shora
+    if (p.invisT <= 0) rimLight(p.rx, p.ry + bob, p.r);   // světelný okraj shora
     // rytíř: aktivní blok — velký štít napřažený ve směru míření
-    if (p.blockT > 0) drawKnightShield(p.x, p.y + bob, p.r, p.aimAngle);
+    if (p.blockT > 0) drawKnightShield(p.rx, p.ry + bob, p.r, p.aimAngle);
   }
 }
 // Štít rytíře (vizuál aktivního bloku): kovová deska s bosem, natočená ve směru míření.
@@ -3657,7 +3707,7 @@ function handleBuildTap(x, y) {
 function upgradeAt(tx, ty, p) {
   p = p || localPlayer();
   const i = tileIndex(tx, ty);
-  let obj = grid.structures[i] || traps.find(t => t.tx === tx && t.ty === ty);
+  let obj = grid.structures[i] || trapGrid.get(i);
   if (!obj || obj.temp != null) return;
   const lvl = obj.level || 0; if (lvl >= 5) return;
   const cost = Math.round((obj.def.cost || 60) * 0.55 * Math.pow(1.5, lvl));

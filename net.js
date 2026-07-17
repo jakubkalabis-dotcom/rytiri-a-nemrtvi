@@ -172,25 +172,117 @@ function netHandleCmd(m) {
 }
 
 /* ============================================================================
+   SNAPSHOT_SCHEMA — JEDEN ZDROJ PRAVDY pro serializeState() i applyState().
+   Pole každé entity se vyjmenují JEDNOU zde; serialize i apply je čtou odsud.
+   Zápis pole:
+     'jmeno'                  → přímá kopie (obj.jmeno), beze změny hodnoty
+     { key, def }              → obj[key] || def   (stejná sémantika jako dřívější `x || 0`/`|| {}`/`|| []`/`|| null`)
+     { key, bool: true }       → !!obj[key]
+   `rehydrate(obj)` (volitelný) se po applyState() zavolá na KAŽDÝ prvek dané
+   entity a doplní netransportovatelné věci (napojení `.def`/`.class`, apod.).
+   ========================================================================== */
+const SNAPSHOT_SCHEMA = {
+  run: {
+    single: true,
+    fields: [
+      'lives', 'wave', { key: 'score', def: 0 }, 'ownedWeapons', 'ammo', 'owned', 'upgrades', 'wUpgrades',
+      { key: 'wood', def: 0 }, { key: 'steel', def: 0 }, { key: 'combo', def: 0 }, { key: 'comboT', def: 0 },
+      { key: 'shieldLvl', def: 0 }, { key: 'wheelReady', def: 0 }, { key: 'wheelUpgrades', def: {} },
+      { key: 'turretKills', def: 0 }, { key: 'wheelThreshold', def: 2 }, { key: 'pacts', def: [] },
+      { key: '_pactOffer', def: null }, { key: 'lifeBuys', def: 0 },
+    ],
+  },
+  wave: { single: true, fields: ['boss', 'spawned', 'total', 'reward'] },
+  banner: { single: true, fields: ['text', 't', 'warn'] },
+  players: {
+    list: true,
+    fields: [
+      'x', 'y', 'r', 'hp', 'hpMax', { key: 'gems', def: 0 }, 'aimAngle', 'inv', 'downed', 'classId', 'color',
+      'weaponId', 'mana', 'manaMax', { key: 'walk', def: 0 }, { key: 'buffRapid', def: 0 }, { key: 'buffPower', def: 0 },
+      { key: 'shieldT', def: 0 }, { key: 'rageT', def: 0 }, { key: 'abilityCd', def: 0 }, { key: 'perks', def: {} },
+      { key: 'perkOffer', def: null }, { key: 'blockT', def: 0 }, { key: 'invisT', def: 0 }, { key: 'flurryT', def: 0 },
+      { key: 'abomT', def: 0 }, { key: 'potions', def: 0 }, { key: 'bile', def: 0 }, { key: 'clanCd', def: 0 },
+      { key: 'resurrectUsed', bool: true }, { key: '_clanActive', bool: true },
+    ],
+    rehydrate(p) {
+      p.class = CLASSES[p.classId]; p.basePassive = p.class ? p.class.passive : {};
+      p.perks = p.perks || {}; p.input = { mx: 0, my: 0, aiming: false };
+      recalcPerks(p);
+    },
+  },
+  enemies: {
+    list: true,
+    fields: [
+      'id', 'x', 'y', 'r', 'hp', 'hpMax', 'flash', 'arch', 'color', 'typeId', 'elite', 'spawnT',
+      { key: 'slamWind', def: 0 }, 'slamWindMax', 'slamX', 'slamY', 'slamR',
+    ],
+    rehydrate(e) { e.def = ENEMIES[e.typeId] || {}; },
+  },
+  bullets: { list: true, fields: ['x', 'y', 'vx', 'vy', 'r', 'color', 'thrown', 'magic', 'ang', 'crit'] },
+  eBullets: { list: true, fields: ['x', 'y', 'r', 'color'] },
+  walls: {
+    list: true,
+    fields: ['defId', 'tx', 'ty', 'x', 'y', 'hp', 'hpMax', 'flash', 'temp', { key: 'level', def: 0 }],
+    rehydrate(o) { o.def = STRUCTURES[o.defId] || TRAPS[o.defId]; },
+  },
+  turrets: {
+    list: true,
+    fields: ['defId', 'tx', 'ty', 'x', 'y', 'hp', 'hpMax', 'flash', 'temp', { key: 'level', def: 0 }],
+    rehydrate(o) { o.def = TRAPS[o.defId]; },
+  },
+  traps: {
+    list: true,
+    fields: ['defId', 'tx', 'ty', 'x', 'y', 'dur', { key: 'level', def: 0 }],
+    rehydrate(o) { o.def = TRAPS[o.defId]; },
+  },
+  warriors: {
+    list: true,
+    fields: ['defId', 'x', 'y', 'r', 'hp', 'hpMax', 'flash', 'aim'],
+    rehydrate(o) { o.def = WARRIORS[o.defId] || (o.defId === 'clan_axeman' ? CLAN_AXEMAN : { color: '#d07038', arch: 'MELEE' }); },
+  },
+  groundFx: { list: true, fields: ['x', 'y', 'radius', 'color'] },
+  pickups: { list: true, fields: ['id', 'x', 'y', 'bob'] },
+};
+
+// Serializuje jeden objekt podle pole `fields` ze schématu (viz komentář výše).
+function schemaPick(obj, fields) {
+  const out = {};
+  for (const f of fields) {
+    if (typeof f === 'string') out[f] = obj[f];
+    else if (f.bool) out[f.key] = !!obj[f.key];
+    else out[f.key] = obj[f.key] || f.def;
+  }
+  return out;
+}
+function schemaSerList(schemaKey, arr) { return arr.map(o => schemaPick(o, SNAPSHOT_SCHEMA[schemaKey].fields)); }
+function schemaSerSingle(schemaKey, obj) { return obj && schemaPick(obj, SNAPSHOT_SCHEMA[schemaKey].fields); }
+// Po převzetí pole ze snímku dovoláme rehydrate() (napojení def/class) na každý prvek.
+function schemaApplyList(schemaKey, arr) {
+  const rehydrate = SNAPSHOT_SCHEMA[schemaKey].rehydrate;
+  if (rehydrate) for (const o of arr) rehydrate(o);
+  return arr;
+}
+
+/* ============================================================================
    SERIALIZACE (host → guest)
    ========================================================================== */
 function serializeState() {
   const snap = {
     st: state, map: currentMap,
-    run: run && { lives: run.lives, wave: run.wave, score: run.score || 0, ownedWeapons: run.ownedWeapons, ammo: run.ammo, owned: run.owned, upgrades: run.upgrades, wUpgrades: run.wUpgrades, wood: run.wood || 0, steel: run.steel || 0, combo: run.combo || 0, comboT: run.comboT || 0, shieldLvl: run.shieldLvl || 0, wheelReady: run.wheelReady || 0, wheelUpgrades: run.wheelUpgrades || {}, turretKills: run.turretKills || 0, wheelThreshold: run.wheelThreshold || 2, pacts: run.pacts || [], _pactOffer: run._pactOffer || null, lifeBuys: run.lifeBuys || 0 },
-    wave: wave && { boss: wave.boss, spawned: wave.spawned, total: wave.total, reward: wave.reward },
-    banner: banner && { text: banner.text, t: banner.t, warn: banner.warn },
+    run: schemaSerSingle('run', run),
+    wave: schemaSerSingle('wave', wave),
+    banner: schemaSerSingle('banner', banner),
     readyHost, readyGuest, freezeTimer,
-    players: players.map(p => ({ x: p.x, y: p.y, r: p.r, hp: p.hp, hpMax: p.hpMax, gems: p.gems || 0, aimAngle: p.aimAngle, inv: p.inv, downed: p.downed, classId: p.classId, color: p.color, weaponId: p.weaponId, mana: p.mana, manaMax: p.manaMax, walk: p.walk || 0, buffRapid: p.buffRapid || 0, buffPower: p.buffPower || 0, shieldT: p.shieldT || 0, rageT: p.rageT || 0, abilityCd: p.abilityCd || 0, perks: p.perks || {}, perkOffer: p.perkOffer || null, blockT: p.blockT || 0, invisT: p.invisT || 0, flurryT: p.flurryT || 0, abomT: p.abomT || 0, potions: p.potions || 0, bile: p.bile || 0, clanCd: p.clanCd || 0, resurrectUsed: !!p.resurrectUsed, _clanActive: !!p._clanActive })),
-    enemies: enemies.map(e => ({ x: e.x, y: e.y, r: e.r, hp: e.hp, hpMax: e.hpMax, flash: e.flash, arch: e.arch, color: e.color, typeId: e.typeId, elite: e.elite, spawnT: e.spawnT, slamWind: e.slamWind || 0, slamWindMax: e.slamWindMax, slamX: e.slamX, slamY: e.slamY, slamR: e.slamR })),
-    bullets: bullets.map(b => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, r: b.r, color: b.color, thrown: b.thrown, magic: b.magic, ang: b.ang, crit: b.crit })),
-    eBullets: eBullets.map(b => ({ x: b.x, y: b.y, r: b.r, color: b.color })),
-    walls: walls.map(s => ({ defId: s.defId, tx: s.tx, ty: s.ty, x: s.x, y: s.y, hp: s.hp, hpMax: s.hpMax, flash: s.flash, temp: s.temp, level: s.level || 0 })),
-    turrets: turrets.map(s => ({ defId: s.defId, tx: s.tx, ty: s.ty, x: s.x, y: s.y, hp: s.hp, hpMax: s.hpMax, flash: s.flash, temp: s.temp, level: s.level || 0 })),
-    traps: traps.map(t => ({ defId: t.defId, tx: t.tx, ty: t.ty, x: t.x, y: t.y, dur: t.dur, level: t.level || 0 })),
-    warriors: warriors.map(w => ({ defId: w.defId, x: w.x, y: w.y, r: w.r, hp: w.hp, hpMax: w.hpMax, flash: w.flash, aim: w.aim })),
-    groundFx: groundFx.map(g => ({ x: g.x, y: g.y, radius: g.radius, color: g.color })),
-    pickups: pickups.map(pu => ({ id: pu.id, x: pu.x, y: pu.y, bob: pu.bob })),
+    players: schemaSerList('players', players),
+    enemies: schemaSerList('enemies', enemies),
+    bullets: schemaSerList('bullets', bullets),
+    eBullets: schemaSerList('eBullets', eBullets),
+    walls: schemaSerList('walls', walls),
+    turrets: schemaSerList('turrets', turrets),
+    traps: schemaSerList('traps', traps),
+    warriors: schemaSerList('warriors', warriors),
+    groundFx: schemaSerList('groundFx', groundFx),
+    pickups: schemaSerList('pickups', pickups),
     effects: effects.map(e => ({ ...e })),
     ev: netEvents,
   };
@@ -211,16 +303,32 @@ function applyState(s) {
   freezeTimer = s.freezeTimer || 0;
   wave = s.wave ? s.wave : null;
   banner = s.banner ? s.banner : null;
-  // hráči (napojíme třídu z classId)
+  // hráči (napojíme třídu z classId) — applyState() staví pole ZNOVA (nové objekty), takže by jinak
+  // guest ztratil vyhlazenou render-pozici (rx/ry) při každém snímku. Napřed si ji uložíme (podle
+  // indexu — 0=hostitel, 1=guest, pořadí je stabilní), po rebuildu ji naSeedujeme do nových objektů.
+  const prevPlayersRender = players.map(p => ({ rx: p.rx != null ? p.rx : p.x, ry: p.ry != null ? p.ry : p.y }));
   players.length = 0;
-  for (const p of s.players) { p.class = CLASSES[p.classId]; p.basePassive = p.class ? p.class.passive : {}; p.perks = p.perks || {}; p.input = { mx: 0, my: 0, aiming: false }; recalcPerks(p); players.push(p); }
-  // nepřátelé — napojíme def podle typeId (kvůli vykreslení bosse/pancíře)
-  enemies = s.enemies.map(e => (e.def = ENEMIES[e.typeId] || {}, e));
+  for (let i = 0; i < s.players.length; i++) {
+    const p = s.players[i];
+    SNAPSHOT_SCHEMA.players.rehydrate(p);
+    const prev = prevPlayersRender[i];
+    if (prev) { p.rx = prev.rx; p.ry = prev.ry; } else { p.rx = p.x; p.ry = p.y; }   // nový hráč = objeví se rovnou na místě
+    players.push(p);
+  }
+  // nepřátelé — napojíme def podle typeId (kvůli vykreslení bosse/pancíře); render-pozici (rx/ry)
+  // spárujeme podle stabilního `id` (viz spawnEnemy v game.js), aby vyhlazování nenaskočilo mezi snímky.
+  const prevEnemyRender = new Map();
+  for (const e of enemies) if (e.id != null) prevEnemyRender.set(e.id, { rx: e.rx != null ? e.rx : e.x, ry: e.ry != null ? e.ry : e.y });
+  enemies = schemaApplyList('enemies', s.enemies);
+  for (const e of enemies) {
+    const prev = prevEnemyRender.get(e.id);
+    if (prev) { e.rx = prev.rx; e.ry = prev.ry; } else { e.rx = e.x; e.ry = e.y; }   // nově příchozí = objeví se rovnou na místě
+  }
   bullets = s.bullets; eBullets = s.eBullets;
-  walls = s.walls.map(o => (o.def = STRUCTURES[o.defId] || TRAPS[o.defId], o));
-  turrets = s.turrets.map(o => (o.def = TRAPS[o.defId], o));
-  traps = s.traps.map(o => (o.def = TRAPS[o.defId], o));
-  warriors = s.warriors.map(o => (o.def = WARRIORS[o.defId] || (o.defId === 'clan_axeman' ? CLAN_AXEMAN : { color: '#d07038', arch: 'MELEE' }), o));
+  walls = schemaApplyList('walls', s.walls);
+  turrets = schemaApplyList('turrets', s.turrets);
+  traps = schemaApplyList('traps', s.traps);
+  warriors = schemaApplyList('warriors', s.warriors);
   groundFx = s.groundFx;
   pickups = s.pickups || [];
   effects = s.effects || [];
@@ -244,6 +352,35 @@ function guestEvent(ev) {
   else if (ev.k === 'pick') { burst(ev.x, ev.y, ev.color, 14); sfx.heal(); }
   else if (ev.k === 'ability') { sfx.buy(); }
   else if (ev.k === 'spawn') { burst(ev.x, ev.y, 'rgba(150,40,60,0.6)', 4); }
+}
+
+/* ============================================================================
+   RENDER-VYHLAZENÍ (FÁZE 3 co-op) — jen KOSMETIKA, nikdy autoritativní data.
+   Guest dostává snímky ~30×/s (viz netSendState); bez vyhlazení entity mezi snímky
+   viditelně „skáčou". Řešení: robustní exponenciální vyhlazování — render-pozice
+   (rx/ry) se každý VYKRESLENÝ snímek posune o zlomek k autoritativní pozici (x/y).
+   Žádná časová razítka, žádné přestřelení, nevyžaduje přesné timingy.
+   U sóla/hostitele se rx/ry KAŽDÝ snímek přímo přepíší na x/y (viz updateRenderPositions
+   níže) → vizuál je bit-identický s chováním před FÁZÍ 3, žádná regrese.
+   ========================================================================== */
+const RENDER_SMOOTH_K = 0.30;   // zlomek vzdálenosti k cíli za 1 vykreslený snímek (~60/s) — dolaďeno na pocit
+// Čistá funkce (testovatelná samostatně): posune `cur` o zlomek `k` k `target`; při malém
+// rozdílu (< 0.5 px) rovnou přichytí, ať vyhlazování nikdy „nedobíhá" donekonečna.
+function smoothToward(cur, target, k) {
+  const d = target - cur;
+  if (Math.abs(d) < 0.5) return target;
+  return cur + d * k;
+}
+// Zavolá se KAŽDÝ vykreslený snímek (render()), pro sólo/host/guest stejně.
+function updateRenderPositions() {
+  if (net.role === 'guest') {
+    for (const e of enemies) { e.rx = smoothToward(e.rx != null ? e.rx : e.x, e.x, RENDER_SMOOTH_K); e.ry = smoothToward(e.ry != null ? e.ry : e.y, e.y, RENDER_SMOOTH_K); }
+    for (const p of players) { p.rx = smoothToward(p.rx != null ? p.rx : p.x, p.x, RENDER_SMOOTH_K); p.ry = smoothToward(p.ry != null ? p.ry : p.y, p.y, RENDER_SMOOTH_K); }
+  } else {
+    // sólo/hostitel: PŘÍMÉ přiřazení (ne aritmetika) → rx/ry === x/y bit-přesně, nulové riziko regrese.
+    for (const e of enemies) { e.rx = e.x; e.ry = e.y; }
+    for (const p of players) { p.rx = p.x; p.ry = p.y; }
+  }
 }
 
 /* ============================================================================

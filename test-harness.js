@@ -541,6 +541,302 @@ code += `
     assert(enemyMarkerIcon({ def: {} }) === null, 'obyčejný nepřítel bez markeru');
     log('enemyMarkerIcon ok (priorita léčitel/dělič/elita)'); }
 
+  // ---- 36) FÁZE 3: SNAPSHOT_SCHEMA je jediný zdroj pravdy — serializeState()/applyState() čtou stejná pole (co-op parita) ----
+  { newRun('rytir'); startWave();
+    const p = players[0]; p.gems = 42; p.perks = { brutalita: 1 };
+    spawnDummy('chodec', p.x + 30, p.y);
+    const tx = 2, ty = 2;
+    const wallObj = { def: STRUCTURES.kamenna_zed, defId: 'kamenna_zed', tx, ty, x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE, hp: 55, hpMax: 100, flash: 0, temp: false, level: 1 };
+    walls.push(wallObj);
+    run.upgrades.dmg = 3; run.lifeBuys = 2;
+
+    const snap1 = serializeState();
+
+    // NEZÁVISLÝ SVĚDEK (pozor: úmyslně NEODVOZENO ze SNAPSHOT_SCHEMA!) — ručně vypsaný seznam polí,
+    // která KAŽDÁ entita má vlastnit v síťovém snímku. Pokud někdo pole z SNAPSHOT_SCHEMA[key].fields
+    // odebere (nebo přidá) a zapomene sladit síťový kontrakt, tento seznam se přestane shodovat a test
+    // spadne — dokud vědomě neaktualizuje i tento guard. To je žádoucí tření pro desync-kritickou vrstvu.
+    const EXPECTED_SCHEMA_FIELDS = {
+      run: ['lives', 'wave', 'score', 'ownedWeapons', 'ammo', 'owned', 'upgrades', 'wUpgrades', 'wood', 'steel',
+            'combo', 'comboT', 'shieldLvl', 'wheelReady', 'wheelUpgrades', 'turretKills', 'wheelThreshold', 'pacts',
+            '_pactOffer', 'lifeBuys'],
+      wave: ['boss', 'spawned', 'total', 'reward'],
+      banner: ['text', 't', 'warn'],
+      players: ['x', 'y', 'r', 'hp', 'hpMax', 'gems', 'aimAngle', 'inv', 'downed', 'classId', 'color', 'weaponId',
+                'mana', 'manaMax', 'walk', 'buffRapid', 'buffPower', 'shieldT', 'rageT', 'abilityCd', 'perks',
+                'perkOffer', 'blockT', 'invisT', 'flurryT', 'abomT', 'potions', 'bile', 'clanCd', 'resurrectUsed',
+                '_clanActive'],
+      enemies: ['id', 'x', 'y', 'r', 'hp', 'hpMax', 'flash', 'arch', 'color', 'typeId', 'elite', 'spawnT',
+                'slamWind', 'slamWindMax', 'slamX', 'slamY', 'slamR'],
+      bullets: ['x', 'y', 'vx', 'vy', 'r', 'color', 'thrown', 'magic', 'ang', 'crit'],
+      eBullets: ['x', 'y', 'r', 'color'],
+      walls: ['defId', 'tx', 'ty', 'x', 'y', 'hp', 'hpMax', 'flash', 'temp', 'level'],
+      turrets: ['defId', 'tx', 'ty', 'x', 'y', 'hp', 'hpMax', 'flash', 'temp', 'level'],
+      traps: ['defId', 'tx', 'ty', 'x', 'y', 'dur', 'level'],
+      warriors: ['defId', 'x', 'y', 'r', 'hp', 'hpMax', 'flash', 'aim'],
+      groundFx: ['x', 'y', 'radius', 'color'],
+      pickups: ['id', 'x', 'y', 'bob'],
+    };
+    assert(JSON.stringify(Object.keys(SNAPSHOT_SCHEMA).sort()) === JSON.stringify(Object.keys(EXPECTED_SCHEMA_FIELDS).sort()),
+      'schema drift: SNAPSHOT_SCHEMA obsahuje jiné entity než EXPECTED_SCHEMA_FIELDS guard v testu — aktualizuj guard');
+    for (const key of Object.keys(SNAPSHOT_SCHEMA)) {
+      const meta = SNAPSHOT_SCHEMA[key];
+      const actualFieldNames = meta.fields.map(f => (typeof f === 'string' ? f : f.key)).sort();
+      const expectedFieldNames = EXPECTED_SCHEMA_FIELDS[key].slice().sort();
+      assert(JSON.stringify(actualFieldNames) === JSON.stringify(expectedFieldNames),
+        'schema drift v ' + key + ': SNAPSHOT_SCHEMA.fields=[' + actualFieldNames.join(',') + '] != očekávaný seznam=[' + expectedFieldNames.join(',') + '] (pokud je změna záměrná, sladi i EXPECTED_SCHEMA_FIELDS v testu)');
+    }
+    log('SNAPSHOT_SCHEMA nezávislý svědek ok (odebrání/přidání pole v SNAPSHOT_SCHEMA bez sladění testu by tuto kontrolu shodilo)');
+
+    // strukturální kontrola implementace: schemaPick() musí vracet PŘESNĚ klíče z meta.fields (chytá bugy v schemaPick, ne drift schématu samotného)
+    for (const key of Object.keys(SNAPSHOT_SCHEMA)) {
+      const meta = SNAPSHOT_SCHEMA[key];
+      const wantKeys = JSON.stringify(meta.fields.map(f => (typeof f === 'string' ? f : f.key)).sort());
+      if (meta.list) {
+        assert(Array.isArray(snap1[key]), 'schema drift: ' + key + ' je pole ve snímku');
+        if (snap1[key].length) assert(JSON.stringify(Object.keys(snap1[key][0]).sort()) === wantKeys, 'schemaPick bug v ' + key + ': klíče snímku != schema.fields');
+      } else if (meta.single && snap1[key]) {
+        assert(JSON.stringify(Object.keys(snap1[key]).sort()) === wantKeys, 'schemaPick bug v ' + key + ': klíče snímku != schema.fields');
+      }
+    }
+    log('SNAPSHOT_SCHEMA strukturální kontrola ok (schemaPick() vrací přesně pole ze schématu)');
+
+    // round-trip přes drát (JSON, jako reálný DataChannel přenos)
+    const wire = JSON.parse(JSON.stringify(snap1));
+    const savedLives = run.lives, savedHp = p.hp, savedGems = p.gems, savedEnemyCount = enemies.length,
+          savedEnemyHp = enemies[0].hp, savedWallHp = wallObj.hp, savedUpgrades = JSON.stringify(run.upgrades);
+
+    // znič lokální stav — applyState(wire) ho musí obnovit na serializované hodnoty
+    run.lives = 999; p.hp = 1; p.gems = 0; enemies.length = 0; walls[0].hp = 1; run.upgrades = {};
+    applyState(wire);
+
+    assert(run.lives === savedLives, 'apply obnovil run.lives (' + run.lives + ' == ' + savedLives + ')');
+    assert(run.upgrades.dmg === 3 && JSON.stringify(run.upgrades) === savedUpgrades, 'apply obnovil run.upgrades');
+    assert(players[0].hp === savedHp, 'apply obnovil players[0].hp (' + players[0].hp + ' == ' + savedHp + ')');
+    assert(players[0].gems === savedGems, 'apply obnovil players[0].gems (' + players[0].gems + ' == ' + savedGems + ')');
+    assert(players[0].class === CLASSES.rytir, 'apply rehydratoval players[0].class');
+    assert(enemies.length === savedEnemyCount, 'apply obnovil počet enemies (' + enemies.length + ' == ' + savedEnemyCount + ')');
+    assert(enemies[0].hp === savedEnemyHp, 'apply obnovil enemies[0].hp (' + enemies[0].hp + ' == ' + savedEnemyHp + ')');
+    assert(enemies[0].def === ENEMIES[enemies[0].typeId], 'apply rehydratoval enemies[0].def');
+    assert(walls.length === 1 && walls[0].hp === savedWallHp, 'apply obnovil walls[0].hp (' + walls[0].hp + ' == ' + savedWallHp + ')');
+    assert(walls[0].def === STRUCTURES.kamenna_zed, 'apply rehydratoval walls[0].def');
+    log('SNAPSHOT_SCHEMA round-trip ok (wire-format zachován, hodnoty obnoveny, def/class rehydratace ok)'); }
+
+  // ---- 37) FÁZE 3: stabilní enemy.id — unikátní, monotónně rostoucí, resetuje se v newRun() ----
+  { newRun('rytir');
+    assert(nextEnemyId === 1, 'nextEnemyId se resetuje v newRun() na 1');
+    spawnEnemy('chodec'); spawnEnemy('chodec'); spawnEnemy('chodec');
+    const ids = enemies.map(e => e.id);
+    assert(ids.every(id => typeof id === 'number'), 'enemy.id je číslo');
+    assert(new Set(ids).size === ids.length, 'enemy.id: všechna ID v běhu unikátní');
+    assert(ids[0] < ids[1] && ids[1] < ids[2], 'enemy.id: monotónně rostou (' + ids.join(',') + ')');
+    log('enemy.id ok (unikátní, rostoucí, reset per běh)'); }
+
+  // ---- 38) FÁZE 3: smoothToward() — čistá exponenciální vyhlazovací funkce (guest render) ----
+  { assert(smoothToward(0, 10, 0.3) === 3, 'smoothToward: 0→10 @k=0.3 dá 3');
+    assert(smoothToward(10, 10, 0.3) === 10, 'smoothToward: cur===target beze změny');
+    assert(smoothToward(9.7, 10, 0.3) === 10, 'smoothToward: rozdíl < 0.5px se přichytí přesně na cíl');
+    assert(smoothToward(100, 0, 0.3) === 70, 'smoothToward: funguje i směrem dolů');
+    let v = 0; const target = 200, hist = [];
+    for (let i = 0; i < 60; i++) { v = smoothToward(v, target, 0.3); hist.push(v); }
+    assert(v === target, 'smoothToward: po dostatku kroků přesně dosáhne cíle (' + v + ')');
+    assert(hist.every(x => x <= target), 'smoothToward: nikdy nepřestřelí cíl (monotónní přiblížení)');
+    log('smoothToward ok (vyhlazuje, přichycuje pod 0.5px, nikdy nepřestřelí)'); }
+
+  // ---- 39) FÁZE 3: updateRenderPositions() v SÓLU/HOSTU = rx/ry bit-přesně == x/y (ŽÁDNÁ vizuální regrese) ----
+  { newRun('rytir'); spawnEnemy('chodec');
+    const e = enemies[0]; e.x = 123.456789; e.y = -55.125;
+    players[0].x = 77.777; players[0].y = 88.888;
+    assert(net.role === null, 'test předpokládá sólo (net.role null)');
+    updateRenderPositions();
+    assert(e.rx === e.x && e.ry === e.y, 'sólo: enemy.rx/ry === x/y bit-přesně (' + e.rx + '===' + e.x + ')');
+    assert(players[0].rx === players[0].x && players[0].ry === players[0].y, 'sólo: player.rx/ry === x/y bit-přesně');
+    log('updateRenderPositions ok v sólu (přímé přiřazení, beze změny vizuálu)'); }
+
+  // ---- 40) FÁZE 3: updateRenderPositions() u GUESTA plynule dohání cíl, nikdy neskočí ----
+  { newRun('rytir'); spawnEnemy('chodec');
+    const e = enemies[0]; e.rx = 0; e.ry = 0; e.x = 100; e.y = 0;
+    net.role = 'guest';
+    updateRenderPositions();
+    assert(e.rx > 0 && e.rx < 100, 'guest: 1. snímek se posune k cíli, ale nedoskočí (' + e.rx + ')');
+    assert(Math.abs(e.rx - 30) < 1e-9, 'guest: posun odpovídá faktoru k=0.30 (' + e.rx + ')');
+    let guard = 0;
+    while (e.rx !== e.x && guard++ < 200) updateRenderPositions();
+    assert(e.rx === e.x, 'guest: po dostatku snímků se render-pozice přichytí přesně na cíl');
+    assert(guard < 200, 'guest: konverguje v rozumném počtu snímků (' + guard + ')');
+    net.role = null;   // úklid, ať to neovlivní další testy
+    log('updateRenderPositions ok u guesta (plynulé vyhlazení, konverguje)'); }
+
+  // ---- 41) FÁZE 3: applyState() páruje render-pozici nepřátel podle stabilního id (ne skokem na novou x/y) ----
+  { newRun('rytir'); startWave();
+    const e = spawnDummy('chodec', 50, 50);
+    e.rx = 50; e.ry = 50;   // guest už měl tohoto nepřítele vykreslený usazeného na (50,50)
+    const oldId = e.id;
+    const snap = serializeState();
+    assert(snap.enemies[0].id === oldId, 'serializeState nese stabilní enemy.id');
+    snap.enemies[0].x = 500; snap.enemies[0].y = 500;   // hostitel mezitím nepřítele posunul
+    const wire = JSON.parse(JSON.stringify(snap));      // round-trip přes drát
+    net.role = 'guest';
+    applyState(wire);
+    const e2 = enemies.find(x => x.id === oldId);
+    assert(e2, 'nepřítel se stejným id existuje po applyState');
+    assert(e2.x === 500 && e2.y === 500, 'applyState nastavil autoritativní x/y na novou (hostitelovu) pozici');
+    assert(e2.rx === 50 && e2.ry === 50, 'applyState ZACHOVAL starou vyhlazenou render-pozici spárovanou podle id (neskočila na 500,500)');
+    net.role = null;
+    log('applyState: enemy render-pozice spárována podle id, ne resetována skokem'); }
+
+  // ---- 42) FÁZE 3: applyState() páruje render-pozici hráčů podle indexu (0=hostitel, 1=guest) ----
+  { newRun(CLASS_IDS.slice(0, 2));
+    players[0].rx = 10; players[0].ry = 10;
+    players[1].rx = 20; players[1].ry = 20;
+    const snap = serializeState();
+    snap.players[0].x = 999; snap.players[1].x = 888;
+    const wire = JSON.parse(JSON.stringify(snap));
+    net.role = 'guest';
+    applyState(wire);
+    assert(players[0].rx === 10 && players[1].rx === 20, 'applyState: render-pozice hráčů spárována podle indexu');
+    assert(players[0].x === 999 && players[1].x === 888, 'applyState: autoritativní x aktualizováno');
+    net.role = null;
+    log('applyState: player render-pozice spárována podle indexu, ne resetována skokem'); }
+
+  // ---- 43) FÁZE 3: trapGrid (O(1) mřížka pastí) zůstává v synchronu s traps při placeAt/sellAt/expiraci ----
+  { newRun('rytir');
+    const tx1 = 2, ty1 = 2, tx2 = 3, ty2 = 2;
+    // vynuť volné dlaždice bez ohledu na náhodně generovanou mapu (stejná technika jako test 29)
+    grid.tiles[tileIndex(tx1, ty1)] = 0; grid.tiles[tileIndex(tx2, ty2)] = 0;
+    const i1 = tileIndex(tx1, ty1), i2 = tileIndex(tx2, ty2);
+    assert(!trapGrid.has(i1) && !trapGrid.has(i2), 'trapGrid start prázdná na testovacích dlaždicích');
+
+    // a) placeAt (past 'smola', SLOW) -> musí být v traps I v trapGrid na správném tile indexu
+    run.owned.smola = 1; buildSel = 'smola';
+    placeAt(tx1, ty1);
+    assert(trapGrid.has(i1), 'placeAt: past je v trapGrid na tileIndex(' + tx1 + ',' + ty1 + ')');
+    const trapObj1 = trapGrid.get(i1);
+    assert(traps.includes(trapObj1), 'placeAt: STEJNÝ objekt je i v poli traps');
+    assert(traps.filter(t => t.tx === tx1 && t.ty === ty1).length === 1, 'placeAt: přesně jedna past na dlaždici');
+
+    // b) sellAt -> musí zmizet z traps I z trapGrid, dlaždice znovu stavitelná
+    const sold = sellAt(tx1, ty1, players[0]);
+    assert(sold === true, 'sellAt vrátila true (něco se prodalo)');
+    assert(!trapGrid.has(i1), 'sellAt: past zmizela z trapGrid');
+    assert(!traps.some(t => t.tx === tx1 && t.ty === ty1), 'sellAt: past zmizela z traps');
+    run.owned.smola = 1; buildSel = 'smola';
+    placeAt(tx1, ty1);   // dlaždice musí jít znovu zastavět (trapGrid.has() by jinak placeAt zablokoval)
+    assert(trapGrid.has(i1), 'dlaždice je po sellAt znovu stavitelná (placeAt uspěl podruhé)');
+    sellAt(tx1, ty1, players[0]);   // úklid
+
+    // c) DOT_AOE past ('ohniste') po vypršení (dur<=0) zmizí z traps I z trapGrid
+    run.owned.ohniste = 1; buildSel = 'ohniste';
+    placeAt(tx2, ty2);
+    assert(trapGrid.has(i2), 'ohniště je v trapGrid po placeAt');
+    const trapObj2 = trapGrid.get(i2);
+    assert(trapObj2.def.arch === 'DOT_AOE', 'ohniště má arch DOT_AOE');
+    trapObj2.dur = 0.5;   // simuluj těsně před vypršením (updateTraps odečte dt a smaže při dur<=0)
+    enemyHash.clear();    // izolace od zbytkového stavu jiných testů
+    updateTraps(1);
+    assert(!trapGrid.has(i2), 'ohniště po vypršení (dur<=0) zmizelo z trapGrid');
+    assert(!traps.some(t => t.tx === tx2 && t.ty === ty2), 'ohniště po vypršení zmizelo z traps');
+    log('trapGrid ok (placeAt/sellAt/expirace DOT_AOE drží trapGrid v synchronu s traps)'); }
+
+  // ---- 44) FÁZE 3: swap-remove enemies (V9 perf) — bez duplicit a bez vynechání, na kraji i uprostřed ----
+  { newRun('rytir'); startWave();
+    const p = players[0]; p.x = 40; p.y = 700;   // hráč daleko od testovacích nepřátel (mimo 150px aggro)
+    enemies.length = 0;                          // izolace od nepřátel spawnutých startWave()
+    wave.spawned = wave.total;                   // zabraň auto-spawnu z fronty během testovacího ticku
+    const es = [];
+    for (let k = 0; k < 6; k++) es.push(spawnDummy('chodec', 40 + k * 20, 40));
+    assert(es.every(e => e), 'všech 6 testovacích nepřátel vytvořeno');
+    es[0].dead = true;   // první
+    es[2].dead = true;   // prostřední
+    es[3].dead = true;   // prostřední, sousedící s předchozím (dvojice sousedících mrtvých)
+    es[5].dead = true;   // poslední
+    const idsWant = [es[1].id, es[4].id].sort((a, b) => a - b);
+    updateCombat(1);
+    assert(enemies.length === 2, 'swap-remove enemies: po odstranění 4 mrtvých zbyli přesně 2 (' + enemies.length + ')');
+    assert(new Set(enemies).size === enemies.length, 'swap-remove enemies: žádné duplicitní reference v poli');
+    const idsGot = enemies.map(e => e.id).sort((a, b) => a - b);
+    assert(JSON.stringify(idsGot) === JSON.stringify(idsWant), 'swap-remove enemies: přežili přesně ti neoznačení (' + idsGot.join(',') + ' == ' + idsWant.join(',') + ')');
+    log('swap-remove enemies ok (první/prostřední/sousedící/poslední mrtví korektně odstraněni bez duplicit)'); }
+
+  // ---- 45) FÁZE 3: swap-remove warriors (V9 perf) — víc mrtvých v jednom snímku, bez duplicit/vynechání ----
+  { newRun('rytir'); startWave();
+    enemies.length = 0; enemyHash.clear();   // žádní nepřátelé v okolí, ať spojence nic jiného nezraní
+    warriors.length = 0;
+    const mk = (x, y, hp) => ({ def: WARRIORS.mecenos, defId: 'mecenos', x, y, r: 12, hp, hpMax: 100, homeX: x, homeY: y, cool: 0, aim: 0, flash: 0 });
+    const ws = [mk(40, 40, 100), mk(60, 40, 0), mk(80, 40, 100), mk(100, 40, 0), mk(120, 40, 0), mk(140, 40, 100)];
+    // mrtví: index1 (osamocený uprostřed, sousedí se 2 živými), index3+4 (sousedící dvojice mrtvých)
+    warriors.push(...ws);
+    const survivorsWant = [ws[0], ws[2], ws[5]];   // první, uprostřed, poslední — všichni živí
+    updateWarriors(1);
+    assert(warriors.length === 3, 'swap-remove warriors: po odstranění 3 mrtvých zbyli přesně 3 (' + warriors.length + ')');
+    assert(new Set(warriors).size === warriors.length, 'swap-remove warriors: žádné duplicitní reference v poli');
+    const gotSet = new Set(warriors);
+    for (const w of survivorsWant) assert(gotSet.has(w), 'swap-remove warriors: přeživší odpovídají přesně neoznačeným');
+    log('swap-remove warriors ok (víc mrtvých v jednom snímku odstraněno bez duplicit/vynechání)'); }
+
+  // ---- 46) FÁZE 3: queryHashInto() (sdílený buffer _enemyQueryBuf) — shoda s enemyHash.query() a nezávislost mezi voláními ----
+  { newRun('rytir'); startWave();
+    enemies.length = 0; enemyHash.clear();
+    // klastr A (3 nepřátelé) a klastr B (2 nepřátelé), dostatečně daleko od sebe, ať se dotazy nepřekrývají
+    spawnDummy('chodec', 40, 40); spawnDummy('chodec', 45, 42); spawnDummy('chodec', 50, 38);
+    spawnDummy('chodec', 400, 700); spawnDummy('chodec', 404, 702);
+    assert(enemies.length === 5, 'test připravil přesně 5 nepřátel ve 2 klastrech');
+    enemyHash.clear(); for (const e of enemies) enemyHash.insert(e);
+
+    // a) queryHashInto vrací STEJNOU množinu referencí jako query() pro stejné parametry
+    const wideQ = enemyHash.query(45, 40, 5000);           // pokryje celou mapu
+    const wideI = queryHashInto(enemyHash, 45, 40, 5000).slice();   // spotřebuj hned do lokálního pole
+    assert(wideQ.length === enemies.length, 'kontrolní query() pokrylo všech 5 testovacích nepřátel');
+    assert(wideI.length === wideQ.length, 'queryHashInto vrací stejný POČET jako query() (' + wideI.length + '==' + wideQ.length + ')');
+    const setQ = new Set(wideQ);
+    assert(wideI.every(e => setQ.has(e)), 'queryHashInto vrací stejnou MNOŽINU referencí jako query()');
+
+    // b) dvě po sobě jdoucí volání se navzájem nekontaminují (sdílený buffer se mezi voláními resetuje)
+    const resA = queryHashInto(enemyHash, 45, 40, 20).slice();      // klastr A, spotřebováno do lokální kopie
+    assert(resA.length === 3, 'queryHashInto: klastr A obsahuje přesně 3 nepřátele (' + resA.length + ')');
+    const resB = queryHashInto(enemyHash, 402, 701, 20).slice();    // klastr B, 2. volání
+    assert(resB.length === 2, 'queryHashInto: 2. volání (klastr B) neobsahuje zbytky z 1. volání — délka přesně 2, ne 5 (' + resB.length + ')');
+    assert(new Set(resB).size === resB.length, 'queryHashInto: žádné duplicity ve výsledku 2. volání');
+    assert(resA.length === 3, 'queryHashInto: lokální kopie 1. volání zůstala nedotčena 2. voláním');
+    log('queryHashInto ok (shoda s enemyHash.query(), buffer se mezi voláními korektně resetuje bez kontaminace)'); }
+
+  // ---- 47) FÁZE 3: hraniční případ interpolace — NOVÉ enemy.id u guesta se objeví přímo na x/y, beze skoku ----
+  { newRun('rytir'); startWave();
+    const savedRole = net.role;
+    const e1 = spawnDummy('chodec', 50, 50); e1.rx = 50; e1.ry = 50;
+    const wire1 = JSON.parse(JSON.stringify(serializeState()));
+    net.role = 'guest';
+    applyState(wire1);   // guest teď zná e1 (spárovaný podle id)
+    const e1g = enemies.find(x => x.id === e1.id);
+    assert(e1g, 'e1 existuje po 1. applyState');
+    e1g.rx = 5; e1g.ry = 5;   // umělé reziduum — jako by e1 už chvíli doháněl jinou vyhlazenou render-pozici
+
+    // hostitel mezitím přidá NOVÉHO nepřítele s ID, které guest ještě NIKDY neviděl, daleko od (0,0).
+    // Pozor: NEsmí se přidat přímo do sdíleného pole enemies PŘED voláním applyState — to je totiž
+    // právě pole, které applyState čte jako "guestův dosavadní stav" při párování rx/ry podle id;
+    // kdyby tam nový nepřítel už byl, test by (falešně) simuloval už-známé id s reziduální (spawnovou)
+    // rx/ry místo skutečně nového příchozího. Proto ho vytvoříme v DOČASNĚ izolovaném poli, serializujeme
+    // jeho pole podle schématu, a teprve tak "od hostitele" přidáme do drátového snímku.
+    const wire2 = JSON.parse(JSON.stringify(serializeState()));   // zatím jen e1 — přesně to, co guest už zná
+    const savedEnemiesArr = enemies;
+    enemies = [];
+    const e2 = spawnDummy('chodec', 400, 300);
+    wire2.enemies.push(schemaSerList('enemies', enemies)[0]);   // "od hostitele": nový nepřítel s novým id
+    enemies = savedEnemiesArr;   // vrať guestovo lokální pole (pořád jen e1) — applyState ho nahradí
+
+    applyState(wire2);   // pořád v roli guest
+
+    const e2g = enemies.find(x => x.id === e2.id);
+    assert(e2g, 'nový nepřítel s novým id existuje po applyState');
+    assert(Number.isFinite(e2g.rx) && Number.isFinite(e2g.ry), 'rx/ry nového nepřítele jsou konečná čísla (ne NaN/undefined)');
+    assert(e2g.rx === e2g.x && e2g.ry === e2g.y, 'nový nepřítel se objeví PŘÍMO na cílové x/y (' + e2g.rx + ',' + e2g.ry + ' == ' + e2g.x + ',' + e2g.y + '), ne skokem z 0,0');
+
+    const e1g2 = enemies.find(x => x.id === e1.id);
+    assert(e1g2 && e1g2.rx === 5 && e1g2.ry === 5, 'starý (známý) nepřítel si i po dalším applyState drží spárovanou render-pozici (nezasáhla ho logika pro nová id)');
+
+    net.role = savedRole;   // úklid, ať to neovlivní další testy
+    log('applyState hraniční případ ok: nové enemy.id u guesta se objeví přímo na x/y, beze skoku z 0,0/rezidua'); }
+
   console.log('\\n==== TEST RESULTS ====');
   for (const r of results) console.log('  ✓ ' + r);
   console.log('==== ALL PASSED ====');
