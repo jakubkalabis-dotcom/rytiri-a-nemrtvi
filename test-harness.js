@@ -414,6 +414,89 @@ code += `
     try { for(let f=0;f<20;f++) updateCombat(1); } catch(e){ throw new Error('frenzy crash: '+e.message); }
     log('šaman léčí + frenzy + nové sub-bossy ok'); }
 
+  // ---- 26) Progresivní cena Života brány: 40 / 70 / 100 (+30 za nákup), buyLife strhne gemy a zvedne lifeBuys ----
+  { newRun('rytir'); const p = players[0];
+    run.lifeBuys = 0; assert(lifeBuyCost() === 40, 'lifeBuyCost @0 nákupů = 40');
+    run.lifeBuys = 1; assert(lifeBuyCost() === 70, 'lifeBuyCost @1 nákup = 70');
+    run.lifeBuys = 2; assert(lifeBuyCost() === 100, 'lifeBuyCost @2 nákupy = 100');
+    run.lifeBuys = 0; p.gems = 1000; const lives0 = run.lives, gems0 = p.gems;
+    buyLife(p);
+    assert(run.lives === lives0 + 5, 'buyLife: +5 životů (' + lives0 + '->' + run.lives + ')');
+    assert(p.gems === gems0 - 40, 'buyLife: strhla 40 gemů (' + gems0 + '->' + p.gems + ')');
+    assert(run.lifeBuys === 1, 'buyLife: lifeBuys=1 po prvním nákupu');
+    const gems1 = p.gems; buyLife(p);
+    assert(p.gems === gems1 - 70, 'druhý nákup stojí 70 gemů (' + gems1 + '->' + p.gems + ')');
+    assert(run.lifeBuys === 2, 'lifeBuys=2 po druhém nákupu');
+    log('progresivní cena Života brány ok (40->70->100..., gemy/lifeBuys se aktualizují)'); }
+
+  // ---- 27) waveModifier: null na boss/horda/rané vlny, platný objekt na 27/32/37, deterministický, cykluje přes všechny typy ----
+  { assert(waveModifier(25) === null, 'vlna 25 (mapový boss) bez modifikátoru');
+    assert(waveModifier(30) === null, 'vlna 30 (boss, %5==0) bez modifikátoru');
+    assert(waveModifier(29) === null, 'vlna 29 (horda, %5==4) bez modifikátoru');
+    assert(waveModifier(24) === null, 'vlna 24 (<=25) bez modifikátoru');
+    assert(waveModifier(10) === null, 'raná vlna 10 (<=25) bez modifikátoru');
+    const m27 = waveModifier(27);
+    assert(m27 && typeof m27.id === 'string', 'vlna 27 má platný modifikátor s id');
+    assert(Number.isFinite(m27.spdMul) && Number.isFinite(m27.hpMul) && Number.isFinite(m27.dmgMul) && Number.isFinite(m27.countMul) && Number.isFinite(m27.eliteChanceAdd), 'vlna 27 má očekávaná číselná pole');
+    const m27b = waveModifier(27);
+    assert(m27b.id === m27.id, 'waveModifier je deterministický pro stejnou vlnu (27)');
+    const m32 = waveModifier(32), m37 = waveModifier(37);
+    assert(m32 && m32.id, 'vlna 32 má platný modifikátor'); assert(m37 && m37.id, 'vlna 37 má platný modifikátor');
+    const ids = []; for (let w = 27; w <= 27 + 5 * (WAVE_MODIFIERS.length - 1); w += 5) { const mm = waveModifier(w); assert(mm, 'vlna ' + w + ' by měla mít modifikátor'); ids.push(mm.id); }
+    const uniq = new Set(ids);
+    assert(uniq.size === WAVE_MODIFIERS.length, 'modifikátor cykluje přes všech ' + WAVE_MODIFIERS.length + ' typů (' + ids.join(',') + ')');
+    log('waveModifier ok (null na boss/horda/rané vlny, determinismus, cyklus ' + ids.join(',') + ')'); }
+
+  // ---- 28) Rozzuření (enrage): boss pod 35 % HP se hýbe výrazně rychleji (+40 % rychlost) než nad prahem ----
+  //         Měřeno ve DVOU oddělených bězích (stejná mapa/seed => stejné flow-pole => stejný směr),
+  //         aby se vyloučilo zkreslení ze separační síly mezi dvěma bossy stojícími na stejném místě.
+  { newRun('rytir'); startWave(); let p = players[0]; p.x = 3000; p.y = 3000; // hráč mimo agro dosah (>150) → směr určí jen flow-field
+    const eA = spawnDummy('abominace', 400, 400); // NEnrage: 90 % HP
+    eA.hp = eA.hpMax * 0.9; eA.enrageAnnounced = false;
+    const sxA = eA.x, syA = eA.y;
+    updateCombat(1);
+    const dA = dist(sxA, syA, eA.x, eA.y);
+    const eAannounced = eA.enrageAnnounced;
+
+    newRun('rytir'); startWave(); p = players[0]; p.x = 3000; p.y = 3000;
+    const eB = spawnDummy('abominace', 400, 400); // Enrage: 20 % HP, stejná pozice a stejný tik → identický směr pohybu jako eA
+    eB.hp = eB.hpMax * 0.2; eB.enrageAnnounced = false;
+    const sxB = eB.x, syB = eB.y;
+    updateCombat(1);
+    const dB = dist(sxB, syB, eB.x, eB.y);
+
+    assert(dB > dA * 1.2, 'rozzuřený boss (hp<35%) urazil za tik víc než klidný (' + dA.toFixed(3) + ' vs ' + dB.toFixed(3) + ')');
+    assert(eB.enrageAnnounced === true, 'enrage flag nastaven pod 35 % HP');
+    assert(eAannounced === false, 'enrage flag zůstal vypnutý nad 35 % HP');
+    log('enrage ok: rychlost +40% pod 35% HP (' + dA.toFixed(3) + ' -> ' + dB.toFixed(3) + ')'); }
+
+  // ---- 29) Bodcová zeď: kontaktní poškození (contactDmg) postupně sráží HP nepřítele u zdi a nakonec ho zabije ----
+  { newRun('rytir'); startWave(); const p = players[0];
+    const tx = 3, ty = 3;
+    grid.tiles[tileIndex(tx, ty)] = 0; grid.tiles[tileIndex(tx - 1, ty)] = 0;   // zajisti volné dlaždice bez ohledu na náhodné překážky mapy
+    const wallX = (tx + 0.5) * TILE, wallY = (ty + 0.5) * TILE;
+    const wallDef = STRUCTURES.bodcova_zed;
+    const wallObj = { def: wallDef, defId: 'bodcova_zed', tx, ty, x: wallX, y: wallY, r: 15, hp: wallDef.hp, hpMax: wallDef.hp, wallCool: 0, fireCool: 0, flash: 0 };
+    grid.structures[tileIndex(tx, ty)] = wallObj; walls.push(wallObj);
+    const e = spawnDummy('chodec', wallX - TILE, wallY);
+    p.x = e.x + 100; p.y = e.y;   // hráč v agro dosahu → nepřítel míří rovně na zeď a zůstane u ní stát
+    const hp0 = e.hpMax;
+    updateCombat(1);
+    assert(e.hp < hp0, 'bodcová zeď (contactDmg=' + wallDef.contactDmg + '/s) ubrala HP hned první tik (' + hp0 + '->' + e.hp.toFixed(2) + ')');
+    let g = 1; while (!e.dead && g++ < 400) updateCombat(1);
+    assert(e.dead, 'bodcová zeď kontaktním poškozením nepřítele nakonec zabila (tiky=' + g + ')');
+    log('bodcová zeď ok: kontaktní poškození zabíjí, engine nespadl (tiky=' + g + ')'); }
+
+  // ---- 30) D12 co-op: gemy za zabití dostane JEN killer, ne všichni hráči v týmu ----
+  { newRun('rytir'); const p1 = players[0];
+    const p2 = makePlayer(CLASSES.zved, 'zved'); p2.x = p1.x + 10; p2.y = p1.y; players.push(p2);
+    startWave(); p1.gems = 0; p2.gems = 0;
+    const e = spawnDummy('chodec', p1.x + 15, p1.y);
+    e.hp = 0; killEnemy(e, p1);
+    assert(p1.gems > 0, 'D12: zabíječ (hráč1) dostal gemy (' + p1.gems + ')');
+    assert(p2.gems === 0, 'D12: druhý hráč gemy NEdostal, aby nedocházelo k duplikaci (' + p2.gems + ')');
+    log('D12 coop gemy ok: jen killer dostává odměnu (p1=' + p1.gems + ', p2=' + p2.gems + ')'); }
+
   console.log('\\n==== TEST RESULTS ====');
   for (const r of results) console.log('  ✓ ' + r);
   console.log('==== ALL PASSED ====');

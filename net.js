@@ -177,7 +177,7 @@ function netHandleCmd(m) {
 function serializeState() {
   const snap = {
     st: state, map: currentMap,
-    run: run && { lives: run.lives, wave: run.wave, score: run.score || 0, ownedWeapons: run.ownedWeapons, ammo: run.ammo, owned: run.owned, upgrades: run.upgrades, wUpgrades: run.wUpgrades, wood: run.wood || 0, steel: run.steel || 0, combo: run.combo || 0, comboT: run.comboT || 0, shieldLvl: run.shieldLvl || 0, wheelReady: run.wheelReady || 0, wheelUpgrades: run.wheelUpgrades || {}, turretKills: run.turretKills || 0, wheelThreshold: run.wheelThreshold || 2, pacts: run.pacts || [], _pactOffer: run._pactOffer || null },
+    run: run && { lives: run.lives, wave: run.wave, score: run.score || 0, ownedWeapons: run.ownedWeapons, ammo: run.ammo, owned: run.owned, upgrades: run.upgrades, wUpgrades: run.wUpgrades, wood: run.wood || 0, steel: run.steel || 0, combo: run.combo || 0, comboT: run.comboT || 0, shieldLvl: run.shieldLvl || 0, wheelReady: run.wheelReady || 0, wheelUpgrades: run.wheelUpgrades || {}, turretKills: run.turretKills || 0, wheelThreshold: run.wheelThreshold || 2, pacts: run.pacts || [], _pactOffer: run._pactOffer || null, lifeBuys: run.lifeBuys || 0 },
     wave: wave && { boss: wave.boss, spawned: wave.spawned, total: wave.total, reward: wave.reward },
     banner: banner && { text: banner.text, t: banner.t, warn: banner.warn },
     readyHost, readyGuest, freezeTimer,

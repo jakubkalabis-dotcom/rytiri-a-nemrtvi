@@ -82,6 +82,7 @@ function newRun(classIds) {
     wheelUpgrades: { dmg: 0, dur: 0, rate: 0, count: 0, hp: 0 },  // vylepšení polní věže
     pacts: [],          // roguelite modifikátory běhu (viz PACTS)
     _pactOffer: null,   // aktuální nabídka 3 paktů
+    lifeBuys: 0,        // kolikrát byl v tomto běhu koupen Život brány (cena progresivně roste)
   };
   for (const k in AMMO) run.ammo[k] = 0;
   // sdílené vlastněné zbraně = sjednocení startovních zbraní hráčů
@@ -405,7 +406,7 @@ function shopGrid(cards, empty) { return `<div class="grid">${cards || '<div cla
 // Krátký popis účinku pasti/věže do karty obchodu.
 function trapInfo(t) {
   if (t.arch === 'ONESHOT') return `⚔ ${t.dmg}/zásah · trvalá`;
-  if (t.arch === 'DOT_AOE') return `🔥 ${t.dps}/s v okolí`;
+  if (t.arch === 'DOT_AOE') return `🔥 ${t.dps}/s v okolí. Překrývající se plošné pasti mají klesající účinek (100/50/25 %).`;
   if (t.arch === 'SLOW') return `🐌 −${Math.round((1 - t.slow.mul) * 100)}% rychlost`;
   if (t.arch === 'EMITTER') return `🏹 ${t.dmg} dmg · dosah ${Math.round(t.range / 24)}`;
   return '';
@@ -425,7 +426,7 @@ function enemyDesc(id, e) {
     parts.push('💥 Drtivý úder: nadechne se a plošně udeří (2,2× poškození) — uhni z výstražného kruhu!');
     if (e.summon) parts.push('Přivolává další nemrtvé (' + (ENEMIES[e.summon] ? ENEMIES[e.summon].name : e.summon) + ').');
     if (e.volley) parts.push('Střílí vějíř projektilů.');
-    if (e.enrage) parts.push('V nízkém HP se rozzuří (zrychlí).');
+    if (e.enrage) parts.push('Pod 35 % HP se rozzuří: +40 % rychlost a +30 % poškození.');
     if (e.final) parts.push('Finální boss celé hry.');
   }
   return parts.filter(Boolean).join(' ');
@@ -467,7 +468,7 @@ function renderShopCat(tab) {
     return `<div class="shop"><p style="font-size:12px;color:#9aa87e">Vše postavené je trvalé <b>v rámci mapy</b> (nemizí mezi vlnami). Na <b>nové mapě</b> se ale všechny stavby resetují — postavíš je znovu (peníze i vylepšení zůstávají). <b>Věže</b> jsou průchozí (hráč přes ně projde, nezaseknou ho).</p><h3>Pasti a věže (${Object.keys(TRAPS).length})</h3>${shopGrid(cards)}</div>`;
   }
   if (tab === 'walls') {
-    const cards = Object.keys(STRUCTURES).map(id => { const s = STRUCTURES[id], cost = costOf(s.cost, 'wall'); return shopCard(id, `${ico('wall', id)} ${s.name}`, cost, 'wall', `HP ${Math.round(s.hp * (teamMax('wallHp') || 1))} · máš ${run.owned[id] || 0}`, 'buybuild', meGems() < cost ? 'málo 💎' : null); }).join('');
+    const cards = Object.keys(STRUCTURES).map(id => { const s = STRUCTURES[id], cost = costOf(s.cost, 'wall'); const contact = s.contactDmg ? ` · Nepřátelům u zdi ubírá ${s.contactDmg} HP/s.` : ''; return shopCard(id, `${ico('wall', id)} ${s.name}`, cost, 'wall', `HP ${Math.round(s.hp * (teamMax('wallHp') || 1))} · máš ${run.owned[id] || 0}${contact}`, 'buybuild', meGems() < cost ? 'málo 💎' : null); }).join('');
     return `<div class="shop"><h3>Zdi a brány</h3>${shopGrid(cards)}</div>`;
   }
   if (tab === 'warriors') {
@@ -476,7 +477,8 @@ function renderShopCat(tab) {
   }
   // ammo + život
   const ammo = Object.keys(AMMO).map(id => { const a = AMMO[id], cost = costOf(a.cost, 'ammo'); return shopCard(id, `🎯 ${a.name}`, cost, 'ammo', `+${a.bundle} · máš ${run.ammo[id] || 0}`, 'buyammo', meGems() < cost ? 'málo 💎' : null); }).join('');
-  const life = shopCard('life', '❤ Život brány (+5)', 40, 'ammo', `jádro: ${run.lives}`, 'buylife', meGems() < 40 ? 'málo 💎' : null);
+  const lifeCost = lifeBuyCost();
+  const life = shopCard('life', '❤ Život brány (+5)', lifeCost, 'ammo', `jádro: ${run.lives}`, 'buylife', meGems() < lifeCost ? 'málo 💎' : null);
   return `<div class="shop"><h3>Munice</h3>${shopGrid(ammo)}<h3>Život brány</h3>${shopGrid(life)}</div>`;
 }
 function abilityDetail(cid) {
@@ -489,7 +491,7 @@ function abilityDetail(cid) {
     zved: '🗡 Bodnutí do zad (cd 10 s): 5 s neviditelnost (mobové tě ignorují). PRVNÍ útok = okamžité zabití běžného nepřítele, nebo 3× poškození zbraně na bosse. Zabiješ-li silnějšího, cd se resetuje.',
     mag: `☄ Armagedon (cd 15 s): meteor na nejbližší shluk — ${MAG_METEOR_DMG} poškození v okruhu ${MAG_METEOR_RADIUS} + ohnivá zem ${MAG_METEOR_DOT.dps}/s po 3 s. (× magický bonus).`,
     alchymista: `🧟 Abominace (lektvar z ${BILE_PER_POTION} žlučí, max 2): ${(ABOM_DURATION / 60)} s proměna — −${Math.round(ABOM_DR * 100)} % obdrž. poškození, −38 % rychlost, POŽÍRÁ pěšáky (+${ABOM_HP_PER_EAT} max HP navždy/kus, strop ${ABOM_HP_CAP}) a leptá silnější ${ABOM_ACID_BURST} dmg/2,5 s + ${ABOM_ACID_DPS} dmg/s v okruhu ${ABOM_ACID_RADIUS}.`,
-    inzenyr: `🔧 Polní věž (cd 17 s): ${1 + (wu.count || 0)}× samostříl (${(720 + (wu.dur || 0) * 180) / 60} s, ${Math.round(90 * (1 + 0.4 * (wu.hp || 0)))} HP, +${(wu.dmg || 0) * 20} % dmg, +${(wu.rate || 0) * 15} % rychlost) + opraví zdi. Zabíjením věžemi plníš „Kolečka se točí".`,
+    inzenyr: `🔧 Polní věž (cd 17 s): ${1 + (wu.count || 0)}× samostříl (${(720 + (wu.dur || 0) * 180) / 60} s, ${Math.round(90 * (1 + 0.4 * (wu.hp || 0)))} HP, +${(wu.dmg || 0) * 20} % dmg, +${(wu.rate || 0) * 15} % rychlost). Zabíjením věžemi plníš „Kolečka se točí". ➕ Pasivně opravuje blízké stavby (~30 HP/s).`,
     knez: `✨ Vzkříšení (1× za kolo): oživí padlé v okruhu 220 na 60 % HP, živé vyléčí o 60 HP a spálí nemrtvé za 40 v okruhu 130.  ➕ Pasivně: Svatá záře — každých ${(PRIEST_NOVA.cd / 60).toFixed(1)} s spálí nemrtvé kolem za ${Math.round(PRIEST_NOVA.dmg * 1.25)} v okruhu ${PRIEST_NOVA.radius}.`,
     nekromant: `💀 Povstaňte! (cd 19 s): vyvolá ${SKELETON_COUNT} kostlivé bojovníky (${SKELETON.hp} HP, ${SKELETON.dmg} poškození), kteří ${SKELETON_LIFETIME / 60} s bojují za tebe. Pasivně: +15 % magie, +30 % jed/oheň (DoT), +6 % vysávání.`,
   })[cid] || 'Aktivní schopnost třídy.';
@@ -748,7 +750,8 @@ overlay.addEventListener('click', e => {
   else if (act === 'buylife') buyLife(me);
   else if (act === 'toshop') { setState('shop'); }
 });
-function buyLife(p) { p = p || localPlayer(); if (p.gems >= 40) { p.gems -= 40; run.lives += 5; sfx.buy(); refreshShop(); } }
+function lifeBuyCost() { return 40 + (run.lifeBuys || 0) * 30; }   // progresivní cena: 40, 70, 100, 130…
+function buyLife(p) { p = p || localPlayer(); const cost = lifeBuyCost(); if (p.gems >= cost) { p.gems -= cost; run.lives += 5; run.lifeBuys = (run.lifeBuys || 0) + 1; sfx.buy(); refreshShop(); } }
 // Ready-gate v obchodě: do stavění se jde, až jsou připraveni všichni.
 function shopReady() {
   if (!isCoop()) { startBuildPhase(); return; }
@@ -920,14 +923,17 @@ function startWave() {
     for (let k = 0; k < n; k++) queue.push(pickWeighted(comp));
   }
   const spawnMul = pactMul('spawn');   // pakt Krvavý spěch (nižší = rychleji)
+  // Modifikátor vlny (data.js, může chybět/vrátit null) — deterministický z čísla vlny, host i guest ho dopočítají stejně.
+  const mod = (typeof waveModifier === 'function') ? waveModifier(wv) : null;
   wave = { queue, spawned: 0, total: queue.length, spawnCool: 20 * spawnMul, boss, mapBoss, subBoss, horde,
-           bossKind: mapBoss ? 'map' : (subBoss ? 'sub' : null), bossId, spawnMul,
+           bossKind: mapBoss ? 'map' : (subBoss ? 'sub' : null), bossId, spawnMul, mod,
            interval: horde ? 8 * spawnMul : null, kills: 0, reward: { gems: 0, kills: 0, xp: 0 } };
   flowDirty = true;
   setState('combat');
   banner = mapBoss ? { text: '⚠ BOSS: ' + ENEMIES[bossId].name.toUpperCase() + ' ⚠', t: 120, warn: true }
     : (subBoss ? { text: '☠ SUB-BOSS: ' + ENEMIES[bossId].name.toUpperCase(), t: 110, warn: true }
     : (horde ? { text: '🧟 HORDA! VLNA ' + wv, t: 120, warn: true } : { text: 'VLNA ' + wv, t: 110 }));
+  if (mod) banner = { text: mod.icon + ' ' + mod.name + ' — ' + mod.desc, t: 140, warn: true };   // modifikátor vlny má přednost v oznámení
   if (boss) sfx.boss(); else if (horde) { sfx.groan(); sfx.waveStart(); } else sfx.waveStart();
 }
 function pickWeighted(weights) {
@@ -944,15 +950,19 @@ function spawnEnemy(typeId, ovX, ovY, isSplit) {
   // Škálování: mapoví bossové rostou podle pořadí mapy; sub-bossové mírněji; běžní přes enemyScale.
   let hpMul, spdMul;
   if (base.arch === 'BOSS' && base.sub)      { hpMul = 1 + 0.26 * mapIdx; spdMul = 1; }
-  else if (base.arch === 'BOSS')             { hpMul = base.final ? 1 : Math.min(3.2, 1 + 0.16 * mapIdx); spdMul = 1; }
+  else if (base.arch === 'BOSS')             { hpMul = base.final ? (2.4 + 0.14 * mapIdx) : Math.min(5.0, 1 + 0.30 * mapIdx); spdMul = 1; }
   else                                        { hpMul = sc.hp; spdMul = sc.spd; }
+  // modifikátor vlny (V6, data.js waveModifier) — jen na běžné nepřátele, ne na bossy. countMul řeší už data.js.
+  const mod = wave && wave.mod;
+  if (base.arch !== 'BOSS' && mod) { hpMul *= (mod.hpMul || 1); spdMul *= (mod.spdMul || 1); }
   // pakty: HP (boss vs běžní), rychlost a poškození nepřátel
   hpMul *= (base.arch === 'BOSS' ? pactMul('bossHp') : pactMul('enemyHp'));
   spdMul *= pactMul('enemySpd');
   let dmgMul = (base.arch === 'BOSS' ? Math.min(3, 1 + 0.12 * mapIdx) : sc.dmg) * pactMul('enemyDmg');
+  if (base.arch !== 'BOSS' && mod) dmgMul *= (mod.dmgMul || 1);
   // elitní přídomek (jen běžní nepřátelé)
   let elite = null;
-  if (base.arch !== 'BOSS' && Math.random() < eliteChance(run.wave) * pactMul('eliteChance')) {
+  if (base.arch !== 'BOSS' && Math.random() < eliteChance(run.wave) * pactMul('eliteChance') + (mod ? (mod.eliteChanceAdd || 0) : 0)) {
     elite = ELITE_KEYS[(Math.random() * ELITE_KEYS.length) | 0];
     const ed = ELITES[elite]; hpMul *= ed.hpMul; spdMul *= ed.spdMul; dmgMul *= ed.dmgMul;
   }
@@ -1200,7 +1210,10 @@ function killEnemy(e, killer) {
   const mult = comboMult();
   const eliteGem = e.elite ? 3 * pactMul('eliteGem') : 1;   // pakt Lovecká odměna
   const gems = Math.max(1, Math.round((e.def.bounty || 4) * GEMS_PER_KILL_MUL * mult * eliteGem * pactMul('gem') * (1 + metaBonus('luck'))));
-  for (const q of players) q.gems = (q.gems || 0) + Math.max(1, Math.round(gems * (q.passive.gemMul || 1)));  // perk: +% gemů (per hráč)
+  // D12: gemy dostane JEN zabíječ (dřív dostával plnou odměnu každý hráč v co-opu = duplicace).
+  // Bez identifikovaného zabíječe (past/DOT) kredituje prvního hráče — v sólu nemá vliv.
+  const gemQ = killer || players[0];
+  if (gemQ) gemQ.gems = (gemQ.gems || 0) + Math.max(1, Math.round(gems * (gemQ.passive.gemMul || 1)));  // perk: +% gemů
   run.score = (run.score || 0) + Math.round((e.def.score || 10) * mult * (e.elite ? 3 : 1) * pactMul('score'));
   if (wave) { wave.kills++; wave.reward.kills++; }
   addXp(xpForKill(e.def) * (e.elite ? 3 : 1) * ((killer && killer.passive && killer.passive.xpMul) || 1) * pactMul('xp'));  // perk + pakt: +% XP
@@ -1319,9 +1332,12 @@ function spawnDecal(x, y, r) {
 }
 // Drop dočasného bonusu
 function dropPickup(x, y, guaranteed) {
-  let total = 0; for (const k in DROP_WEIGHTS) total += DROP_WEIGHTS[k];
+  // D13: elitní (zaručený) drop dřív dával Mráz příliš často — u guaranteed tabulky mu snížíme váhu (2 → 1 z 23, ~4,3 %
+  // místo ~8,3 %), aby nezamrazovala obrazovka po každé druhé elitě. Neguaranteed dropy (9 % šance/zabití) beze změny.
+  const weights = guaranteed ? { ...DROP_WEIGHTS, freeze: Math.max(1, Math.round((DROP_WEIGHTS.freeze || 0) * 0.5)) } : DROP_WEIGHTS;
+  let total = 0; for (const k in weights) total += weights[k];
   let r = Math.random() * total, id = 'heal';
-  for (const k in DROP_WEIGHTS) { r -= DROP_WEIGHTS[k]; if (r <= 0) { id = k; break; } }
+  for (const k in weights) { r -= weights[k]; if (r <= 0) { id = k; break; } }
   pickups.push({ id, x, y, t: 600, bob: Math.random() * 6 });
 }
 function aoeExplosion(x, y, radius, dmg, dot, srcColor) {
@@ -1369,6 +1385,7 @@ function updateCombat(dt) {
   updateWarriors(dt);
   updateTurrets(dt);
   updateTraps(dt);
+  updateEngineerRepair(dt);
   updateGroundFx(dt);
   updateBullets(dt);
   updateEnemyBullets(dt);
@@ -1482,7 +1499,7 @@ function useAbility(p) {
   }
   if (p.classId === 'alchymista') {
     if (p.abomT > 0) return;
-    if ((p.potions || 0) <= 0) { banner = { text: 'Potřebuješ lektvar (nasbírej 5 žlučí)!', t: 70, warn: true }; return; }
+    if ((p.potions || 0) <= 0) { banner = { text: 'Potřebuješ lektvar (nasbírej ' + BILE_PER_POTION + ' žlučí)!', t: 70, warn: true }; return; }
     p.potions--; startAbomination(p); emitAbilityFx(p); sfx.groan(); return;
   }
   if (p.classId === 'knez') {
@@ -1652,7 +1669,7 @@ function damagePlayer(p, amount, src) {
   let dmg = amount;
   if (p.passive.block && Math.random() < p.passive.block) dmg *= 0.4;
   if (p.shieldT > 0) dmg *= 0.35;   // starší štít (kompatibilita)
-  if (p.abomT > 0) dmg *= (1 - ABOM_DR);            // abominace: −50 % obdrž. poškození
+  if (p.abomT > 0) dmg *= (1 - ABOM_DR);            // abominace: −35 % obdrž. poškození
   dmg *= (p.passive.armorMul || 1);                  // perky: −% obdrženého poškození
   dmg *= Math.max(0.35, 1 - 0.05 * ((run.upgrades && run.upgrades.armor) || 0)); // stat Pancíř
   // perk: trny — vrací část poškození útočníkovi zblízka
@@ -1734,6 +1751,18 @@ function updateEnemies(dt) {
     if (e.slowTimer > 0) e.slowTimer -= dt; else e.slowMul = 1;
     if (e.flash > 0) e.flash -= dt;
 
+    // ROZZUŘENÍ: pod 35 % HP nepřátelé s def.enrage zrychlí (+40 % rychlost) a zesílí útoky (+30 % dmg).
+    // Odvozeno stavově z hp/hpMax (žádné perzistentní pole) — guest si to při vykreslení dopočítá stejně.
+    const enraged = !!(e.def.enrage && e.hpMax > 0 && e.hp < e.hpMax * 0.35);
+    if (enraged && !e.enrageAnnounced) {
+      e.enrageAnnounced = true;
+      banner = { text: '💢 ' + e.def.name + ' se rozzuřil!', t: 90, warn: true };
+      if (sfx.growl) sfx.growl();
+    } else if (!enraged && e.enrageAnnounced) {
+      e.enrageAnnounced = false;   // umožní znovu ohlásit, pokud jej léčitel vytáhne nad práh a on zase klesne
+    }
+    const enrageDmgMul = enraged ? 1.3 : 1;
+
     // směr pohybu: agro na hráče poblíž, jinak flow k jádru
     let dx = 0, dy = 0;
     const pl = nearestPlayer(e.x, e.y);
@@ -1756,7 +1785,7 @@ function updateEnemies(dt) {
       e.fireCool -= dt;
       if (e.fireCool <= 0 && d < e.def.keepDist * 1.6) {
         const a = Math.atan2(pl.y - e.y, pl.x - e.x);
-        eBullets.push({ x: e.x, y: e.y, vx: Math.cos(a) * e.def.projSpeed, vy: Math.sin(a) * e.def.projSpeed, r: 5, dmg: e.dmg, color: '#8affb0' });
+        eBullets.push({ x: e.x, y: e.y, vx: Math.cos(a) * e.def.projSpeed, vy: Math.sin(a) * e.def.projSpeed, r: 5, dmg: e.dmg * enrageDmgMul, color: '#8affb0' });
         e.fireCool = e.atkRate;
       }
     }
@@ -1774,7 +1803,7 @@ function updateEnemies(dt) {
         const base = Math.atan2(pl.y - e.y, pl.x - e.x);
         for (let i = -2; i <= 2; i++) {
           const a = base + i * 0.24;
-          eBullets.push({ x: e.x, y: e.y, vx: Math.cos(a) * 4, vy: Math.sin(a) * 4, r: 6, dmg: e.dmg * 0.5, color: '#d09aff' });
+          eBullets.push({ x: e.x, y: e.y, vx: Math.cos(a) * 4, vy: Math.sin(a) * 4, r: 6, dmg: e.dmg * 0.5 * enrageDmgMul, color: '#d09aff' });
         }
         e.fireCool = e.atkRate;
       }
@@ -1783,7 +1812,7 @@ function updateEnemies(dt) {
       if (e.slamWind > 0) {
         e.slamWind -= dt;
         if (e.slamWind <= 0) {                 // DETONACE
-          const rad = e.slamR || 74, sdmg = e.dmg * 2.2;
+          const rad = e.slamR || 74, sdmg = e.dmg * 2.2 * enrageDmgMul;
           explode(e.slamX, e.slamY, '#ff4a2a', 28);
           particles.push({ x: e.slamX, y: e.slamY, ring: true, r: 6, rMax: rad, life: 1, decay: 0.06, color: '#ff8a3a' });
           for (const q of players) if (!q.downed && q.inv <= 0 && dist(e.slamX, e.slamY, q.x, q.y) <= rad + q.r) damagePlayer(q, sdmg, e);
@@ -1818,7 +1847,7 @@ function updateEnemies(dt) {
     if (e.spawnT > 0) e.spawnT -= dt;   // krátká „nezranitelnost" objevení (jen vizuál)
     // ZUŘIVEC: čím míň HP, tím rychlejší (frenzy)
     const frenzy = e.def.frenzy ? (1 + (1 - clamp(e.hp / e.hpMax, 0, 1)) * 1.2) : 1;
-    const spd = e.speed * e.slowMul * frenzy * (freezeTimer > 0 ? 0 : 1);
+    const spd = e.speed * e.slowMul * frenzy * (enraged ? 1.4 : 1) * (freezeTimer > 0 ? 0 : 1);
     // past „smola" pod nohama
     const trap = traps.find(t => t.def.arch === 'SLOW' && t.tx === Math.floor(e.x / TILE) && t.ty === Math.floor(e.y / TILE));
     const slowField = trap ? trap.def.slow.mul : 1;
@@ -1830,7 +1859,12 @@ function updateEnemies(dt) {
       const st = grid.structures[tileIndex(ahead.tx, ahead.ty)];
       if (st) {
         e.wallCool -= dt;
-        if (e.wallCool <= 0) { damageStructure(st, e.dmg * (e.arch === 'BOSS' ? 2 : 0.5)); e.wallCool = 30; }
+        if (e.wallCool <= 0) { damageStructure(st, e.dmg * (e.arch === 'BOSS' ? 2 : 0.5) * enrageDmgMul); e.wallCool = 30; }
+        // Bodcová zeď (V8): kontaktnímu nepříteli ubírá HP za sekundu (def.contactDmg/s).
+        if (st.def.contactDmg) {
+          e.hp -= st.def.contactDmg * dt / 60;
+          if (e.hp <= 0) { killEnemy(e); continue; }
+        }
       }
     }
     // Pohyb s kolizemi (i boss — NEprochází zdmi; zeď v cestě prokousává).
@@ -1848,13 +1882,13 @@ function updateEnemies(dt) {
     if (pl && hitCircle(e, pl, 2)) {
       e.atkCool -= dt;
       if (e.arch === 'EXPLODER') { explodeEnemy(e, pl); continue; }
-      if (e.atkCool <= 0) { damagePlayer(pl, e.dmg, e); e.atkCool = e.atkRate || 40; }
+      if (e.atkCool <= 0) { damagePlayer(pl, e.dmg * enrageDmgMul, e); e.atkCool = e.atkRate || 40; }
     }
     // kontakt s válečníkem
     for (const wr of warriors) {
       if (hitCircle(e, wr, 2)) {
         e.atkCool2 = (e.atkCool2 || 0) - dt;
-        if (e.atkCool2 <= 0) { wr.hp -= e.dmg; wr.flash = 5; e.atkCool2 = e.atkRate || 40; if (wr.hp <= 0) burst(wr.x, wr.y, wr.def.color, 12); }
+        if (e.atkCool2 <= 0) { wr.hp -= e.dmg * enrageDmgMul; wr.flash = 5; e.atkCool2 = e.atkRate || 40; if (wr.hp <= 0) burst(wr.x, wr.y, wr.def.color, 12); }
       }
     }
     // dosažení jádra → únik (ztráta životů)
@@ -1949,7 +1983,11 @@ function updateTurrets(dt) {
 }
 
 /* ---------- Pozemní pasti ---------- */
+// V7: klesající výnos u překrývajících se DOT_AOE polí (proti trap-cheese kill-boxu).
+// Nejsilnější zdroj působí 100 %, druhý 50 %, třetí 25 %, čtvrtý a další 0 %.
+const DOT_AOE_OVERLAP_WEIGHTS = [1, 0.5, 0.25];
 function updateTraps(dt) {
+  const dotHits = new Map();   // enemy -> [dps ze všech pastí, co ho zasahují tento snímek]
   for (const t of traps) {
     const def = t.def;
     if (def.arch === 'ONESHOT') {
@@ -1970,13 +2008,45 @@ function updateTraps(dt) {
     } else if (def.arch === 'DOT_AOE') {
       t.dur -= dt;
       const cand = enemyHash.query(t.x, t.y, def.radius);
-      for (const e of cand) { if (!e.dead && dist(t.x, t.y, e.x, e.y) <= def.radius + e.r) { e.hp -= def.dps * (t.up || 1) * dt / 60; if (e.hp <= 0) killEnemy(e); } }
+      for (const e of cand) {
+        if (!e.dead && dist(t.x, t.y, e.x, e.y) <= def.radius + e.r) {
+          let arr = dotHits.get(e); if (!arr) { arr = []; dotHits.set(e, arr); }
+          arr.push(def.dps * (t.up || 1));
+        }
+      }
       if (Math.random() < 0.3) burst(t.x + (Math.random() - 0.5) * def.radius, t.y + (Math.random() - 0.5) * def.radius, def.color, 1);
     }
     // SLOW se aplikuje v updateEnemies
   }
+  // aplikuj nasčítané DOT_AOE poškození s klesajícím výnosem (100/50/25/0 %)
+  for (const [e, arr] of dotHits) {
+    if (e.dead) continue;
+    arr.sort((a, b) => b - a);
+    let dps = 0;
+    for (let i = 0; i < arr.length && i < DOT_AOE_OVERLAP_WEIGHTS.length; i++) dps += arr[i] * DOT_AOE_OVERLAP_WEIGHTS[i];
+    e.hp -= dps * dt / 60;
+    if (e.hp <= 0) killEnemy(e);
+  }
   // pasti jsou trvalé v rámci mapy; odstraní se jen výslovně časované (dur)
   traps = traps.filter(t => !(t.def.arch === 'DOT_AOE' && t.dur <= 0));
+}
+// D11: pasivní oprava (Inženýr, passive.canRepair) — poškozené zdi/věže v okruhu 90 px
+// se pomalu opravují o 0,5 HP/frame (~30 HP/s při 60 FPS), maximálně do hpMax.
+const ENGINEER_REPAIR_RADIUS = 90, ENGINEER_REPAIR_RATE = 0.5;   // 0,5 HP/frame ≈ 30 HP/s
+function updateEngineerRepair(dt) {
+  const engineers = players.filter(p => !p.downed && p.passive.canRepair);
+  if (!engineers.length) return;
+  const structs = walls.length || turrets.length ? walls.concat(turrets) : null;
+  if (!structs) return;
+  for (const s of structs) {
+    if (s.hp >= s.hpMax) continue;
+    for (const p of engineers) {
+      if (dist(p.x, p.y, s.x, s.y) <= ENGINEER_REPAIR_RADIUS) {
+        s.hp = Math.min(s.hpMax, s.hp + ENGINEER_REPAIR_RATE * dt);
+        break;
+      }
+    }
+  }
 }
 function updateGroundFx(dt) {
   for (const g of groundFx) {
@@ -2065,7 +2135,7 @@ function applyPickup(pu, p) {
   const d = DROPS[pu.id];
   // drop platí VŠEM hráčům najednou (buff/léčení/gemy/mráz)
   if (d.kind === 'buff') { for (const q of players) { if (pu.id === 'rapid') q.buffRapid = d.dur; else q.buffPower = d.dur; } }
-  else if (d.kind === 'freeze') { freezeTimer = 150; emitEv({ k: 'freeze' }); }
+  else if (d.kind === 'freeze') { freezeTimer = 72; emitEv({ k: 'freeze' }); }   // 1,2 s (dřív 2,5 s)
   else if (d.kind === 'heal') { for (const q of players) if (!q.downed) q.hp = Math.min(q.hpMax, q.hp + 45); }
   else if (d.kind === 'gems') { creditAll(d.gems); }
   else if (d.kind === 'mat') { run[d.mat] = (run[d.mat] || 0) + d.amt; }
