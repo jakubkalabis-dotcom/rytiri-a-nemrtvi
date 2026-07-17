@@ -40,7 +40,7 @@ const MAPS = [
 ];
 const NUM_MAPS = MAPS.length;
 const WAVES_PER_MAP = 25;                // každá mapa = 25 vln; každá 5. vlna = sub-boss, 25. = mapový boss
-const FINAL_WAVE = NUM_MAPS * WAVES_PER_MAP;  // 375
+const FINAL_WAVE = NUM_MAPS * WAVES_PER_MAP;  // poslední vlna kampaně (počet map × 25) — po ní lze vstoupit do Nekonečna (viz ASCENSION_CURSES)
 function mapForWave(wave) { return Math.min(NUM_MAPS - 1, Math.floor((Math.max(1, wave) - 1) / WAVES_PER_MAP)); }
 function waveInMap(wave) { return ((Math.max(1, wave) - 1) % WAVES_PER_MAP) + 1; }   // 1..25
 function isMapEndWave(wave) { return wave % WAVES_PER_MAP === 0; }   // mapový boss = konec mapy (každá 25.)
@@ -206,7 +206,7 @@ const DROPS = {
 };
 // materiály na vylepšování zbraní padají často (aby se dalo craftit)
 const DROP_WEIGHTS = { rapid: 3, power: 3, freeze: 2, heal: 3, truhla: 2, wood: 7, steel: 4 };
-// Škálování dle POSTUPU (mapa + zlomek uvnitř mapy), aby křivka dávala smysl přes 375 vln.
+// Škálování dle POSTUPU (mapa + zlomek uvnitř mapy), aby křivka dávala smysl přes celou kampaň (FINAL_WAVE vln).
 // prog = 0 (mapa 1, vlna 1) .. ~15 (mapa 15, konec). hp roste plynule, spd/dmg mají strop.
 function enemyScale(wave) {
   const prog = waveProgress(wave);
@@ -425,6 +425,22 @@ const PACTS = {
   posedlost:  { name:'Posedlost',          icon:'👁', desc:'−15 % cooldown schopností a +25 % many, ale nepřátelé +15 % HP.', cd:0.85, manaRegen:1.25, enemyHp:1.15 },
 };
 const PACT_KEYS = Object.keys(PACTS);
+
+/* ---------- ASCENSION / NEKONEČNO (FÁZE 4.1) ----------
+   Po poražení Pekelného pána ve vlně FINAL_WAVE si hráč může zvolit „Vstoupit do Nekonečna": běh
+   pokračuje TÝMŽ postupem (stejná postava/zbraně/vylepšení) na vlny FINAL_WAVE+1…, zůstává na poslední
+   mapě a každých 25 vln za FINAL_WAVE (FINAL_WAVE+25, +50, …) se run.ascension zvýší o 1 → přibude
+   další prokletí z tohoto cyklického seznamu. Efekt je SOUČIN násobičů prvních `run.ascension` prokletí
+   (cyklicky, viz ascensionMul() v game.js) — s ascension=0 (běžná hra, vlny 1..FINAL_WAVE) vrací vždy
+   1× (žádný efekt). Čísla v `desc` MUSÍ přesně odpovídat hodnotám níže — při změně čísla uprav i popis. */
+const ASCENSION_CURSES = [
+  { id:'tuhost',     name:'Nemrtvá tuhost', icon:'🩹', desc:'Nepřátelé mají +40 % HP.',                 hp:1.40 },
+  { id:'zbesilost',  name:'Zběsilost',      icon:'⚡', desc:'Nepřátelé jsou o 25 % rychlejší.',          spd:1.25 },
+  { id:'zurivasila', name:'Zuřivá síla',    icon:'💢', desc:'Nepřátelé udělují o 30 % víc poškození.',   dmg:1.30 },
+  { id:'presila',    name:'Přesila',        icon:'🧟', desc:'+20 % počet nepřátel ve vlnách.',           count:1.20 },
+  { id:'hladbrany',  name:'Hlad brány',     icon:'🩸', desc:'−25 % gemů z nepřátel.',                    gem:0.75 },
+  { id:'elitnivpad', name:'Elitní vpád',    icon:'⭐', desc:'+20 % šance na elitního nepřítele.',        eliteChance:1.20 },
+];
 
 /* ---------- META-PROGRESE (Svatyně) — trvalá vylepšení účtu za „duše" napříč běhy ----------
    Duše se získávají po každém běhu (dle vlny+skóre) a utrácí v menu za permanentní bonusy.   */

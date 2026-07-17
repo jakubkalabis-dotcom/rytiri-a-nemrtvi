@@ -93,6 +93,7 @@ function newRun(classIds) {
     pacts: [],          // roguelite modifikátory běhu (viz PACTS)
     _pactOffer: null,   // aktuální nabídka 3 paktů
     lifeBuys: 0,        // kolikrát byl v tomto běhu koupen Život brány (cena progresivně roste)
+    ascension: 0,       // FÁZE 4.1 Nekonečno: 0 ve vlnách 1..FINAL_WAVE (žádný efekt), ≥1 po vstupu do Nekonečna (viz ASCENSION_CURSES/ascensionMul)
   };
   for (const k in AMMO) run.ammo[k] = 0;
   // sdílené vlastněné zbraně = sjednocení startovních zbraní hráčů
@@ -215,10 +216,30 @@ function rollPerkOffer(p) {
 // PAKTY: součin násobičů / součet přídavků přes aktivní pakty běhu
 function pactMul(key) { let m = 1; if (run && run.pacts) for (const id of run.pacts) { const v = PACTS[id] && PACTS[id][key]; if (v != null) m *= v; } return m; }
 function pactSum(key) { let s = 0; if (run && run.pacts) for (const id of run.pacts) { const v = PACTS[id] && PACTS[id][key]; if (v != null) s += v; } return s; }
+// ASCENSION (Nekonečno): součin násobičů prvních run.ascension prokletí z ASCENSION_CURSES (cyklicky —
+// při vyčerpání sady se prokletí opakují a jejich efekt se tak stále násobí, viz komentář u ASCENSION_CURSES).
+// ascension=0 (normální hra, vlny 1..FINAL_WAVE) → vždy vrací 1 (žádný vliv na běžný běh).
+function ascensionMul(r, key) {
+  let m = 1; const n = (r && r.ascension) || 0;
+  for (let i = 0; i < n; i++) { const c = ASCENSION_CURSES[i % ASCENSION_CURSES.length]; const v = c[key]; if (v != null) m *= v; }
+  return m;
+}
+// Seznam aktivních prokletí pro HUD/roundEnd s počtem opakování (kolikrát bylo dané prokletí v cyklu aplikováno).
+function activeAscensionCurses(r) {
+  const n = (r && r.ascension) || 0; if (!n) return [];
+  const counts = new Array(ASCENSION_CURSES.length).fill(0);
+  for (let i = 0; i < n; i++) counts[i % ASCENSION_CURSES.length]++;
+  return ASCENSION_CURSES.map((c, i) => ({ curse: c, count: counts[i] })).filter(x => x.count > 0);
+}
+// Kompaktní shrnutí aktuálních násobičů (přesná čísla pro HUD — vždy odpovídá realitě, čte se ze stejné funkce jako herní logika).
+function ascensionSummary(r) {
+  const kinds = [['hp', 'HP'], ['spd', 'RYCH'], ['dmg', 'DMG'], ['count', 'POČ'], ['gem', 'GEM'], ['eliteChance', 'ELI']];
+  return kinds.map(([k, label]) => label + '×' + ascensionMul(r, k).toFixed(2)).join('  ·  ');
+}
 // META-progrese (Svatyně): trvalé bonusy účtu
 function metaLvl(k) { return (profile.meta && profile.meta[k]) || 0; }
 function metaBonus(k) { return metaLvl(k) * (META_UPGRADES[k] ? META_UPGRADES[k].per : 0); }
-function soulsFromRun() { return Math.max(1, Math.round(((run.wave || 0) * 2 + (run.score || 0) / 500) * (1 + metaBonus('reaper')))); }
+function soulsFromRun() { return Math.max(1, Math.round(((run.wave || 0) * 2 + (run.score || 0) / 500) * (1 + metaBonus('reaper')) * (1 + (run.ascension || 0) * 0.25))); }   // + bonus Nekonečna: ×(1 + ascension×0,25)
 function grantPerkOffer() { for (const p of players) if (!p.perkOffer) p.perkOffer = rollPerkOffer(p); }
 /* ---- PAKTY: nabídka 3 před během a před každou mapou ---- */
 let pactReturn = 'shop';
@@ -367,7 +388,8 @@ function renderMenu() {
   ovContent.innerHTML = `
     ${heroSVG()}
     <p>Braň hradní bránu před vlnami nemrtvých. Nakupuj zbraně, stav pasti, zdi a věže,
-    najmi spojence a přežij co nejdéle. Úroveň profilu: <b>${profile.playerLevel}</b> (odemyká zbraně).</p>
+    najmi spojence a přežij co nejdéle. Úroveň profilu: <b>${profile.playerLevel}</b> (odemyká zbraně).
+    ${profile.bestAscension ? ' Nejvyšší dosažený <b>☠ Ascension ' + profile.bestAscension + '</b> v Nekonečnu.' : ''}</p>
     <button data-act="play">Hrát sám</button>
     <button data-act="hostgame" class="ghost">Hostovat co-op (2 hráči)</button>
     <button data-act="joingame" class="ghost">Připojit se ke hře</button>
@@ -591,9 +613,17 @@ function renderRoundEnd() {
   const mapEnd = isMapEndWave(run.wave);
   const subB = isSubBossWave(run.wave);
   const nextMap = mapForWave(run.wave + 1);
-  const note = mapEnd
+  const note = run.ascension > 0
+    ? `<p>☠ <b>Nekonečno pokračuje.</b> Jádro brány má ještě <b>${run.lives}</b> životů. Připrav se na vlnu <b>${run.wave + 1}</b>${(run.wave + 1 - FINAL_WAVE) % 25 === 0 ? ' — přibude další prokletí (Ascension ' + (run.ascension + 1) + ')!' : '.'}</p>`
+    : mapEnd
     ? `<p>🏆 <b>Mapa ${currentMap + 1} dokončena!</b> Další zastávka: <b>${MAPS[nextMap].name}</b> (mapa ${nextMap + 1}/${NUM_MAPS}). Na nové mapě si obranu (zdi, věže, pasti) postavíš znovu.</p>`
     : `<p>Jádro brány má ještě <b>${run.lives}</b> životů. Připrav se na vlnu <b>${run.wave + 1}</b> (${waveInMap(run.wave + 1)}/${WAVES_PER_MAP} na mapě).</p>`;
+  const ascHtml = run.ascension > 0 ? (() => {
+    const list = activeAscensionCurses(run);
+    const items = list.map(x => `<div>${x.curse.icon} ${x.curse.name}${x.count > 1 ? ' ×' + x.count : ''} — <span style="color:#9aa87e">${x.curse.desc}</span></div>`).join('');
+    return `<details class="perk-owned" open><summary>☠ Aktivní prokletí Nekonečna (Ascension ${run.ascension})</summary><div class="perk-list">${items}</div>
+      <div style="font-size:11px;color:#c8a060;margin-top:4px">Souhrn násobičů: ${ascensionSummary(run)}</div></details>`;
+  })() : '';
   const me = localPlayer();
   // Nabídka trvalého buffu (po bossovi). Dokud si hráč nevybere, nejde dál.
   let perkHtml = '';
@@ -619,6 +649,7 @@ function renderRoundEnd() {
     <h2>${mapEnd ? '🏆 Boss poražen!' : (subB ? '☠ Sub-boss padl!' : 'Vlna ' + run.wave + ' přežita!')}</h2>
     <div class="wallet">Zabito: <b>${r.kills}</b> · Získáno 💎 <b>${r.gems}</b> · XP <b>+${r.xp}</b></div>
     ${note}
+    ${ascHtml}
     ${perkHtml}
     ${ownedHtml}
     ${gate ? '<button class="dis" disabled>Nejdřív si vyber buff ☝</button>' : '<button data-act="toshop">Do obchodu</button>'}`;
@@ -662,11 +693,17 @@ function soulsLine() {
   const e = (run && run._soulsEarned) || 0;
   return `<div class="wallet" style="color:var(--arcane-2,#c88bff)">💀 Získáno <b>${e}</b> duší · celkem <b>${profile.souls || 0}</b> — utrať je ve Svatyni</div>`;
 }
+function ascensionLine() {
+  if (!run || !run.ascension) return '';
+  const pb = profile.bestAscension || 0;
+  return `<div class="wallet" style="color:#ff5a7a">☠ Dosažený Ascension: <b>${run.ascension}</b>${pb > run.ascension ? ' (osobní rekord: ' + pb + ')' : (pb === run.ascension ? ' — nový osobní rekord!' : '')}</div>`;
+}
 function renderGameOver() {
   const score = run ? run.score || 0 : 0;
   ovContent.innerHTML = `
     <h2>Brána padla</h2>
     <div class="wallet">Mapa <b>${currentMap + 1}/${NUM_MAPS}</b> · vlna <b>${run.wave}</b> · Skóre: <b>${score}</b></div>
+    ${ascensionLine()}
     ${soulsLine()}
     <button data-act="shrine">💀 Svatyně (vylepšit napořád)</button>
     <div class="board"><h3>NEJLEPŠÍ SKÓRE</h3>${scoreBoardHtml()}</div>
@@ -674,12 +711,18 @@ function renderGameOver() {
 }
 function renderVictory() {
   const score = run ? run.score || 0 : 0;
+  const firstCurse = ASCENSION_CURSES[0];
   ovContent.innerHTML = `
     <h2>👑 ZVÍTĚZIL JSI! 👑</h2>
     <p>Prošel jsi všech <b>${NUM_MAPS}</b> map a v pekle jsi porazil <b>Pekelného pána</b>!
     Nemrtví jsou zahnáni a brána stojí.</p>
     <div class="wallet">Finální skóre: <b>${score}</b> · třída ${players.map(p => p.class.name).join(' + ')}</div>
     ${soulsLine()}
+    <div class="perk-offer"><h3>☠ Nekonečno</h3>
+      <p style="font-size:12px;color:#9aa87e">Chceš víc? Pokračuj TÝMŽ postupem (stejná postava, zbraně, vylepšení) do nekonečných vln za hranicí ${FINAL_WAVE}.
+      Každých 25 vln přibude další stohované prokletí — první: <b>${firstCurse.icon} ${firstCurse.name}</b> — ${firstCurse.desc}
+      ${profile.bestAscension ? '<br>Osobní rekord: <b>☠ Ascension ' + profile.bestAscension + '</b>' : ''}</p>
+      <button data-act="ascend">☠ Vstoupit do Nekonečna</button></div>
     <button data-act="shrine">💀 Svatyně (vylepšit napořád)</button>
     <div class="board"><h3>NEJLEPŠÍ SKÓRE</h3>${scoreBoardHtml()}</div>
     <button data-act="menu" class="ghost">Do menu</button>`;
@@ -744,11 +787,12 @@ overlay.addEventListener('click', e => {
   if (act === 'tobuild') { shopReady(); return; }              // ready-gate obchodu (co-op)
   // --- guest: ekonomika a tok = příkazy hostiteli ---
   if (net.role === 'guest') {
-    if (['buyweapon', 'buyammo', 'buybuild', 'buylife', 'upstat', 'upweapon', 'toshop', 'perkpick', 'upshield', 'wheelpick', 'pactpick'].includes(act)) { netSend({ t: 'cmd', act, id }); if (act === 'perkpick') { const g = players[1]; if (g && g.perkOffer) { g.perkOffer = null; renderRoundEnd(); } } return; }
+    if (['buyweapon', 'buyammo', 'buybuild', 'buylife', 'upstat', 'upweapon', 'toshop', 'perkpick', 'upshield', 'wheelpick', 'pactpick', 'ascend'].includes(act)) { netSend({ t: 'cmd', act, id }); if (act === 'perkpick') { const g = players[1]; if (g && g.perkOffer) { g.perkOffer = null; renderRoundEnd(); } } return; }
     return;
   }
   // --- host / solo ---
   const me = localPlayer();
+  if (act === 'ascend') { enterAscension(); return; }
   if (act === 'perkpick') { choosePerk(me, id); return; }
   if (act === 'pactpick') { choosePact(id); return; }
   if (act === 'pactskip') { setState(pactReturn || 'shop'); return; }
@@ -911,6 +955,9 @@ function refund(id, seller) {
 function startWave() {
   run.wave++;
   const wv = run.wave;
+  // ASCENSION (Nekonečno): každých 25 vln za FINAL_WAVE (450, 475, 500, …) přibude další prokletí ze stohu.
+  let ascendedThisWave = false;
+  if (run.ascension > 0 && wv > FINAL_WAVE && (wv - FINAL_WAVE) % 25 === 0) { run.ascension++; ascendedThisWave = true; }
   // konec předchozího kola: sekerníci klanu odejdou, schopnosti se resetují na kolo
   warriors = warriors.filter(w => !w.clanOwner);
   for (const p of players) {
@@ -933,7 +980,7 @@ function startWave() {
     for (let k = 0; k < escort; k++) queue.push(pickWeighted(comp));
   } else {
     const comp = horde ? hordeComposition(wv) : waveComposition(wv);
-    const n = Math.round(waveCount(wv) * pactMul('count'));   // pakt Neustálá horda
+    const n = Math.round(waveCount(wv) * pactMul('count') * ascensionMul(run, 'count'));   // pakt Neustálá horda + prokletí Přesila
     for (let k = 0; k < n; k++) queue.push(pickWeighted(comp));
   }
   const spawnMul = pactMul('spawn');   // pakt Krvavý spěch (nižší = rychleji)
@@ -948,6 +995,11 @@ function startWave() {
     : (subBoss ? { text: '☠ SUB-BOSS: ' + ENEMIES[bossId].name.toUpperCase(), t: 110, warn: true }
     : (horde ? { text: '🧟 HORDA! VLNA ' + wv, t: 120, warn: true } : { text: 'VLNA ' + wv, t: 110 }));
   if (mod) banner = { text: mod.icon + ' ' + mod.name + ' — ' + mod.desc, t: 140, warn: true };   // modifikátor vlny má přednost v oznámení
+  // ASCENSION: nový tier prokletí má přednost před vším ostatním — hráč MUSÍ vidět, co přibylo a o kolik.
+  if (ascendedThisWave) {
+    const tierCurse = ASCENSION_CURSES[(run.ascension - 1) % ASCENSION_CURSES.length];
+    banner = { text: '☠ ASCENSION ' + run.ascension + ' — ' + tierCurse.icon + ' ' + tierCurse.name + ': ' + tierCurse.desc, t: 200, warn: true };
+  }
   if (boss) sfx.boss(); else if (horde) { sfx.groan(); sfx.waveStart(); } else sfx.waveStart();
 }
 function pickWeighted(weights) {
@@ -970,13 +1022,13 @@ function spawnEnemy(typeId, ovX, ovY, isSplit) {
   const mod = wave && wave.mod;
   if (base.arch !== 'BOSS' && mod) { hpMul *= (mod.hpMul || 1); spdMul *= (mod.spdMul || 1); }
   // pakty: HP (boss vs běžní), rychlost a poškození nepřátel
-  hpMul *= (base.arch === 'BOSS' ? pactMul('bossHp') : pactMul('enemyHp'));
-  spdMul *= pactMul('enemySpd');
-  let dmgMul = (base.arch === 'BOSS' ? Math.min(3, 1 + 0.12 * mapIdx) : sc.dmg) * pactMul('enemyDmg');
+  hpMul *= (base.arch === 'BOSS' ? pactMul('bossHp') : pactMul('enemyHp')) * ascensionMul(run, 'hp');   // + prokletí Nemrtvá tuhost (i na bossy — eskalují s tebou)
+  spdMul *= pactMul('enemySpd') * ascensionMul(run, 'spd');   // + prokletí Zběsilost
+  let dmgMul = (base.arch === 'BOSS' ? Math.min(3, 1 + 0.12 * mapIdx) : sc.dmg) * pactMul('enemyDmg') * ascensionMul(run, 'dmg');   // + prokletí Zuřivá síla
   if (base.arch !== 'BOSS' && mod) dmgMul *= (mod.dmgMul || 1);
   // elitní přídomek (jen běžní nepřátelé)
   let elite = null;
-  if (base.arch !== 'BOSS' && Math.random() < eliteChance(run.wave) * pactMul('eliteChance') + (mod ? (mod.eliteChanceAdd || 0) : 0)) {
+  if (base.arch !== 'BOSS' && Math.random() < eliteChance(run.wave) * pactMul('eliteChance') * ascensionMul(run, 'eliteChance') + (mod ? (mod.eliteChanceAdd || 0) : 0)) {
     elite = ELITE_KEYS[(Math.random() * ELITE_KEYS.length) | 0];
     const ed = ELITES[elite]; hpMul *= ed.hpMul; spdMul *= ed.spdMul; dmgMul *= ed.dmgMul;
   }
@@ -1253,7 +1305,7 @@ function killEnemy(e, killer) {
   run.combo = (run.combo || 0) + 1; run.comboT = 180;
   const mult = comboMult();
   const eliteGem = e.elite ? 3 * pactMul('eliteGem') : 1;   // pakt Lovecká odměna
-  const gems = Math.max(1, Math.round((e.def.bounty || 4) * GEMS_PER_KILL_MUL * mult * eliteGem * pactMul('gem') * (1 + metaBonus('luck'))));
+  const gems = Math.max(1, Math.round((e.def.bounty || 4) * GEMS_PER_KILL_MUL * mult * eliteGem * pactMul('gem') * ascensionMul(run, 'gem') * (1 + metaBonus('luck'))));   // + prokletí Hlad brány
   // D12: gemy dostane JEN zabíječ (dřív dostával plnou odměnu každý hráč v co-opu = duplicace).
   // Bez identifikovaného zabíječe (past/DOT) kredituje prvního hráče — v sólu nemá vliv.
   const gemQ = killer || players[0];
@@ -1515,7 +1567,9 @@ function endWave() {
   wave.reward.gems = waveReward(run.wave);
   creditAll(wave.reward.gems);
   wave.reward.xp = wave.kills * 3;
-  if (isFinalWave(run.wave)) return doVictory();   // poražen Pekelný pán → vítězství
+  // poražen Pekelný pán poprvé (run.ascension ještě 0) → triumfální vítězství. Jakmile hráč vstoupí do
+  // Nekonečna (run.ascension>0), isFinalWave() zůstává navždy true (wave>=FINAL_WAVE) — proto se dál pokračuje.
+  if (isFinalWave(run.wave) && !run.ascension) return doVictory();
   setState('roundEnd');
   sfx.waveWin();
 }
@@ -1524,11 +1578,14 @@ function grantSouls() {
   profile.souls = (profile.souls || 0) + s; saveProfile(profile);
   return s;
 }
+// Zaznamená nejvyšší dosažený Ascension tier napříč běhy (perzistentní PB, viz defaultProfile v engine.js).
+function recordBestAscension() { profile.bestAscension = Math.max(profile.bestAscension || 0, run.ascension || 0); }
 function doVictory() {
   run.won = true;
   const name = profile.settings.name || 'Rytíř';
   addScore(name, run.wave, run.score || 0);
   grantSouls();
+  recordBestAscension();
   saveProfile(profile);
   sfx.waveWin(); setTimeout(() => { try { sfx.levelUp(); } catch {} }, 300);
   setState('victory');
@@ -1537,9 +1594,30 @@ function doGameOver() {
   const name = (profile.settings.name) || 'Rytíř';
   addScore(name, run.wave, run.score || 0);
   grantSouls();
+  recordBestAscension();
   saveProfile(profile);
   sfx.gameOver();
   setState('gameOver');
+}
+// Jediné místo pravdy pro validaci vstupu do Nekonečna. Legitimní pouze z obrazovky vítězství
+// (viz renderVictory() — tlačítko „Vstoupit do Nekonečna" je jediný vstupní bod): run musí existovat,
+// ascension ještě NEproběhl (0 = ochrana proti reaktivaci/resetu existujícího postupu) a FINAL_WAVE
+// je dosažena. Používá ji enterAscension() (primární guard) i netHandleCmd() v net.js (obranná
+// předkontrola na síťové hranici — coop guest posílá cmd 'ascend' bez lokální validace).
+function canEnterAscension() {
+  return !!run && run.ascension === 0 && isFinalWave(run.wave) && state === 'victory';
+}
+// Vstup do Nekonečna z obrazovky vítězství: pokračuje TÝMŽ během (žádný newRun) na vlny 426+, nastaví
+// první tier prokletí hned (run.ascension=1) a naváže na běžný tok konce kola (roundEnd → obchod → stavění).
+// Idempotentní/no-op mimo legitimní vstup (viz canEnterAscension()).
+function enterAscension() {
+  if (!canEnterAscension()) return;
+  run.ascension = 1;
+  const tierCurse = ASCENSION_CURSES[0];
+  banner = { text: '☠ VSTOUPIL JSI DO NEKONEČNA — ASCENSION 1: ' + tierCurse.icon + ' ' + tierCurse.name + ': ' + tierCurse.desc, t: 220, warn: true };
+  sfx.levelUp();
+  setState('roundEnd');
+  if (net.role === 'host' && net.connected && typeof netPush === 'function') netPush();
 }
 
 /* ---------- Hráč ---------- */
@@ -3329,7 +3407,9 @@ function drawWaveTrack() {
   ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   ctx.font = 'bold 13px system-ui'; ctx.fillStyle = '#f0e0a0';
   const title = (wave && wave.mapBoss) ? '☠ MAPOVÝ BOSS' : (wave && wave.subBoss) ? '☠ SUB-BOSS' : (wave && wave.horde) ? '🧟 HORDA' : 'VLNA';
-  ctx.fillText(title + ' ' + (run.wave || 0) + '  ·  ' + wim + '/' + WAVES_PER_MAP + '  (mapa ' + (currentMap + 1) + '/' + NUM_MAPS + ')', W / 2, ty - 6);
+  // Transparentnost Nekonečna: dokud run.ascension>0, hráč MUSÍ vidět aktuální tier vždy, když je HUD vykreslen.
+  const ascSuffix = (run.ascension > 0) ? '  ☠ ASCENSION ' + run.ascension : '';
+  ctx.fillText(title + ' ' + (run.wave || 0) + '  ·  ' + wim + '/' + WAVES_PER_MAP + '  (mapa ' + (currentMap + 1) + '/' + NUM_MAPS + ')' + ascSuffix, W / 2, ty - 6);
   forgeBar(tx, ty, tw, th, journey, '#c09030', { frame: '#5a4a28' });
   // milníky
   for (let i = 5; i <= WAVES_PER_MAP; i += 5) {
@@ -3419,6 +3499,15 @@ function drawHud() {
     ctx.restore();
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#ffdce2'; ctx.font = 'bold 11px system-ui';
     ctx.fillText('☠ ' + (boss.def.name || 'BOSS').toUpperCase() + '  ' + Math.max(0, Math.ceil(boss.hp)) + '/' + boss.hpMax, W / 2, by + 6.5);
+    ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  } else if (run.ascension > 0) {
+    // Prostor pod milníkovou lištou je mimo boss souboje volný — použij ho pro přesná čísla aktivních prokletí
+    // (mimo boss souboje, protože jinak by kolidovalo s bossovou HP lištou výše). Banner při tier-upu + roundEnd
+    // detail (renderRoundEnd) zajišťují viditelnost i v okamžicích, kdy tato lišta ustoupí boss HP liště.
+    const by = 58;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = 'bold 11px system-ui'; ctx.fillStyle = '#ff5a7a';
+    ctx.fillText('☠ Aktivní prokletí — ' + ascensionSummary(run), W / 2, by + 6.5);
     ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   }
   // HUD pás pozadí — tepaný kovový panel s horní zlatou lištou a nýty

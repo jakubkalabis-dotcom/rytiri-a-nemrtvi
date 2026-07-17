@@ -158,6 +158,9 @@ function netHandleCmd(m) {
     case 'upshield': buyShield(players[1]); break;
     case 'wheelpick': chooseWheel(m.id); break;
     case 'pactpick': choosePact(m.id); break;
+    // obranná předkontrola na síťové hranici (guest posílá bez lokální validace) — primární guard je
+    // uvnitř enterAscension() přes canEnterAscension() (jediné místo pravdy, viz game.js)
+    case 'ascend': if (canEnterAscension()) enterAscension(); break;
     case 'sready': readyGuest = true; if (readyHost) startBuildPhase(); break;
     case 'sunready': readyGuest = false; break;
     case 'cycle': cycleWeapon(players[1]); break;
@@ -189,7 +192,7 @@ const SNAPSHOT_SCHEMA = {
       { key: 'wood', def: 0 }, { key: 'steel', def: 0 }, { key: 'combo', def: 0 }, { key: 'comboT', def: 0 },
       { key: 'shieldLvl', def: 0 }, { key: 'wheelReady', def: 0 }, { key: 'wheelUpgrades', def: {} },
       { key: 'turretKills', def: 0 }, { key: 'wheelThreshold', def: 2 }, { key: 'pacts', def: [] },
-      { key: '_pactOffer', def: null }, { key: 'lifeBuys', def: 0 },
+      { key: '_pactOffer', def: null }, { key: 'lifeBuys', def: 0 }, { key: 'ascension', def: 0 },
     ],
   },
   wave: { single: true, fields: ['boss', 'spawned', 'total', 'reward'] },

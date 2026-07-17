@@ -559,7 +559,7 @@ code += `
     const EXPECTED_SCHEMA_FIELDS = {
       run: ['lives', 'wave', 'score', 'ownedWeapons', 'ammo', 'owned', 'upgrades', 'wUpgrades', 'wood', 'steel',
             'combo', 'comboT', 'shieldLvl', 'wheelReady', 'wheelUpgrades', 'turretKills', 'wheelThreshold', 'pacts',
-            '_pactOffer', 'lifeBuys'],
+            '_pactOffer', 'lifeBuys', 'ascension'],
       wave: ['boss', 'spawned', 'total', 'reward'],
       banner: ['text', 't', 'warn'],
       players: ['x', 'y', 'r', 'hp', 'hpMax', 'gems', 'aimAngle', 'inv', 'downed', 'classId', 'color', 'weaponId',
@@ -836,6 +836,145 @@ code += `
 
     net.role = savedRole;   // úklid, ať to neovlivní další testy
     log('applyState hraniční případ ok: nové enemy.id u guesta se objeví přímo na x/y, beze skoku z 0,0/rezidua'); }
+
+  // ---- 48) FÁZE 4.1 ASCENSION: ascensionMul(0)=1 (žádný vliv na běžnou hru, vlny 1..FINAL_WAVE) ----
+  { for (const k of ['hp', 'spd', 'dmg', 'count', 'gem', 'eliteChance']) {
+      assert(ascensionMul({ ascension: 0 }, k) === 1, 'ascensionMul kind=' + k + ' == 1 při ascension=0');
+      assert(ascensionMul(null, k) === 1, 'ascensionMul(null, ' + k + ') == 1 (bezpečné volání bez run)');
+    }
+    assert(ascensionMul(undefined, 'hp') === 1, 'ascensionMul(undefined) == 1');
+    log('ascensionMul: ascension=0 nemá žádný efekt (normální hra vln 1..FINAL_WAVE beze změny) ok'); }
+
+  // ---- 49) FÁZE 4.1 ASCENSION: stohování prokletí v pořadí + 2. cyklus dál násobí stejné prokletí ----
+  { assert(Math.abs(ascensionMul({ ascension: 1 }, 'hp') - ASCENSION_CURSES[0].hp) < 1e-9,
+      'tier 1: aktivní jen 1. prokletí (hp = ' + ASCENSION_CURSES[0].hp + ')');
+    assert(ascensionMul({ ascension: 1 }, 'dmg') === 1, 'tier 1: 3. prokletí (dmg) ještě neaktivní');
+    assert(Math.abs(ascensionMul({ ascension: 3 }, 'dmg') - ASCENSION_CURSES[2].dmg) < 1e-9,
+      'tier 3: dmg curse[2] aplikováno přesně 1× (' + ascensionMul({ ascension: 3 }, 'dmg').toFixed(3) + ')');
+    const expectHp6 = ASCENSION_CURSES[0].hp;   // v tieru 6 je hp curse[0] pořád jen 1×
+    assert(Math.abs(ascensionMul({ ascension: 6 }, 'hp') - expectHp6) < 1e-9, 'tier 6: hp curse[0] pořád jen 1× (celá sada 6 prokletí, žádné opakování)');
+    const expectDmg9 = ASCENSION_CURSES[2].dmg * ASCENSION_CURSES[2].dmg;   // tier 9 = indexy 0..8 mod 6 → index 2 vyjde 2×
+    assert(Math.abs(ascensionMul({ ascension: 9 }, 'dmg') - expectDmg9) < 1e-9,
+      '2. cyklus (tier 9) násobí dmg curse[2] znovu (' + ascensionMul({ ascension: 9 }, 'dmg').toFixed(4) + ' == ' + expectDmg9.toFixed(4) + ')');
+    log('ascensionMul: stohování v pořadí a 2. cyklus dál násobí stejné prokletí ok'); }
+
+  // ---- 50) FÁZE 4.1 ASCENSION: čísla v ASCENSION_CURSES[].desc PŘESNĚ odpovídají realitě v ascensionMul (transparentnost) ----
+  { for (const c of ASCENSION_CURSES) {
+      for (const k of ['hp', 'spd', 'dmg', 'count', 'gem', 'eliteChance']) {
+        const v = c[k]; if (v == null) continue;
+        const pct = Math.round(Math.abs(v - 1) * 100);
+        assert(c.desc.indexOf(String(pct)) >= 0,
+          'ASCENSION_CURSES.' + c.id + '.desc musí obsahovat přesné číslo ' + pct + ' (klíč ' + k + '=' + v + ') — desc="' + c.desc + '"');
+      }
+    }
+    log('ASCENSION_CURSES desc čísla ok (odpovídají skutečným multiplikátorům v ascensionMul)'); }
+
+  // ---- 51) FÁZE 4.1 ASCENSION: efekt reálně dopadá na spawnutého nepřítele (hp/spd/dmg) i na počet vlny ----
+  { newRun('rytir'); startWave();
+    const eBase = spawnDummy('chodec', 40, 40);
+    const hpBase = eBase.hpMax, spdBase = eBase.speed, dmgBase = eBase.dmg;
+    newRun('rytir'); run.ascension = 1; startWave();   // tier 1 = Nemrtvá tuhost (+40 % HP), nic jiného zatím
+    const eAsc = spawnDummy('chodec', 40, 40);
+    assert(Math.abs(eAsc.hpMax / hpBase - 1.40) < 0.02, 'ascension=1: HP nepřítele přesně +40 % (' + hpBase + '->' + eAsc.hpMax + ')');
+    assert(Math.abs(eAsc.speed - spdBase) < 1e-6, 'ascension=1: rychlost zatím nedotčena (2. prokletí ještě neaktivní)');
+    assert(Math.abs(eAsc.dmg - dmgBase) < 1e-6, 'ascension=1: poškození zatím nedotčeno (3. prokletí ještě neaktivní)');
+    newRun('rytir'); run.ascension = 3; startWave();   // tier 3 = HP+40 %, SPD+25 %, DMG+30 %
+    const eAsc3 = spawnDummy('chodec', 40, 40);
+    assert(Math.abs(eAsc3.speed / spdBase - 1.25) < 0.02, 'ascension=3: rychlost +25 % (' + spdBase + '->' + eAsc3.speed + ')');
+    assert(Math.abs(eAsc3.dmg / dmgBase - 1.30) < 0.02, 'ascension=3: poškození +30 % (' + dmgBase + '->' + eAsc3.dmg + ')');
+    newRun('rytir'); run.ascension = 4; startWave();   // tier 4 přidá Přesila (+20 % počet nepřátel)
+    const n0 = waveCount(run.wave), nMul = Math.round(n0 * ascensionMul(run, 'count'));
+    assert(nMul > n0, 'ascension=4: počet nepřátel ve vlně vyšší díky prokletí Přesila (' + n0 + '->' + nMul + ')');
+    log('ascension efekt aplikován na spawn (hp/spd/dmg) i na waveCount ok'); }
+
+  // ---- 52) FÁZE 4.1 ASCENSION: run.ascension je ve SNAPSHOT_SCHEMA i svědkovi a přežije round-trip ----
+  { newRun('rytir'); startWave(); run.ascension = 4;
+    assert(SNAPSHOT_SCHEMA.run.fields.some(f => (typeof f === 'string' ? f : f.key) === 'ascension'), 'ascension je v SNAPSHOT_SCHEMA.run.fields');
+    const snap = serializeState();
+    assert(snap.run.ascension === 4, 'serializeState() zahrnuje run.ascension');
+    const wire = JSON.parse(JSON.stringify(snap));
+    run.ascension = 0;   // znič lokální stav
+    applyState(wire);
+    assert(run.ascension === 4, 'applyState() obnovil run.ascension přes drát (' + run.ascension + ')');
+    log('run.ascension: schema + round-trip ok'); }
+
+  // ---- 53) FÁZE 4.1 ASCENSION: vstup do Nekonečna z victory pokračuje TÝMŽ během (žádný newRun), nastaví ascension=1 ----
+  { newRun('rytir'); const ownedBefore = run.ownedWeapons.slice();
+    loadMap(mapForWave(FINAL_WAVE));   // simuluje přirozený postup: v okamžiku FINAL_WAVE je hráč vždy na poslední mapě
+    run.wave = FINAL_WAVE - 1; startWave();   // -> run.wave === FINAL_WAVE
+    assert(run.wave === FINAL_WAVE, 'run.wave dosáhl FINAL_WAVE (' + run.wave + ')');
+    endWave();
+    assert(state === 'victory', 'endWave() na FINAL_WAVE s ascension=0 vede na victory (' + state + ')');
+    assert(run.ascension === 0, 'ascension zůstává 0, dokud hráč nevstoupí do Nekonečna');
+    const runRefBefore = run;
+    enterAscension();
+    assert(run === runRefBefore, 'enterAscension() NEzakládá nový run — stejná reference na run');
+    assert(run.ascension === 1, 'enterAscension() nastaví ascension=1 (hned první tier)');
+    assert(run.wave === FINAL_WAVE, 'enterAscension() nemění run.wave (žádný reset postupu)');
+    assert(JSON.stringify(run.ownedWeapons) === JSON.stringify(ownedBefore), 'zbraně/postup zachovány (žádný nový run)');
+    assert(state === 'roundEnd', 'po vstupu do Nekonečna pokračuje běžným tokem (roundEnd → obchod → stavění)');
+    // pokračování: obchod -> stavění -> další vlna. Zůstává na poslední mapě, žádné volání advanceToMap za FINAL_WAVE.
+    const mapBefore = currentMap;
+    setState('shop'); shopReady();
+    assert(state === 'build', 'po ready přechod do fáze stavění');
+    assert(currentMap === mapBefore && currentMap === NUM_MAPS - 1, 'v Nekonečnu zůstává na poslední mapě (' + (currentMap + 1) + '/' + NUM_MAPS + ')');
+    startWave();
+    assert(run.wave === FINAL_WAVE + 1, 'vlna pokračuje za FINAL_WAVE (' + run.wave + ')');
+    assert(state === 'combat', 'combat pokračuje normálně v Nekonečnu');
+    assert(run.ascension === 1, 'tier se nezvyšuje hned na vlně FINAL_WAVE+1 (další tier až FINAL_WAVE+25)');
+    log('enterAscension ok (pokračuje TÝMŽ během, ascension=1, zůstává na poslední mapě)'); }
+
+  // ---- 54) FÁZE 4.1 ASCENSION: tier-up přesně každých 25 vln za FINAL_WAVE (FINAL_WAVE+25, +50, …) ----
+  { newRun('rytir'); run.ascension = 1; run.wave = FINAL_WAVE - 1;   // simulace: v Nekonečnu, tier 1
+    startWave();   // -> run.wave === FINAL_WAVE (žádná změna tieru — vstup do Nekonečna už proběhl)
+    assert(run.ascension === 1, 'vlna FINAL_WAVE: tier beze změny');
+    run.wave = FINAL_WAVE + 25 - 1;   // -> startWave() -> FINAL_WAVE+25
+    startWave();
+    assert(run.wave === FINAL_WAVE + 25 && run.ascension === 2, 'vlna FINAL_WAVE+25 zvyšuje ascension na 2 (' + run.ascension + ')');
+    run.wave = FINAL_WAVE + 50 - 1;   // -> FINAL_WAVE+50
+    startWave();
+    assert(run.wave === FINAL_WAVE + 50 && run.ascension === 3, 'vlna FINAL_WAVE+50 zvyšuje ascension na 3 (' + run.ascension + ')');
+    log('ascension tier-up ok (přesně každých 25 vln za FINAL_WAVE)'); }
+
+  // ---- 55) FÁZE 4.1 ASCENSION: perzistentní PB profile.bestAscension (defaultProfile + doGameOver/doVictory) ----
+  { assert(defaultProfile().bestAscension === 0, 'defaultProfile().bestAscension výchozí 0');
+    profile.bestAscension = 0;
+    newRun('rytir'); run.ascension = 3; run.wave = 400; run.lives = 0;
+    doGameOver();
+    assert(profile.bestAscension === 3, 'doGameOver() zaznamená nejvyšší dosažený ascension do profilu (' + profile.bestAscension + ')');
+    profile.bestAscension = 5;   // vyšší starý rekord se NESMÍ přepsat nižším
+    newRun('rytir'); run.ascension = 2; run.wave = 425; run.lives = 0;
+    doGameOver();
+    assert(profile.bestAscension === 5, 'doGameOver() nepřepíše vyšší starý rekord nižším (' + profile.bestAscension + ')');
+    log('profile.bestAscension ok (perzistentní PB, max() přes běhy)'); }
+
+  // ---- 56) FÁZE 4.1 ASCENSION GUARD: enterAscension()/netHandleCmd('ascend') jsou no-op mimo legitimní vstup ----
+  { // (a) daleko pod FINAL_WAVE, uprostřed boje: cmd 'ascend' (guestova cesta bez lokální validace) nesmí nic udělat
+    newRun('rytir'); run.wave = 10; setState('combat');
+    assert(run.ascension === 0, 'test předpokládá čerstvý run (ascension=0)');
+    netHandleCmd({ t: 'cmd', act: 'ascend' });
+    assert(run.ascension === 0, 'netHandleCmd ascend hluboko pod FINAL_WAVE v combatu: ascension zůstává 0 (' + run.ascension + ')');
+    assert(state === 'combat', 'netHandleCmd ascend hluboko pod FINAL_WAVE v combatu: state zůstává combat (' + state + ')');
+    assert(run.wave === 10, 'netHandleCmd ascend hluboko pod FINAL_WAVE v combatu: wave nedotčena (' + run.wave + ')');
+    enterAscension();   // i přímé volání (host klik) musí být stejně bezpečné
+    assert(run.ascension === 0 && state === 'combat' && run.wave === 10, 'enterAscension() přímo: stejně no-op mimo FINAL_WAVE/victory');
+
+    // (b) legitimní jednorázový vstup z victory na FINAL_WAVE funguje a je idempotentní
+    newRun('rytir'); run.wave = FINAL_WAVE; setState('victory');
+    enterAscension();
+    assert(run.ascension === 1, 'legitimní vstup do Nekonečna z victory na FINAL_WAVE nastaví ascension=1 (' + run.ascension + ')');
+    assert(state === 'roundEnd', 'legitimní vstup pokračuje běžným tokem (roundEnd)');
+    enterAscension();   // druhé volání ihned po prvním (state už není victory) — nesmí nic udělat
+    assert(run.ascension === 1, 'druhé volání enterAscension() (state už roundEnd): ascension zůstává 1, ne reset/inkrement (' + run.ascension + ')');
+    state = 'victory';   // adversariální simulace: i kdyby se stav victory vrátil, ascension>0 sám o sobě blokuje re-entry
+    enterAscension();
+    assert(run.ascension === 1, 'i s state vráceným na victory: ascension>0 blokuje re-entry, zůstává 1 (' + run.ascension + ')');
+
+    // (c) run.ascension=6 (hluboko v Nekonečnu): cmd 'ascend' nesmí resetovat postup zpět na 1
+    newRun('rytir'); run.ascension = 6; run.wave = FINAL_WAVE + 100; setState('combat');
+    netHandleCmd({ t: 'cmd', act: 'ascend' });
+    assert(run.ascension === 6, 'netHandleCmd ascend s run.ascension=6: zůstává 6, žádný reset na 1 (' + run.ascension + ')');
+    log('enterAscension guard ok (no-op mimo legitimní victory@FINAL_WAVE vstup, idempotentní, nikdy nereset existující ascension)'); }
 
   console.log('\\n==== TEST RESULTS ====');
   for (const r of results) console.log('  ✓ ' + r);

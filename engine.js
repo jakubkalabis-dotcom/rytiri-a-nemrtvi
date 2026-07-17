@@ -494,7 +494,7 @@ function loadProfile() {
   return defaultProfile();
 }
 function defaultProfile() {
-  return { playerLevel: 1, xp: 0, unlocked: [], souls: 0, meta: {}, settings: { autofire: true, autoaim: true, muted: false, haptics: true } };
+  return { playerLevel: 1, xp: 0, unlocked: [], souls: 0, meta: {}, bestAscension: 0, settings: { autofire: true, autoaim: true, muted: false, haptics: true } };
 }
 function saveProfile(p) { try { localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); } catch {} }
 function loadScores() { try { return JSON.parse(localStorage.getItem(SCORES_KEY)) || []; } catch { return []; } }
