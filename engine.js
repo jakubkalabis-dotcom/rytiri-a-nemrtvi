@@ -496,7 +496,9 @@ function loadProfile() {
 function defaultProfile() {
   // mastery: { classId: { xp } } — mistrovství tříd (FÁZE 4.3). Úroveň se ODVOZUJE z xp (viz
   // masteryXpToLevel/masteryLevel v data.js/game.js), nikde se neukládá zvlášť, aby nemohla driftnout.
-  return { playerLevel: 1, xp: 0, unlocked: [], souls: 0, meta: {}, mastery: {}, bestAscension: 0, settings: { autofire: true, autoaim: true, muted: false, haptics: true } };
+  // daily: { date, bestWave, bestScore } — lokální osobní rekord Denní výzvy (FÁZE 4.4, viz
+  // todayStr()/dailyPactId()/recordDailyPB() v game.js). date == '' znamená „zatím nehráno nikdy".
+  return { playerLevel: 1, xp: 0, unlocked: [], souls: 0, meta: {}, mastery: {}, bestAscension: 0, daily: { date: '', bestWave: 0, bestScore: 0 }, settings: { autofire: true, autoaim: true, muted: false, haptics: true } };
 }
 function saveProfile(p) { try { localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); } catch {} }
 function loadScores() { try { return JSON.parse(localStorage.getItem(SCORES_KEY)) || []; } catch { return []; } }

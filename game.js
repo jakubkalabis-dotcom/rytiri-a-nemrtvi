@@ -94,6 +94,7 @@ function newRun(classIds) {
     _pactOffer: null,   // aktuální nabídka 3 paktů
     lifeBuys: 0,        // kolikrát byl v tomto běhu koupen Život brány (cena progresivně roste)
     ascension: 0,       // FÁZE 4.1 Nekonečno: 0 ve vlnách 1..FINAL_WAVE (žádný efekt), ≥1 po vstupu do Nekonečna (viz ASCENSION_CURSES/ascensionMul)
+    daily: false,       // FÁZE 4.4: true = tento běh je Denní výzva (vynucený pakt dle data, žádná nabídka) — viz pendingDaily/forceDailyPact
   };
   for (const k in AMMO) run.ammo[k] = 0;
   // sdílené vlastněné zbraně = sjednocení startovních zbraní hráčů
@@ -321,6 +322,73 @@ function renderPact() {
     ${off.length ? `<div class="perk-offer"><div class="grid">${cards}</div></div>` : '<button data-act="pactskip">Pokračovat</button>'}
     ${guestWait}${owned}`;
 }
+/* ---- DENNÍ VÝZVA (FÁZE 4.4): deterministický denní seal — JEDEN vynucený pakt dle dnešního data
+   + lokální osobní rekord. Sólo hra pouze (viz pickClass()).
+   VĚDOMÉ OMEZENÍ: toto NENÍ plný seed-determinismus celého běhu — spawny nepřátel dál používají
+   Math.random() (nedeterministické), takže dva hráči se stejným zapečetěným paktem NEHRAJÍ identickou
+   hru krok za krokem. Plná determinističnost (nutná pro férový online žebříček) je vědomě odložena na
+   pozdější fázi s backendem (July). Denní výzva teď = stejný pakt pro všechny ve stejný den + lokální PB. */
+function todayStr() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+}
+// Jednoduchý deterministický hash řetězce (FNV-1a) -> 32bit unsigned číslo pro mulberry32 seed.
+function dailySeed(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+// Stejné datum -> vždy stejný pakt (celý den). Jiné datum -> (typicky) jiný pakt.
+function dailyPactId() {
+  const rnd = mulberry32(dailySeed(todayStr()));
+  const idx = Math.min(PACT_KEYS.length - 1, Math.floor(rnd() * PACT_KEYS.length));
+  return PACT_KEYS[idx];
+}
+// true = hráč právě přišel z obrazovky 'daily' a příští pickClass() má spustit Denní výzvu
+// (vynucený pakt, žádná nabídka). Nastavuje se v click handleru (act 'playdaily'), spotřebovává se v pickClass().
+let pendingDaily = false;
+// Vynutí zapečetěný denní pakt na aktuální run (bez nabídky) a aplikuje jeho okamžité efekty —
+// zrcadlí okamžité efekty choosePact() (gateBonus/maxHp/manaRegen), aby denní pakt fungoval identicky
+// jako běžně vybraný pakt.
+function forceDailyPact() {
+  const id = dailyPactId();
+  run.pacts = [id];
+  const p = PACTS[id];
+  if (p.gateBonus) run.lives += p.gateBonus;
+  if (p.maxHp || p.manaRegen) for (const q of players) recalcPerks(q);
+}
+// Zaznamená lokální osobní rekord Denní výzvy na konci běhu (viz doVictory/doGameOver). Reset při
+// jiném datu než poslední uložený rekord (nový den = nová výzva), jinak max() přes běhy stejného dne.
+// Vrací true, pokud byl DNES překonán rekord (pro UI „nový denní rekord!").
+function recordDailyPB() {
+  if (!run || !run.daily) return false;
+  const today = todayStr();
+  if (!profile.daily || profile.daily.date !== today) profile.daily = { date: today, bestWave: 0, bestScore: 0 };
+  let improved = false;
+  if (run.wave > profile.daily.bestWave) { profile.daily.bestWave = run.wave; improved = true; }
+  if ((run.score || 0) > profile.daily.bestScore) { profile.daily.bestScore = run.score || 0; improved = true; }
+  return improved;
+}
+function renderDaily() {
+  const id = dailyPactId();
+  const p = PACTS[id];
+  const today = todayStr();
+  const hasPB = profile.daily && profile.daily.date === today;
+  const pbLine = hasPB
+    ? `Dnešní rekord: <b>vlna ${profile.daily.bestWave}</b> · <b>${profile.daily.bestScore} bodů</b>`
+    : 'Zatím nehráno dnes.';
+  ovContent.innerHTML = `<h2>📅 Denní výzva</h2>
+    <p>Datum: <b>${today}</b>. Na dnešek je zapečetěný JEDEN pakt — stejný pro všechny, kdo hrají dnes.
+    Platí po celý běh, nabídku paktů nedostaneš (je nahrazena tímto). Jen sólo.</p>
+    <div class="card pact-card">
+      <div class="scn">${p.icon} ${p.name}</div>
+      <div class="scd">${p.desc}</div>
+    </div>
+    <p>${pbLine}</p>
+    <button data-act="playdaily">▶ Hrát denní výzvu</button>
+    <button data-act="menu" class="ghost">Zpět do menu</button>`;
+}
 function choosePerk(p, id) {
   if (!p || !p.perkOffer || p.perkOffer.indexOf(id) < 0) return;
   if ((p.perks[id] || 0) >= PERKS[id].cap) return;
@@ -351,7 +419,7 @@ function costOf(cost, cat) {
    ========================================================================== */
 function setState(s) {
   state = s;
-  if (s === 'menu' || s === 'class' || s === 'shop' || s === 'roundEnd' || s === 'gameOver' || s === 'victory' || s === 'host' || s === 'join' || s === 'wheel' || s === 'pact' || s === 'shrine' || s === 'mastery' || s === 'help') {
+  if (s === 'menu' || s === 'class' || s === 'shop' || s === 'roundEnd' || s === 'gameOver' || s === 'victory' || s === 'host' || s === 'join' || s === 'wheel' || s === 'pact' || s === 'shrine' || s === 'mastery' || s === 'help' || s === 'daily') {
     overlay.classList.remove('hidden');
   } else {
     overlay.classList.add('hidden');
@@ -359,6 +427,7 @@ function setState(s) {
   if (s === 'help') renderHelp();
   else if (s === 'shrine') renderShrine();
   else if (s === 'mastery') renderMastery();
+  else if (s === 'daily') renderDaily();
   else if (s === 'pact') renderPact();
   else if (s === 'wheel') renderWheelMenu();
   else if (s === 'menu') renderMenu();
@@ -436,6 +505,7 @@ function renderMenu() {
     <button data-act="play">Hrát sám</button>
     <button data-act="hostgame" class="ghost">Hostovat co-op (2 hráči)</button>
     <button data-act="joingame" class="ghost">Připojit se ke hře</button>
+    <button data-act="daily" class="ghost">📅 Denní výzva</button>
     <button data-act="shrine" class="ghost">💀 Svatyně duší${profile.souls ? ' (' + profile.souls + ')' : ''}</button>
     <button data-act="mastery" class="ghost">🏆 Mistrovství tříd</button>
     <button data-act="help" class="ghost">📖 Jak hrát</button>
@@ -742,12 +812,19 @@ function ascensionLine() {
   const pb = profile.bestAscension || 0;
   return `<div class="wallet" style="color:#ff5a7a">☠ Dosažený Ascension: <b>${run.ascension}</b>${pb > run.ascension ? ' (osobní rekord: ' + pb + ')' : (pb === run.ascension ? ' — nový osobní rekord!' : '')}</div>`;
 }
+// FÁZE 4.4: shrnutí Denní výzvy na konci běhu — čte se z profile.daily/run._dailyNewPB (viz recordDailyPB()).
+function dailyLine() {
+  if (!run || !run.daily) return '';
+  const d = profile.daily || { bestWave: 0, bestScore: 0 };
+  return `<div class="wallet" style="color:#ffd873">📅 Denní výzva — vlna <b>${run.wave}</b> · skóre <b>${run.score || 0}</b>${run._dailyNewPB ? ' — <b>nový denní rekord!</b>' : ' (rekord dne: vlna ' + d.bestWave + ' · ' + d.bestScore + ')'}</div>`;
+}
 function renderGameOver() {
   const score = run ? run.score || 0 : 0;
   ovContent.innerHTML = `
     <h2>Brána padla</h2>
     <div class="wallet">Mapa <b>${currentMap + 1}/${NUM_MAPS}</b> · vlna <b>${run.wave}</b> · Skóre: <b>${score}</b></div>
     ${ascensionLine()}
+    ${dailyLine()}
     ${soulsLine()}
     <button data-act="shrine">💀 Svatyně (vylepšit napořád)</button>
     <div class="board"><h3>NEJLEPŠÍ SKÓRE</h3>${scoreBoardHtml()}</div>
@@ -761,6 +838,7 @@ function renderVictory() {
     <p>Prošel jsi všech <b>${NUM_MAPS}</b> map a v pekle jsi porazil <b>Pekelného pána</b>!
     Nemrtví jsou zahnáni a brána stojí.</p>
     <div class="wallet">Finální skóre: <b>${score}</b> · třída ${players.map(p => p.class.name).join(' + ')}</div>
+    ${dailyLine()}
     ${soulsLine()}
     <div class="perk-offer"><h3>☠ Nekonečno</h3>
       <p style="font-size:12px;color:#9aa87e">Chceš víc? Pokračuj TÝMŽ postupem (stejná postava, zbraně, vylepšení) do nekonečných vln za hranicí ${FINAL_WAVE}.
@@ -865,10 +943,12 @@ overlay.addEventListener('click', e => {
   const act = el.dataset.act, id = el.dataset.id;
   initAudio();
   // --- lobby / co-op ---
-  if (act === 'play') { net.role = null; net.mode = 'solo'; setState('class'); return; }
-  if (act === 'hostgame') { net.role = 'host'; net.mode = 'coop'; setState('host'); if (typeof netHost === 'function') netHost(); return; }
-  if (act === 'joingame') { net.role = 'guest'; net.mode = 'coop'; setState('join'); return; }
-  if (act === 'menu') { if (typeof netClose === 'function') netClose(); net.role = null; net.mode = 'solo'; setState('menu'); return; }
+  if (act === 'play') { pendingDaily = false; net.role = null; net.mode = 'solo'; setState('class'); return; }   // normální sólo start — zruš případný zaseklý denní flag
+  if (act === 'daily') { setState('daily'); return; }
+  if (act === 'playdaily') { pendingDaily = true; net.role = null; net.mode = 'solo'; setState('class'); return; }   // Denní výzva je jen sólo
+  if (act === 'hostgame') { pendingDaily = false; net.role = 'host'; net.mode = 'coop'; setState('host'); if (typeof netHost === 'function') netHost(); return; }   // co-op start — denní výzva nikdy není coop
+  if (act === 'joingame') { pendingDaily = false; net.role = 'guest'; net.mode = 'coop'; setState('join'); return; }   // co-op start — denní výzva nikdy není coop
+  if (act === 'menu') { pendingDaily = false; if (typeof netClose === 'function') netClose(); net.role = null; net.mode = 'solo'; setState('menu'); return; }   // opuštění toku (Zpět z výběru třídy atd.) — zruš zaseklý denní flag
   if (act === 'copycode') { if (typeof netCopy === 'function') netCopy(el.dataset.which, el); return; }
   if (act === 'joinconnect') { if (typeof netJoinConnect === 'function') netJoinConnect(); return; }
   if (act === 'shrine') { setState('shrine'); return; }
@@ -913,7 +993,20 @@ function shopReady() {
 
 // Výběr třídy (solo i co-op)
 function pickClass(id) {
-  if (!isCoop()) { newRun(id); offerPact('shop'); return; }   // 1. pakt před prvním obchodem
+  if (!isCoop()) {
+    newRun(id);
+    if (pendingDaily) {   // FÁZE 4.4: Denní výzva — pakt je zapečetěný dle data, žádná nabídka
+      run.daily = true;
+      forceDailyPact();
+      pendingDaily = false;
+      sfx.levelUp();
+      setState('shop');
+      return;
+    }
+    offerPact('shop');   // 1. pakt před prvním obchodem
+    return;
+  }
+  pendingDaily = false;   // pojistka: denní výzva nikdy není coop, nesmí prosáknout do startCoop/forceDailyPact
   if (net.role === 'host') {
     net.hostClass = id;
     if (net.guestClass) startCoop();
@@ -1682,6 +1775,7 @@ function doVictory() {
   grantSouls();
   grantMasteryXp();
   recordBestAscension();
+  run._dailyNewPB = recordDailyPB();   // FÁZE 4.4: lokální PB Denní výzvy (no-op mimo run.daily)
   saveProfile(profile);
   sfx.waveWin(); setTimeout(() => { try { sfx.levelUp(); } catch {} }, 300);
   setState('victory');
@@ -1692,6 +1786,7 @@ function doGameOver() {
   grantSouls();
   grantMasteryXp();
   recordBestAscension();
+  run._dailyNewPB = recordDailyPB();   // FÁZE 4.4: lokální PB Denní výzvy (no-op mimo run.daily)
   saveProfile(profile);
   sfx.gameOver();
   setState('gameOver');

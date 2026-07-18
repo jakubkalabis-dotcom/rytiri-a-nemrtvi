@@ -193,6 +193,7 @@ const SNAPSHOT_SCHEMA = {
       { key: 'shieldLvl', def: 0 }, { key: 'wheelReady', def: 0 }, { key: 'wheelUpgrades', def: {} },
       { key: 'turretKills', def: 0 }, { key: 'wheelThreshold', def: 2 }, { key: 'pacts', def: [] },
       { key: '_pactOffer', def: null }, { key: 'lifeBuys', def: 0 }, { key: 'ascension', def: 0 },
+      { key: 'daily', bool: true },
     ],
   },
   wave: { single: true, fields: ['boss', 'spawned', 'total', 'reward'] },

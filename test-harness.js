@@ -27,7 +27,11 @@ const ctxProxy = new Proxy({}, {
 });
 function fakeCanvas() { return { width: 480, height: 800, style: {}, getContext: () => ctxProxy, addEventListener: noop, getBoundingClientRect: () => ({ left: 0, top: 0, width: 480, height: 800 }), dataset: {} }; }
 function fakeEl() {
-  const el = { style: {}, dataset: {}, classList: { add: noop, remove: noop, toggle: noop, contains: () => false }, addEventListener: noop, removeEventListener: noop, appendChild: noop, removeChild: noop, setAttribute: noop, getContext: () => ctxProxy, querySelectorAll: () => [], querySelector: () => null, focus: noop, click: noop, getBoundingClientRect: () => ({ left: 0, top: 0, width: 480, height: 800 }), remove: noop };
+  const _listeners = {};
+  // addEventListener zachytává handlery (na rozdíl od noop) — testu 71h to umožní volat SKUTEČNÝ
+  // delegovaný click handler overlaye (overlay.addEventListener('click', ...) v game.js), místo
+  // aby přímo volal podkladové funkce. Reálnější reprodukce sekvence kliknutí uživatele.
+  const el = { style: {}, dataset: {}, classList: { add: noop, remove: noop, toggle: noop, contains: () => false }, addEventListener: (t, fn) => { (_listeners[t] = _listeners[t] || []).push(fn); }, removeEventListener: noop, appendChild: noop, removeChild: noop, setAttribute: noop, getContext: () => ctxProxy, querySelectorAll: () => [], querySelector: () => null, focus: noop, click: noop, getBoundingClientRect: () => ({ left: 0, top: 0, width: 480, height: 800 }), remove: noop, _listeners };
   let _html = '';
   Object.defineProperty(el, 'innerHTML', { get: () => _html, set: v => { _html = String(v); } });
   Object.defineProperty(el, 'textContent', { get: () => '', set: noop });
@@ -75,6 +79,16 @@ code += `
   const assert = (c, m) => { if (!c) throw new Error('ASSERT FAIL: ' + m); };
   // drive N combat ticks
   function tick(n) { for (let i = 0; i < n; i++) { if (state === 'combat') updateCombat(1); } }
+  // Vyvolá SKUTEČNÝ delegovaný click handler overlaye (overlay.addEventListener('click', ...) v game.js),
+  // stejně jako reálný klik uživatele na tlačítko s data-act. Ověřuje se tak přesně ta cesta, kterou hráč
+  // opravdu prochází, ne jen přímé volání podkladových funkcí.
+  function clickAct(act, id, which) {
+    const handlers = overlay._listeners && overlay._listeners.click;
+    if (!handlers || !handlers.length) throw new Error('overlay nemá zaregistrovaný click handler (data-act dispatch)');
+    const fakeTarget = { dataset: { act, id, which } };
+    const fakeEvent = { target: { closest: (sel) => (sel === '[data-act]' ? fakeTarget : null) } };
+    for (const fn of handlers) fn(fakeEvent);
+  }
   function forceState(s) { state = s; }
 
   const CLASS_IDS = Object.keys(CLASSES);
@@ -559,7 +573,7 @@ code += `
     const EXPECTED_SCHEMA_FIELDS = {
       run: ['lives', 'wave', 'score', 'ownedWeapons', 'ammo', 'owned', 'upgrades', 'wUpgrades', 'wood', 'steel',
             'combo', 'comboT', 'shieldLvl', 'wheelReady', 'wheelUpgrades', 'turretKills', 'wheelThreshold', 'pacts',
-            '_pactOffer', 'lifeBuys', 'ascension'],
+            '_pactOffer', 'lifeBuys', 'ascension', 'daily'],
       wave: ['boss', 'spawned', 'total', 'reward'],
       banner: ['text', 't', 'warn'],
       players: ['x', 'y', 'r', 'hp', 'hpMax', 'gems', 'aimAngle', 'inv', 'downed', 'classId', 'color', 'weaponId',
@@ -1275,6 +1289,151 @@ code += `
     assert(MASTERY_BONUS_PER_LEVEL === saved, 'konstanta MASTERY_BONUS_PER_LEVEL nezůstala pozměněná (guard nic natrvalo nemění)');
     profile.mastery = {};
     log('empirický guard mistrovství ok (rozhozené číslo vs. realita test skutečně shodí)'); }
+
+  // ---- 71a) FÁZE 4.4 DENNÍ VÝZVA: dailyPactId() je deterministický a vrací platný pakt ----
+  { const a1 = dailyPactId(), a2 = dailyPactId();
+    assert(a1 === a2, 'dailyPactId() je deterministický pro stejné datum, opakovaná volání se shodují (' + a1 + ' == ' + a2 + ')');
+    assert(PACT_KEYS.includes(a1), 'dailyPactId() vrací platný prvek PACT_KEYS (' + a1 + ')');
+    const seed1 = dailySeed(todayStr()), seed2 = dailySeed(todayStr());
+    assert(seed1 === seed2, 'dailySeed() je deterministický pro stejné datum');
+    const rndA = mulberry32(seed1)(), rndB = mulberry32(seed2)();
+    assert(rndA === rndB, 'mulberry32(dailySeed(todayStr())) dá stejnou první hodnotu při opakovaném vytvoření generátoru (' + rndA + ' == ' + rndB + ')');
+    assert(dailySeed('2020-01-01') !== dailySeed('2099-12-31'), 'dailySeed() rozlišuje různá data (různý seed pro různé datum)');
+    log('dailyPactId() ok (deterministický pro dnešní datum, vrací platný PACT_KEYS prvek)'); }
+
+  // ---- 71b) FÁZE 4.4 DENNÍ BĚH: pendingDaily -> pickClass() vynutí zapečetěný pakt, PŘESKOČÍ nabídku ----
+  { pendingDaily = true;
+    pickClass('rytir');
+    assert(run.daily === true, 'pickClass() s pendingDaily nastaví run.daily=true');
+    const expected = dailyPactId();
+    assert(run.pacts.length === 1 && run.pacts[0] === expected, 'run.pacts obsahuje PŘESNĚ jeden vynucený denní pakt (' + JSON.stringify(run.pacts) + ' == [' + expected + '])');
+    assert(run._pactOffer === null, 'denní běh NEMÁ aktivní nabídku paktů (_pactOffer=null, offerPact() nebyl volán)');
+    assert(pendingDaily === false, 'pendingDaily se po spuštění denního běhu spotřebuje (zpět na false)');
+    assert(state === 'shop', 'denní běh jde rovnou do obchodu (žádná mezi-obrazovka pact)');
+    log('denní běh ok (vynucený pakt dle data, žádná nabídka, pendingDaily spotřebován)'); }
+
+  // ---- 71c) FÁZE 4.4 REGRESE: nedenní běh (pendingDaily=false) se chová IDENTICKY jako dřív ----
+  { pendingDaily = false;
+    pickClass('mag');
+    assert(run.daily === false, 'normální (nedenní) run.daily zůstává false');
+    assert(state === 'pact', 'normální běh nabízí pakt (state=pact), přesně jako dřív');
+    assert(run._pactOffer && run._pactOffer.length === 3, 'normální běh nabízí 3 pakty (žádná regrese)');
+    assert(run.pacts.length === 0, 'žádný pakt není vynucen před výběrem hráče v normálním běhu');
+    run._pactOffer = ['pevnost']; choosePact('pevnost');
+    assert(state === 'shop' && run.pacts.includes('pevnost'), 'normální tok pact -> shop funguje jako dřív');
+    log('regrese ok (nedenní běh má identický tok jako před FÁZÍ 4.4)'); }
+
+  // ---- 71d) FÁZE 4.4 UI: obrazovka 'daily' zobrazí datum + přesná čísla zapečetěného paktu (transparentnost) ----
+  { renderDaily();
+    const html = ovContent.innerHTML;
+    assert(html.includes('Denní výzva'), 'renderDaily() zobrazí nadpis');
+    assert(html.includes(todayStr()), 'renderDaily() zobrazí dnešní datum');
+    const id = dailyPactId(), p = PACTS[id];
+    assert(html.includes(p.name) && html.includes(p.desc), 'renderDaily() zobrazí PŘESNÝ název a popis (čísla) dnešního zapečetěného paktu');
+    assert(html.includes('data-act="playdaily"'), 'renderDaily() nabízí tlačítko pro spuštění denní výzvy');
+    log('renderDaily() ok (datum + zapečetěný pakt s reálnými čísly)'); }
+
+  // ---- 71e) FÁZE 4.4 PB: doGameOver/doVictory zaznamená profile.daily (reset při jiném datu, max() jinak) ----
+  { profile.daily = { date: '2000-01-01', bestWave: 50, bestScore: 9000 };  // starý rekord z „jiného dne"
+    pendingDaily = true; pickClass('rytir'); run.wave = 5; run.score = 100; run.lives = 0;
+    doGameOver();
+    const today = todayStr();
+    assert(profile.daily.date === today, 'doGameOver() resetuje profile.daily na dnešní datum (starý den zahozen)');
+    assert(profile.daily.bestWave === 5 && profile.daily.bestScore === 100, 'doGameOver() nastaví PB na hodnoty z prvního dnešního běhu (' + profile.daily.bestWave + ',' + profile.daily.bestScore + ')');
+    assert(run._dailyNewPB === true, 'první běh dne = nový rekord (run._dailyNewPB=true)');
+
+    // druhý běh týž den, HORŠÍ výsledek -> max() se NESMÍ snížit
+    pendingDaily = true; pickClass('rytir'); run.wave = 2; run.score = 10; run.lives = 0;
+    doGameOver();
+    assert(profile.daily.bestWave === 5 && profile.daily.bestScore === 100, 'doGameOver() NEPŘEPÍŠE lepší rekord horším výsledkem téhož dne (' + profile.daily.bestWave + ',' + profile.daily.bestScore + ')');
+    assert(run._dailyNewPB === false, 'horší běh téhož dne NENÍ nový rekord (run._dailyNewPB=false)');
+
+    // třetí běh týž den, lepší v jednom poli (vlna) -> max() se zvýší JEN v tom poli
+    pendingDaily = true; pickClass('rytir'); run.wave = 9; run.score = 50; run.lives = 0;
+    doVictory();
+    assert(profile.daily.bestWave === 9, 'doVictory() zvýší bestWave při lepším výsledku (' + profile.daily.bestWave + ')');
+    assert(profile.daily.bestScore === 100, 'doVictory() NESNÍŽÍ bestScore, když je nové skóre nižší (max() per pole nezávisle, ' + profile.daily.bestScore + ')');
+    assert(run._dailyNewPB === true, 'zlepšení alespoň v jednom poli (bestWave) = nový rekord');
+
+    // NEDENNÍ běh nesmí profile.daily vůbec ovlivnit
+    const savedDaily = JSON.stringify(profile.daily);
+    pendingDaily = false; pickClass('mag'); run._pactOffer = ['pevnost']; choosePact('pevnost'); run.wave = 999; run.score = 999999; run.lives = 0;
+    doGameOver();
+    assert(JSON.stringify(profile.daily) === savedDaily, 'nedenní běh NEOVLIVNÍ profile.daily (i s vyšší vlnou/skóre)');
+    assert(run._dailyNewPB === false, 'nedenní běh: run._dailyNewPB=false (recordDailyPB() no-op mimo run.daily)');
+    log('PB Denní výzvy ok (reset na jiný den, max() přes běhy stejného dne, nedenní běh neovlivní)'); }
+
+  // ---- 71f) FÁZE 4.4 SCHÉMA: run.daily je v SNAPSHOT_SCHEMA i nezávislém svědkovi (viz test 36), round-trip ----
+  { pendingDaily = true; pickClass('rytir');
+    assert(run.daily === true, 'test předpoklad: run.daily=true před round-trip');
+    const snap = serializeState();
+    assert(snap.run.daily === true, 'serializeState() zahrne run.daily=true');
+    run.daily = false;   // znič lokální stav
+    applyState(JSON.parse(JSON.stringify(snap)));
+    assert(run.daily === true, 'applyState() obnoví run.daily z drátu (' + run.daily + ')');
+    log('run.daily schema round-trip ok'); }
+
+  // ---- 71g) FÁZE 4.4 BEZPEČNOST: starý profil bez pole daily nesmí spadnout (migrace přes defaultProfile) ----
+  { const oldProfile = { playerLevel: 2, xp: 10, unlocked: [], souls: 5, meta: {}, mastery: {}, bestAscension: 0, settings: { autofire: true, autoaim: true, muted: false, haptics: true } };
+    assert(!('daily' in oldProfile), 'test předpokládá starý profil BEZ pole daily');
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(oldProfile));
+    const migrated = loadProfile();
+    assert(migrated.playerLevel === 2 && migrated.souls === 5, 'loadProfile() skutečně načetl starý profil ze storage (ne jen default)');
+    assert(migrated.daily && typeof migrated.daily === 'object' && migrated.daily.date === '' && migrated.daily.bestWave === 0 && migrated.daily.bestScore === 0,
+      'loadProfile() doplní chybějící daily na výchozí {date:"",bestWave:0,bestScore:0} (Object.assign(defaultProfile(),...))');
+    profile = migrated;
+    let threw = false;
+    try { pendingDaily = true; pickClass('rytir'); run.wave = 3; run.score = 3; run.lives = 0; doGameOver(); renderDaily(); }
+    catch (e) { threw = true; log('CHYBA: ' + (e && e.stack)); }
+    assert(!threw, 'starý profil bez daily: denní běh + doGameOver()/renderDaily() neházejí výjimku');
+    assert(profile.daily.date === todayStr() && profile.daily.bestWave === 3, 'migrovaný starý profil: PB se po prvním denním běhu zapíše správně');
+    log('bezpečnost starého profilu bez daily ok (migrace + žádný pád)'); }
+
+  // ---- 71h) FÁZE 4.4 OPRAVA REGRESE: opuštění denní výzvy PŘED výběrem třídy nesmí zaseknout
+  //           pendingDaily=true a tiše vynutit denní pakt v pozdějším NORMÁLNÍM běhu.
+  //           Simuluje se PŘES SKUTEČNÝ delegovaný click handler overlaye (clickAct), přesná
+  //           sekvence reálných kliknutí: Menu -> „Denní výzva“ -> „Hrát denní výzvu“ -> „Zpět“
+  //           (do menu, OPUŠTĚNÍ toku před výběrem třídy) -> „Hrát sám“ -> výběr třídy. ----
+  { const savedDailyBefore = JSON.stringify(profile.daily);
+    clickAct('daily');                 // Menu -> Denní výzva (obrazovka s datem + zapečetěným paktem)
+    assert(state === 'daily', 'clickAct(daily) přepne na obrazovku denní výzvy');
+    clickAct('playdaily');             // „Hrát denní výzvu“ -> pendingDaily=true, výběr třídy
+    assert(pendingDaily === true, 'clickAct(playdaily) nastaví pendingDaily=true (jako dřív)');
+    assert(state === 'class', 'clickAct(playdaily) přepne na výběr třídy');
+    clickAct('menu');                  // „Zpět“ na výběru třídy -> OPUŠTĚNÍ toku denní výzvy do menu
+    assert(state === 'menu', 'clickAct(menu) přepne zpět do menu (uživatel opustil denní tok)');
+    assert(pendingDaily === false, 'OPRAVA: clickAct(menu) resetuje zaseklý pendingDaily zpět na false');
+    clickAct('play');                  // „Hrát sám“ -> normální sólo výběr třídy (NE denní)
+    assert(state === 'class', 'clickAct(play) přepne na výběr třídy (normální sólo)');
+    assert(pendingDaily === false, 'pendingDaily zůstává false i po vstupu do normálního výběru třídy');
+    clickAct('pickclass', 'rytir');    // výběr třídy -> pickClass('rytir') přes handler
+    assert(run.daily === false, 'BEZ OPRAVY BY SPADLO: normální běh po opuštěné denní výzvě má run.daily=false (žádný tichý denní běh)');
+    assert(run.pacts.length === 0, 'BEZ OPRAVY BY SPADLO: žádný vynucený pakt (forceDailyPact() se nezavolal)');
+    assert(state === 'pact' && run._pactOffer && run._pactOffer.length === 3, 'BEZ OPRAVY BY SPADLO: normální nabídka 3 paktů proběhla (offerPact() se zavolal)');
+    assert(pendingDaily === false, 'pendingDaily zůstává false po pickClass (nic k spotřebování)');
+    run._pactOffer = ['pevnost']; choosePact('pevnost');
+    run.wave = 5; run.score = 100; run.lives = 0;
+    const dailyBefore = JSON.stringify(profile.daily);
+    doGameOver();
+    assert(JSON.stringify(profile.daily) === dailyBefore, 'BEZ OPRAVY BY SPADLO: doGameOver() normálního běhu NEZMĚNÍ profile.daily (nebyl to denní běh)');
+    assert(JSON.stringify(profile.daily) === savedDailyBefore, 'profile.daily je na konci scénáře identické jako před ním (žádný vedlejší zápis)');
+    log('oprava regrese 71h ok (opuštění denní výzvy před výběrem třídy už nezasekává pendingDaily do dalšího normálního běhu)'); }
+
+  // ---- 71i) FÁZE 4.4 HAPPY PATH: legitimní PŘÍMÁ cesta daily -> playdaily -> pickClass DÁL funguje
+  //           (oprava 71h nerozbila normální denní tok), opět přes SKUTEČNÝ click handler. ----
+  { clickAct('menu');                  // čistý start z menu
+    assert(pendingDaily === false, 'pendingDaily čistý před testem happy path');
+    clickAct('daily');
+    clickAct('playdaily');
+    assert(pendingDaily === true, 'pendingDaily=true bezprostředně po playdaily (přímá cesta, žádné opuštění)');
+    clickAct('pickclass', 'mag');      // BEZ mezikroku menu/play — přímý výběr třídy v denním toku
+    assert(run.daily === true, 'legitimní denní tok: pickClass přímo po playdaily stále nastaví run.daily=true');
+    const expected = dailyPactId();
+    assert(run.pacts.length === 1 && run.pacts[0] === expected, 'legitimní denní tok: vynucený pakt dle data je stále zapečetěn (' + JSON.stringify(run.pacts) + ')');
+    assert(run._pactOffer === null, 'legitimní denní tok: stále žádná nabídka paktů (offerPact() nevolán)');
+    assert(pendingDaily === false, 'pendingDaily se po legitimním denním běhu spotřebuje jako dřív');
+    assert(state === 'shop', 'legitimní denní tok jde rovnou do obchodu, přesně jako dřív');
+    log('happy path 71i ok (přímá cesta daily -> playdaily -> pickClass dál vynucuje denní pakt, oprava 71h nerozbila legitimní tok)'); }
 
   console.log('\\n==== TEST RESULTS ====');
   for (const r of results) console.log('  ✓ ' + r);
