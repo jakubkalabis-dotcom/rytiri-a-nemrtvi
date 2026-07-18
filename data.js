@@ -445,14 +445,31 @@ const ASCENSION_CURSES = [
 /* ---------- META-PROGRESE (Svatyně) — trvalá vylepšení účtu za „duše" napříč běhy ----------
    Duše se získávají po každém běhu (dle vlny+skóre) a utrácí v menu za permanentní bonusy.   */
 const META_UPGRADES = {
-  gems:   { name:'Dědictví',      icon:'💎', desc:'+15 startovních gemů za úroveň.',   per:15,   max:8 },
-  hp:     { name:'Odolnost rodu', icon:'❤', desc:'+6 % maximálního HP za úroveň.',     per:0.06, max:8 },
-  dmg:    { name:'Zděděná síla',  icon:'⚔', desc:'+4 % poškození za úroveň.',          per:0.04, max:8 },
-  luck:   { name:'Štěstěna',      icon:'🍀', desc:'+8 % gemů z nepřátel za úroveň.',    per:0.08, max:6 },
-  reaper: { name:'Žnec duší',     icon:'💀', desc:'+15 % duší získaných z běhu.',       per:0.15, max:6 },
+  gems:   { name:'Dědictví',        icon:'💎', desc:'+15 startovních gemů za úroveň.',            per:15,   max:8 },
+  hp:     { name:'Odolnost rodu',   icon:'❤', desc:'+6 % maximálního HP za úroveň.',              per:0.06, max:8 },
+  dmg:    { name:'Zděděná síla',    icon:'⚔', desc:'+4 % poškození za úroveň.',                   per:0.04, max:8 },
+  luck:   { name:'Štěstěna',        icon:'🍀', desc:'+8 % gemů z nepřátel za úroveň.',             per:0.08, max:6 },
+  reaper: { name:'Žnec duší',       icon:'💀', desc:'+15 % duší získaných z běhu.',                per:0.15, max:6 },
+  crit:   { name:'Zděděná muška',   icon:'🎯', desc:'+3 % šance na krit za úroveň.',               per:0.03, max:6 },
+  rate:   { name:'Zděděná hbitost', icon:'💨', desc:'−3 % prodleva mezi útoky za úroveň.',         per:0.03, max:6 },
+  armor:  { name:'Rodový pancíř',   icon:'🛡', desc:'−3 % obdrženého poškození za úroveň.',        per:0.03, max:6 },
+  pickup: { name:'Hrabivost rodu',  icon:'🧲', desc:'+15 % dosah sběru dropů za úroveň.',          per:0.15, max:5 },
 };
 const META_KEYS = Object.keys(META_UPGRADES);
 function metaCost(lvl) { return 8 + lvl * 7; }   // cena další úrovně v duších
+
+/* ---------- RELIKVIE (Svatyně) — jednorázové trvalé odemykatelné bonusy účtu za „duše" ----------
+   Na rozdíl od META_UPGRADES (postupné úrovně) se relikvie kupují JEDNOU a dávají větší jednorázový
+   účinek. Vlastnictví se ukládá do `profile.unlocked[]` (id relikvie). Čísla v `desc` MUSÍ přesně
+   odpovídat aplikovanému efektu (viz recalcPerks/makePlayer/killEnemy/addXp v game.js). */
+const RELICS = {
+  pokladnice: { name:'Válečná pokladnice', icon:'💰', desc:'+50 startovních gemů v každém běhu.',        cost:60 },
+  magnet:     { name:'Magnet rodu',        icon:'🧲', desc:'+50 % dosah sběru dropů trvale.',             cost:50 },
+  ucenec:     { name:'Učenec rodu',        icon:'📖', desc:'+25 % XP trvale.',                            cost:55 },
+  kuze:       { name:'Kamenná kůže rodu',  icon:'🗿', desc:'−8 % obdrženého poškození trvale.',           cost:90 },
+  hamiznost:  { name:'Hamižnost rodu',     icon:'🪙', desc:'+20 % gemů z nepřátel trvale.',                cost:70 },
+};
+const RELIC_KEYS = Object.keys(RELICS);
 
 // Kněz – pasivní sekundární AOE: „Svatá záře" pravidelně pálí nemrtvé kolem něj.
 const PRIEST_NOVA = { dmg: 55, radius: 120, cd: 140 };   // 55 poškození (× svěcené) v okruhu 120 každých ~2,3 s

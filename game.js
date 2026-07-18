@@ -119,7 +119,7 @@ function makePlayer(cls, classId) {
   const pas = cls.passive || {};
   const baseHp = Math.round(120 * cls.hpMod * (1 + metaBonus('hp')));   // meta: Odolnost rodu
   const p = {
-    classId, class: cls, color: cls.color, gems: cls.startGems + Math.round(metaLvl('gems') * META_UPGRADES.gems.per),   // meta: Dědictví
+    classId, class: cls, color: cls.color, gems: cls.startGems + Math.round(metaLvl('gems') * META_UPGRADES.gems.per) + (hasRelic('pokladnice') ? 50 : 0),   // meta: Dědictví + relikvie: Válečná pokladnice
     x: (CORE.tx + CORE.w / 2) * TILE, y: (CORE.ty - 1) * TILE, r: 12,
     rx: (CORE.tx + CORE.w / 2) * TILE, ry: (CORE.ty - 1) * TILE,   // render-pozice (transientní); u guesta se vyhlazuje k x/y
     baseHp, hpMax: baseHp, hp: baseHp,
@@ -165,7 +165,7 @@ function recalcPerks(p) {
     ammoSaveChance += (def.ammoSaveChance || 0) * n; manaRegenPct += (def.manaRegenPct || 0) * n;
   }
   // přímé úpravy existujících passiv (čtou je stávající mechaniky):
-  pas.crit = (base.crit || 0) + critAdd;
+  pas.crit = (base.crit || 0) + critAdd + metaBonus('crit');                                    // meta: Zděděná muška
   pas.critMul = (base.critMul || 2) + critMulAdd;
   pas.lifesteal = (base.lifesteal || 0) + lifestealAdd;
   pas.dodge = (base.dodge || 0) + dodgeAdd;
@@ -173,10 +173,10 @@ function recalcPerks(p) {
   pas.dmgMul = 1 + dmgPct;
   pas.rateMul = Math.max(0.35, 1 - ratePct);      // nižší prodleva = rychlejší palba
   pas.speedMul = 1 + speedPct;
-  pas.armorMul = Math.max(0.3, 1 - armorPct);      // nižší obdržené poškození
+  pas.armorMul = Math.max(0.3, 1 - armorPct - metaBonus('armor') - (hasRelic('kuze') ? 0.08 : 0));   // meta: Rodový pancíř + relikvie: Kamenná kůže rodu
   pas.rangeMul = 1 + rangePct;
   pas.cdMul = Math.max(0.4, 1 - cdPct);            // nižší cooldown schopnosti
-  pas.pickupMul = 1 + pickupRadiusAdd;
+  pas.pickupMul = 1 + pickupRadiusAdd + metaBonus('pickup') + (hasRelic('magnet') ? 0.5 : 0);       // meta: Hrabivost rodu + relikvie: Magnet rodu
   pas.gemMul = 1 + gemPct;
   pas.xpMul = 1 + xpPct;
   pas.regenAdd = regenAdd;                          // HP/s
@@ -239,6 +239,8 @@ function ascensionSummary(r) {
 // META-progrese (Svatyně): trvalé bonusy účtu
 function metaLvl(k) { return (profile.meta && profile.meta[k]) || 0; }
 function metaBonus(k) { return metaLvl(k) * (META_UPGRADES[k] ? META_UPGRADES[k].per : 0); }
+// RELIKVIE (Svatyně): jednorázově odemčené trvalé bonusy účtu (profile.unlocked[])
+function hasRelic(id) { return !!(profile.unlocked && profile.unlocked.includes(id)); }
 function soulsFromRun() { return Math.max(1, Math.round(((run.wave || 0) * 2 + (run.score || 0) / 500) * (1 + metaBonus('reaper')) * (1 + (run.ascension || 0) * 0.25))); }   // + bonus Nekonečna: ×(1 + ascension×0,25)
 function grantPerkOffer() { for (const p of players) if (!p.perkOffer) p.perkOffer = rollPerkOffer(p); }
 /* ---- PAKTY: nabídka 3 před během a před každou mapou ---- */
@@ -752,17 +754,38 @@ function renderShrine() {
       <div class="scc">${maxed ? 'MAX' : '💀 ' + cost}</div>
     </div>`;
   }).join('');
+  const relicCards = RELIC_KEYS.map(id => {
+    const d = RELICS[id], owned = hasRelic(id), can = (profile.souls || 0) >= d.cost && !owned;
+    return `<div class="card ${owned || !can ? 'dis' : ''}" ${owned ? '' : `data-act="buyrelic" data-id="${id}"`}>
+      <div class="scn">${d.icon} ${d.name}</div>
+      <div class="scd">${d.desc}</div>
+      <div class="scc">${owned ? '✓ vlastněno' : (can ? '💀 ' + d.cost : 'málo duší (💀 ' + d.cost + ')')}</div>
+    </div>`;
+  }).join('');
   ovContent.innerHTML = `<h2>💀 Svatyně duší</h2>
     <p>Trvalá vylepšení účtu za <b>duše</b> (získáváš je z každého běhu — čím dál dojdeš, tím víc). Platí ve všech dalších bězích.</p>
     <div class="wallet" style="color:var(--arcane-2,#c88bff)">💀 Duše: <b>${profile.souls || 0}</b></div>
     <div class="grid">${cards}</div>
+    <h3>Relikvie</h3>
+    <p style="font-size:12px;color:#9aa87e">Jednorázové odemknutí — koupíš jednou, efekt platí navždy ve všech bězích.</p>
+    <div class="grid">${relicCards}</div>
     <button data-act="menu" class="ghost">Zpět do menu</button>`;
 }
 function buyMeta(k) {
+  if (!Object.prototype.hasOwnProperty.call(META_UPGRADES, k)) return;
   const d = META_UPGRADES[k]; if (!d) return;
   const lv = metaLvl(k); if (lv >= d.max) return;
   const cost = metaCost(lv); if ((profile.souls || 0) < cost) return;
   profile.souls -= cost; profile.meta = profile.meta || {}; profile.meta[k] = lv + 1;
+  saveProfile(profile); sfx.buy(); renderShrine();
+}
+function buyRelic(id) {
+  if (!Object.prototype.hasOwnProperty.call(RELICS, id)) return;
+  const d = RELICS[id]; if (!d) return;
+  profile.unlocked = profile.unlocked || [];
+  if (profile.unlocked.includes(id)) return;   // idempotentní: druhá koupě je no-op
+  if ((profile.souls || 0) < d.cost) return;
+  profile.souls -= d.cost; profile.unlocked.push(id);
   saveProfile(profile); sfx.buy(); renderShrine();
 }
 
@@ -782,6 +805,7 @@ overlay.addEventListener('click', e => {
   if (act === 'shrine') { setState('shrine'); return; }
   if (act === 'help') { setState('help'); return; }
   if (act === 'buymeta') { buyMeta(id); return; }
+  if (act === 'buyrelic') { buyRelic(id); return; }
   if (act === 'pickclass') { pickClass(id); return; }
   if (act === 'tab') { shopTab = id; renderShop(); return; }   // lokální přepnutí záložky
   if (act === 'tobuild') { shopReady(); return; }              // ready-gate obchodu (co-op)
@@ -1068,6 +1092,7 @@ function rateMod(p, w) {
   let m = 1;
   if (w.cat === 'ranged' && p.passive.rangedRate) m = p.passive.rangedRate;
   m *= (p.passive.rateMul || 1);   // perky: rychlejší palba
+  m *= Math.max(0.5, 1 - metaBonus('rate'));   // meta: Zděděná hbitost
   if (p.flurryT > 0) m *= 1 / 1.7; // lovec: smršt +70 % rychlost palby
   if (p.buffRapid > 0) m *= 0.5;   // drop „Rychlopalba"
   if (p.rageT > 0) m *= 0.6;       // berserk zuřivost
@@ -1305,7 +1330,7 @@ function killEnemy(e, killer) {
   run.combo = (run.combo || 0) + 1; run.comboT = 180;
   const mult = comboMult();
   const eliteGem = e.elite ? 3 * pactMul('eliteGem') : 1;   // pakt Lovecká odměna
-  const gems = Math.max(1, Math.round((e.def.bounty || 4) * GEMS_PER_KILL_MUL * mult * eliteGem * pactMul('gem') * ascensionMul(run, 'gem') * (1 + metaBonus('luck'))));   // + prokletí Hlad brány
+  const gems = Math.max(1, Math.round((e.def.bounty || 4) * GEMS_PER_KILL_MUL * mult * eliteGem * pactMul('gem') * ascensionMul(run, 'gem') * (1 + metaBonus('luck') + (hasRelic('hamiznost') ? 0.2 : 0))));   // meta: Štěstěna + relikvie: Hamižnost rodu + prokletí Hlad brány
   // D12: gemy dostane JEN zabíječ (dřív dostával plnou odměnu každý hráč v co-opu = duplicace).
   // Bez identifikovaného zabíječe (past/DOT) kredituje prvního hráče — v sólu nemá vliv.
   const gemQ = killer || players[0];
@@ -1345,7 +1370,7 @@ function killEnemy(e, killer) {
 // Násobič combo: 1× → až ~3× při dlouhé sérii
 function comboMult() { return 1 + Math.min(2, (run.combo || 0) * 0.05 * pactMul('comboRate')); }   // pakt Řež: rychlejší růst
 function addXp(n, srcPlayer) {
-  profile.xp += n;
+  profile.xp += n * (hasRelic('ucenec') ? 1.25 : 1);   // relikvie: Učenec rodu
   while (profile.xp >= xpToLevel(profile.playerLevel)) {
     profile.xp -= xpToLevel(profile.playerLevel);
     profile.playerLevel++;

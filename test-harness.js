@@ -976,6 +976,144 @@ code += `
     assert(run.ascension === 6, 'netHandleCmd ascend s run.ascension=6: zůstává 6, žádný reset na 1 (' + run.ascension + ')');
     log('enterAscension guard ok (no-op mimo legitimní victory@FINAL_WAVE vstup, idempotentní, nikdy nereset existující ascension)'); }
 
+  // ---- 57) FÁZE 4.2: čísla v META_UPGRADES[].desc a RELICS[].desc PŘESNĚ odpovídají realitě (transparentnost) ----
+  { for (const k of META_KEYS) {
+      const d = META_UPGRADES[k];
+      const pct = Math.round(d.per * 100);
+      // per je buď procento za úroveň (crit/rate/armor/pickup/hp/dmg/luck/reaper), nebo absolutní číslo (gems)
+      const needle = k === 'gems' ? String(d.per) : String(pct);
+      assert(d.desc.indexOf(needle) >= 0, 'META_UPGRADES.' + k + '.desc musí obsahovat přesné číslo ' + needle + ' (per=' + d.per + ') — desc="' + d.desc + '"');
+    }
+    for (const id of RELIC_KEYS) {
+      const d = RELICS[id];
+      assert(typeof d.cost === 'number' && d.cost > 0, 'RELICS.' + id + ' má platnou cenu');
+    }
+    // konkrétní efektová čísla v desc relikvií musí sedět na to, co aplikuje game.js
+    assert(RELICS.pokladnice.desc.indexOf('50') >= 0, 'pokladnice desc obsahuje 50 (gemy)');
+    assert(RELICS.magnet.desc.indexOf('50') >= 0, 'magnet desc obsahuje 50 (% dosah)');
+    assert(RELICS.ucenec.desc.indexOf('25') >= 0, 'ucenec desc obsahuje 25 (% XP)');
+    assert(RELICS.kuze.desc.indexOf('8') >= 0, 'kuze desc obsahuje 8 (% pancíř)');
+    assert(RELICS.hamiznost.desc.indexOf('20') >= 0, 'hamiznost desc obsahuje 20 (% gemy)');
+    log('META_UPGRADES/RELICS desc čísla ok (odpovídají skutečným hodnotám per/cost/efekt)'); }
+
+  // ---- 58) FÁZE 4.2: nová META vylepšení (crit/rate/armor/pickup) — nákup sníží duše, zvýší metaLvl, projeví se v pas ----
+  { profile.souls = 0; profile.meta = {}; profile.unlocked = [];
+    newRun('rytir'); const p0 = players[0];
+    assert((p0.passive.crit || 0) === (CLASSES.rytir.passive && CLASSES.rytir.passive.crit || 0), 'bez meta: crit neovlivněn');
+    profile.souls = 999;
+    const s0 = profile.souls;
+    buyMeta('crit'); buyMeta('crit');
+    assert(profile.souls < s0, 'buyMeta(crit) strhl duše (' + s0 + '->' + profile.souls + ')');
+    assert(metaLvl('crit') === 2, 'metaLvl crit = 2 po 2 nákupech');
+    buyMeta('rate'); buyMeta('armor'); buyMeta('pickup');
+    assert(metaLvl('rate') === 1 && metaLvl('armor') === 1 && metaLvl('pickup') === 1, 'metaLvl rate/armor/pickup = 1');
+    newRun('rytir'); const p = players[0];
+    const critBase = (CLASSES.rytir.passive && CLASSES.rytir.passive.crit) || 0;
+    assert(Math.abs(p.passive.crit - (critBase + metaBonus('crit'))) < 1e-9, 'pas.crit = základ třídy + metaBonus(crit) přesně (' + p.passive.crit + ')');
+    const w = WEAPONS[p.weaponId];
+    const metaSaved = profile.meta;
+    profile.meta = {};   // dočasně vynulovat meta -> referenční hodnota BEZ vlivu Zděděné hbitosti
+    const rBase = rateMod(p, w);
+    profile.meta = metaSaved;   // vrátit (metaLvl(rate)===1)
+    const rWithMeta = rateMod(p, w);
+    assert(rWithMeta < rBase, 'meta rate zrychluje palbu (nižší cooldown mult): ' + rBase + ' -> ' + rWithMeta);
+    assert(Math.abs(p.passive.armorMul - Math.max(0.3, 1 - metaBonus('armor'))) < 1e-9, 'pas.armorMul = 1 − metaBonus(armor) přesně (' + p.passive.armorMul + ')');
+    assert(Math.abs(p.passive.pickupMul - (1 + metaBonus('pickup'))) < 1e-9, 'pas.pickupMul = 1 + metaBonus(pickup) přesně (' + p.passive.pickupMul + ')');
+    profile.souls = 0; profile.meta = {};
+    log('nová meta vylepšení ok (crit/rate/armor/pickup: nákup + aplikace do pas)'); }
+
+  // ---- 59) FÁZE 4.2: RELIKVIE — buyRelic přidá do unlocked, strhne duše, 2. koupě je no-op (idempotence) ----
+  { profile.souls = 0; profile.unlocked = [];
+    assert(!hasRelic('pokladnice'), 'relikvie zatím nevlastněna');
+    buyRelic('pokladnice');   // bez duší -> no-op
+    assert(!hasRelic('pokladnice'), 'buyRelic bez dostatku duší je no-op');
+    assert(profile.souls === 0, 'souls beze změny při neúspěšném pokusu');
+    profile.souls = RELICS.pokladnice.cost;
+    buyRelic('pokladnice');
+    assert(hasRelic('pokladnice'), 'buyRelic přidal relikvii do unlocked');
+    assert(profile.souls === 0, 'buyRelic strhl přesně cenu (' + RELICS.pokladnice.cost + ')');
+    profile.souls = 999;
+    buyRelic('pokladnice');   // druhá koupě
+    assert(profile.souls === 999, 'druhá koupě stejné relikvie je no-op — duše se nestrhly znovu');
+    assert(profile.unlocked.filter(x => x === 'pokladnice').length === 1, 'relikvie se v unlocked neduplikuje');
+    profile.souls = 0; profile.unlocked = [];
+    log('buyRelic ok (nákup/strhnutí duší/idempotentní 2. koupě)'); }
+
+  // ---- 60) FÁZE 4.2: RELIKVIE — efekty se reálně aplikují ----
+  { profile.souls = 0; profile.unlocked = [];
+    newRun('rytir'); const gBase = players[0].gems;
+    profile.unlocked = ['pokladnice'];
+    newRun('rytir'); const gWith = players[0].gems;
+    assert(gWith === gBase + 50, 'pokladnice: +50 startovních gemů přesně (' + gBase + '->' + gWith + ')');
+
+    profile.unlocked = [];
+    newRun('rytir'); const pmBase = players[0].passive.pickupMul;
+    profile.unlocked = ['magnet'];
+    newRun('rytir'); const pmWith = players[0].passive.pickupMul;
+    assert(Math.abs(pmWith - (pmBase + 0.5)) < 1e-9, 'magnet: +0.5 pickupMul přesně (' + pmBase + '->' + pmWith + ')');
+
+    profile.unlocked = [];
+    newRun('rytir'); const p1 = players[0]; profile.xp = 0; profile.playerLevel = 1;
+    addXp(10, p1); const xpNoRelic = profile.xp;   // 10 << xpToLevel(1)=100, žádný level-up = čistý měřitelný zisk
+    profile.xp = 0;
+    profile.unlocked = ['ucenec'];
+    addXp(10, p1); const xpWithRelic = profile.xp;
+    assert(Math.abs(xpWithRelic - xpNoRelic * 1.25) < 1e-6, 'ucenec: +25 % XP přesně (' + xpNoRelic + '->' + xpWithRelic + ')');
+
+    profile.unlocked = [];
+    newRun('rytir'); const amBase = players[0].passive.armorMul;
+    profile.unlocked = ['kuze'];
+    newRun('rytir'); const amWith = players[0].passive.armorMul;
+    assert(amWith < amBase, 'kuze: snižuje armorMul (' + amBase + '->' + amWith + ')');
+    assert(Math.abs(amBase - amWith - 0.08) < 1e-9, 'kuze: rozdíl přesně 0,08 (8 %) (' + amBase + '->' + amWith + ')');
+
+    profile.unlocked = [];
+    newRun('rytir'); startWave(); const p2 = players[0]; const g2Start = p2.gems;
+    for (let i = 0; i < 10; i++) { const e = spawnDummy('chodec', p2.x + 10, p2.y); e.hp = 0; killEnemy(e, p2); }
+    const gemsNoRelic = p2.gems - g2Start;
+    profile.unlocked = ['hamiznost'];
+    newRun('rytir'); startWave(); const p3 = players[0]; const g3Start = p3.gems;
+    for (let i = 0; i < 10; i++) { const e = spawnDummy('chodec', p3.x + 10, p3.y); e.hp = 0; killEnemy(e, p3); }
+    const gemsWithRelic = p3.gems - g3Start;
+    assert(gemsWithRelic > gemsNoRelic, 'hamiznost: víc gemů ze zabití (10× chodec, ' + gemsNoRelic + '->' + gemsWithRelic + ')');
+
+    profile.unlocked = [];
+    log('relikvie efekty ok (pokladnice/magnet/ucenec/kuze/hamiznost reálně aplikovány)'); }
+
+  // ---- 61) FÁZE 4.2 NEUTRALITA: bez koupených meta/relikvií hraje hráč IDENTICKY jako dřív (žádná regrese) ----
+  { profile.souls = 0; profile.meta = {}; profile.unlocked = [];
+    for (const k of META_KEYS) assert(metaBonus(k) === 0, 'bez nákupu: metaBonus(' + k + ')=0');
+    for (const id of RELIC_KEYS) assert(!hasRelic(id), 'bez nákupu: relikvie ' + id + ' nevlastněna');
+    newRun('rytir'); const p = players[0];
+    assert(p.gems === CLASSES.rytir.startGems, 'bez meta/relikvií: startovní gemy nezměněny (' + p.gems + ')');
+    assert(p.passive.pickupMul === 1, 'bez meta/relikvií: pickupMul=1 (neutrální)');
+    assert(p.passive.armorMul === 1, 'bez meta/relikvií: armorMul=1 (neutrální)');
+    assert((p.passive.crit || 0) === (CLASSES.rytir.passive && CLASSES.rytir.passive.crit || 0), 'bez meta/relikvií: crit nezměněn oproti třídní passivě');
+    const w = WEAPONS[p.weaponId];
+    // s metaBonus('rate')=0 musí přidaný násobič Math.max(0.5, 1-metaBonus('rate')) vyjít přesně 1×
+    // (žádný vliv na rateMod oproti stavu před FÁZÍ 4.2)
+    assert(Math.max(0.5, 1 - metaBonus('rate')) === 1, 'meta rate multiplikátor je neutrální (1×) bez nákupu');
+    const before = { passive: { rangedRate: p.passive.rangedRate, rateMul: p.passive.rateMul }, flurryT: 0, buffRapid: 0, rageT: 0 };
+    const expected = rateMod(before, w);   // referenční výpočet BEZ meta vlivu (metaBonus vrací 0, takže shodné s rateMod(p,w))
+    assert(Math.abs(rateMod(p, w) - expected) < 1e-9, 'bez meta: rateMod totožný s referenčním výpočtem (' + expected + ' == ' + rateMod(p, w) + ')');
+    profile.xp = 0; profile.playerLevel = 1; addXp(10, p);   // 10 << xpToLevel(1)=100, žádný level-up = čistý zisk
+    assert(profile.xp === 10, 'bez relikvie ucenec: addXp nepřidává bonus (' + profile.xp + ')');
+    log('neutralita bez koupí ok (žádná regrese oproti stavu bez meta/relikvií)'); }
+
+  // ---- 62) FÁZE 4.2 EMPIRICKÝ GUARD: pokud se číslo v desc rozejde s reálným efektem, test SPADNE ----
+  { // ověřuje, že guard v testu 57 skutečně něco kontroluje (ne jen kosmeticky prochází) —
+    // dočasně rozhodíme META_UPGRADES.crit.per vs. desc a očekáváme selhání assertu
+    const savedPer = META_UPGRADES.crit.per;
+    META_UPGRADES.crit.per = 0.09;   // desc pořád říká "3 %" -> nesedí s per=0.09 (9 %)
+    let threw = false;
+    try {
+      const pct = Math.round(META_UPGRADES.crit.per * 100);
+      assert(META_UPGRADES.crit.desc.indexOf(String(pct)) >= 0, 'desc musí obsahovat ' + pct);
+    } catch (e) { threw = true; }
+    META_UPGRADES.crit.per = savedPer;   // vrátit zpět, ať zbytek testů běží na reálných datech
+    assert(threw, 'empirický guard: rozhozené per vs. desc MUSÍ shodit assert (jinak by drift čísel prošel nepovšimnut)');
+    log('empirický guard ok (rozhozené číslo v desc vs. realita test skutečně shodí)'); }
+
   console.log('\\n==== TEST RESULTS ====');
   for (const r of results) console.log('  ✓ ' + r);
   console.log('==== ALL PASSED ====');
