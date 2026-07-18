@@ -117,7 +117,7 @@ function newRun(classIds) {
 }
 function makePlayer(cls, classId) {
   const pas = cls.passive || {};
-  const baseHp = Math.round(120 * cls.hpMod * (1 + metaBonus('hp')));   // meta: Odolnost rodu
+  const baseHp = Math.round(120 * cls.hpMod * (1 + metaBonus('hp')) * (1 + masteryBonus(classId).hpPct));   // meta: Odolnost rodu + mistrovství třídy
   const p = {
     classId, class: cls, color: cls.color, gems: cls.startGems + Math.round(metaLvl('gems') * META_UPGRADES.gems.per) + (hasRelic('pokladnice') ? 50 : 0),   // meta: Dědictví + relikvie: Válečná pokladnice
     x: (CORE.tx + CORE.w / 2) * TILE, y: (CORE.ty - 1) * TILE, r: 12,
@@ -170,7 +170,7 @@ function recalcPerks(p) {
   pas.lifesteal = (base.lifesteal || 0) + lifestealAdd;
   pas.dodge = (base.dodge || 0) + dodgeAdd;
   // nové deriv. násobiče/hodnoty (čtou je call-sity níže):
-  pas.dmgMul = 1 + dmgPct;
+  pas.dmgMul = 1 + dmgPct + masteryBonus(p.classId).dmgPct;   // + mistrovství třídy (viz masteryBonus)
   pas.rateMul = Math.max(0.35, 1 - ratePct);      // nižší prodleva = rychlejší palba
   pas.speedMul = 1 + speedPct;
   pas.armorMul = Math.max(0.3, 1 - armorPct - metaBonus('armor') - (hasRelic('kuze') ? 0.08 : 0));   // meta: Rodový pancíř + relikvie: Kamenná kůže rodu
@@ -242,6 +242,46 @@ function metaBonus(k) { return metaLvl(k) * (META_UPGRADES[k] ? META_UPGRADES[k]
 // RELIKVIE (Svatyně): jednorázově odemčené trvalé bonusy účtu (profile.unlocked[])
 function hasRelic(id) { return !!(profile.unlocked && profile.unlocked.includes(id)); }
 function soulsFromRun() { return Math.max(1, Math.round(((run.wave || 0) * 2 + (run.score || 0) / 500) * (1 + metaBonus('reaper')) * (1 + (run.ascension || 0) * 0.25))); }   // + bonus Nekonečna: ×(1 + ascension×0,25)
+// MISTROVSTVÍ TŘÍD (FÁZE 4.3): per-třídní trvalá progrese účtu. Úroveň se odvozuje z profile.mastery[classId].xp
+// (nikdy neukládá zvlášť) přes kumulativní práh masteryXpToLevel() (data.js). Bezpečné i na starém profilu
+// bez pole mastery (Object.assign(defaultProfile(),...) ho doplní na {}, ale i tak to jistíme defenzivně).
+function masteryXp(classId) { return ((profile.mastery && profile.mastery[classId]) || { xp: 0 }).xp || 0; }
+function masteryLevel(classId) {
+  const xp = masteryXp(classId);
+  let lvl = 0;
+  while (masteryXpToLevel(lvl + 1) <= xp) lvl++;
+  return lvl;
+}
+// {dmgPct, hpPct}: +MASTERY_BONUS_PER_LEVEL za úroveň, oboje shodně, stropováno na MASTERY_LEVEL_CAP.
+// level 0 (nehráno / žádné mastery) => {dmgPct:0, hpPct:0} — nulová (neutrální) hodnota, žádná regrese.
+function masteryBonus(classId) {
+  const lvl = Math.min(MASTERY_LEVEL_CAP, masteryLevel(classId));
+  const b = lvl * MASTERY_BONUS_PER_LEVEL;
+  return { dmgPct: b, hpPct: b };
+}
+// Mistrovské XP za jeden odehraný běh (vlna + skóre/1000, min. 1) — stejná třída „platí" každou hru znovu.
+function masteryXpForRun(r) { return Math.max(1, Math.round((r && r.wave || 0) + ((r && r.score || 0) / 1000))); }
+// Přičte mistrovské XP KAŽDÉ unikátně hrané třídě (players[].classId) — pokud oba co-op hráči hrají
+// STEJNOU třídu, dostane gain jen JEDNOU za běh (ne 2×). V sólu jen players[0]'s classId.
+// Volá se výhradně na hostu/sólu (stejně jako grantSouls()).
+function grantMasteryXp() {
+  const gain = masteryXpForRun(run);
+  profile.mastery = profile.mastery || {};
+  const classIds = new Set(players.map(p => p && p.classId).filter(Boolean));
+  for (const classId of classIds) {
+    const m = profile.mastery[classId] || (profile.mastery[classId] = { xp: 0 });
+    m.xp = (m.xp || 0) + gain;
+  }
+  saveProfile(profile);
+  return gain;
+}
+// Progres do další úrovně mistrovství (pro UI progress bar) — {xp, lvl, into, need}.
+function masteryProgress(classId) {
+  const xp = masteryXp(classId);
+  const lvl = masteryLevel(classId);
+  const curT = masteryXpToLevel(lvl), nextT = masteryXpToLevel(lvl + 1);
+  return { xp, lvl, into: xp - curT, need: nextT - curT };
+}
 function grantPerkOffer() { for (const p of players) if (!p.perkOffer) p.perkOffer = rollPerkOffer(p); }
 /* ---- PAKTY: nabídka 3 před během a před každou mapou ---- */
 let pactReturn = 'shop';
@@ -311,13 +351,14 @@ function costOf(cost, cat) {
    ========================================================================== */
 function setState(s) {
   state = s;
-  if (s === 'menu' || s === 'class' || s === 'shop' || s === 'roundEnd' || s === 'gameOver' || s === 'victory' || s === 'host' || s === 'join' || s === 'wheel' || s === 'pact' || s === 'shrine' || s === 'help') {
+  if (s === 'menu' || s === 'class' || s === 'shop' || s === 'roundEnd' || s === 'gameOver' || s === 'victory' || s === 'host' || s === 'join' || s === 'wheel' || s === 'pact' || s === 'shrine' || s === 'mastery' || s === 'help') {
     overlay.classList.remove('hidden');
   } else {
     overlay.classList.add('hidden');
   }
   if (s === 'help') renderHelp();
   else if (s === 'shrine') renderShrine();
+  else if (s === 'mastery') renderMastery();
   else if (s === 'pact') renderPact();
   else if (s === 'wheel') renderWheelMenu();
   else if (s === 'menu') renderMenu();
@@ -396,6 +437,7 @@ function renderMenu() {
     <button data-act="hostgame" class="ghost">Hostovat co-op (2 hráči)</button>
     <button data-act="joingame" class="ghost">Připojit se ke hře</button>
     <button data-act="shrine" class="ghost">💀 Svatyně duší${profile.souls ? ' (' + profile.souls + ')' : ''}</button>
+    <button data-act="mastery" class="ghost">🏆 Mistrovství tříd</button>
     <button data-act="help" class="ghost">📖 Jak hrát</button>
     <div class="board"><h3>NEJLEPŠÍ SKÓRE</h3>${board}</div>`;
 }
@@ -407,7 +449,7 @@ function renderClassSelect() {
       <div class="ci">${c.icon}</div>
       <div class="cn">${c.name}</div>
       <div class="cd">${c.desc}</div>
-      <div class="cs">💎 ${c.startGems} · ❤ ${Math.round(120 * c.hpMod)}</div>
+      <div class="cs">💎 ${c.startGems} · ❤ ${Math.round(120 * c.hpMod)} · 🏆 Mistr. ${masteryLevel(id)}</div>
     </div>`;
   }).join('');
   ovContent.innerHTML = `<h2>Vyber třídu</h2><div class="grid">${cards}</div>
@@ -789,6 +831,33 @@ function buyRelic(id) {
   saveProfile(profile); sfx.buy(); renderShrine();
 }
 
+// FÁZE 4.3: obrazovka „Mistrovství tříd" — per-třídní trvalá progrese (viz masteryLevel/masteryBonus).
+// Čísla se ČTOU ze skutečných funkcí (masteryBonus/masteryProgress), nikdy natvrdo — nemůžou driftnout.
+function renderMastery() {
+  const cards = Object.keys(CLASSES).map(id => {
+    const c = CLASSES[id];
+    const { lvl, into, need } = masteryProgress(id);
+    const b = masteryBonus(id);
+    const barLen = 10;
+    const pct = need > 0 ? Math.max(0, Math.min(1, into / need)) : 1;
+    const filled = Math.round(pct * barLen);
+    const capped = lvl >= MASTERY_LEVEL_CAP;
+    return `<div class="card" style="--cc:${c.color}">
+      <div class="scn">${c.icon} ${c.name}</div>
+      <div class="scd">Mistrovství úroveň <b>${lvl}</b>${capped ? ' (strop bonusu)' : ''} · +${(b.dmgPct * 100).toFixed(1)} % poškození, +${(b.hpPct * 100).toFixed(1)} % max HP</div>
+      <div class="upbar">${'▮'.repeat(filled) + '▯'.repeat(barLen - filled)}</div>
+      <div class="scc">${into} / ${need} XP do další úrovně</div>
+    </div>`;
+  }).join('');
+  ovContent.innerHTML = `<h2>🏆 Mistrovství tříd</h2>
+    <p>Za odehraný běh dané třídy získáváš mistrovské XP (podle vlny a skóre, min. 1) — samostatně pro každou třídu.
+    Každá úroveň mistrovství dává +${(MASTERY_BONUS_PER_LEVEL * 100).toFixed(1)} % poškození a +${(MASTERY_BONUS_PER_LEVEL * 100).toFixed(1)} % max HP té třídy,
+    strop bonusu je na úrovni ${MASTERY_LEVEL_CAP} (celkem +${(MASTERY_LEVEL_CAP * MASTERY_BONUS_PER_LEVEL * 100).toFixed(0)} % / +${(MASTERY_LEVEL_CAP * MASTERY_BONUS_PER_LEVEL * 100).toFixed(0)} %).
+    XP nad stropem se dál počítá pro přehled, bonus dál neroste.</p>
+    <div class="grid">${cards}</div>
+    <button data-act="menu" class="ghost">Zpět do menu</button>`;
+}
+
 // Delegované klikání v overlay
 overlay.addEventListener('click', e => {
   const el = e.target.closest('[data-act]');
@@ -803,6 +872,7 @@ overlay.addEventListener('click', e => {
   if (act === 'copycode') { if (typeof netCopy === 'function') netCopy(el.dataset.which, el); return; }
   if (act === 'joinconnect') { if (typeof netJoinConnect === 'function') netJoinConnect(); return; }
   if (act === 'shrine') { setState('shrine'); return; }
+  if (act === 'mastery') { setState('mastery'); return; }
   if (act === 'help') { setState('help'); return; }
   if (act === 'buymeta') { buyMeta(id); return; }
   if (act === 'buyrelic') { buyRelic(id); return; }
@@ -1610,6 +1680,7 @@ function doVictory() {
   const name = profile.settings.name || 'Rytíř';
   addScore(name, run.wave, run.score || 0);
   grantSouls();
+  grantMasteryXp();
   recordBestAscension();
   saveProfile(profile);
   sfx.waveWin(); setTimeout(() => { try { sfx.levelUp(); } catch {} }, 300);
@@ -1619,6 +1690,7 @@ function doGameOver() {
   const name = (profile.settings.name) || 'Rytíř';
   addScore(name, run.wave, run.score || 0);
   grantSouls();
+  grantMasteryXp();
   recordBestAscension();
   saveProfile(profile);
   sfx.gameOver();

@@ -471,6 +471,22 @@ const RELICS = {
 };
 const RELIC_KEYS = Object.keys(RELICS);
 
+/* ---------- MISTROVSTVÍ TŘÍD (FÁZE 4.3) — trvalá per-třídní progrese účtu ----------
+   Na rozdíl od META_UPGRADES (společné pro všechny třídy) roste mistrovství KAŽDÉ třídy zvlášť
+   podle toho, jak moc se s ní hraje. Ukládá se `profile.mastery[classId] = { xp }` — úroveň se vždy
+   ODVOZUJE z nastřádaného xp (viz masteryLevel() v game.js), nikdy neukládá zvlášť, takže nemůže
+   driftnout od skutečného xp. XP může růst neomezeně (prestižní pocit), ale ÚČINEK bonusu je
+   stropovaný na MASTERY_LEVEL_CAP úrovni — nad stropem se dál neroste (viz masteryBonus() v game.js). */
+const MASTERY_LEVEL_CAP = 20;             // strop ÚČINKU bonusu (level i xp mohou růst dál, jen navíc nic nedávají)
+const MASTERY_BONUS_PER_LEVEL = 0.015;    // +1,5 % poškození A +1,5 % max HP dané třídy za úroveň (do stropu = +30 %/+30 %)
+// Kumulativní XP práh pro DOSAŽENÍ úrovně `lvl` (masteryXpToLevel(0)=0). Přírůstek mezi úrovní `l` a `l+1`
+// je (50 + l*40) — tj. každá další úroveň mistrovství stojí o 40 víc xp než ta předchozí. Uzavřený tvar
+// součtu Σ_{l=0}^{lvl-1} (50 + 40l) = 20·lvl² + 30·lvl (ověřeno v test-harness.js).
+function masteryXpToLevel(lvl) {
+  lvl = Math.max(0, lvl | 0);
+  return 20 * lvl * lvl + 30 * lvl;
+}
+
 // Kněz – pasivní sekundární AOE: „Svatá záře" pravidelně pálí nemrtvé kolem něj.
 const PRIEST_NOVA = { dmg: 55, radius: 120, cd: 140 };   // 55 poškození (× svěcené) v okruhu 120 každých ~2,3 s
 const KNIGHT_BLOCK_TIME = 45;       // 0,75 s okno bloku (základ; +štít vylepšení)

@@ -1114,6 +1114,168 @@ code += `
     assert(threw, 'empirický guard: rozhozené per vs. desc MUSÍ shodit assert (jinak by drift čísel prošel nepovšimnut)');
     log('empirický guard ok (rozhozené číslo v desc vs. realita test skutečně shodí)'); }
 
+  // ---- 63) FÁZE 4.3 MISTROVSTVÍ: masteryXpToLevel/masteryLevel — monotónní křivka, správné prahy ----
+  { assert(masteryXpToLevel(0) === 0, 'masteryXpToLevel(0)=0');
+    assert(masteryXpToLevel(1) === 50, 'masteryXpToLevel(1)=50 (přírůstek 50+0*40)');
+    assert(masteryXpToLevel(2) === 140, 'masteryXpToLevel(2)=140 (50+90)');
+    assert(masteryXpToLevel(3) === 270, 'masteryXpToLevel(3)=270 (50+90+130)');
+    for (let l = 0; l < 30; l++) assert(masteryXpToLevel(l + 1) > masteryXpToLevel(l), 'masteryXpToLevel monotónně roste na úrovni ' + l);
+    // masteryLevel odvozuje úroveň z profile.mastery[classId].xp přesně podle prahů
+    profile.mastery = {};
+    profile.mastery.rytir = { xp: 0 }; assert(masteryLevel('rytir') === 0, 'xp=0 -> level 0');
+    profile.mastery.rytir = { xp: 49 }; assert(masteryLevel('rytir') === 0, 'xp=49 (těsně pod prahem 50) -> level 0');
+    profile.mastery.rytir = { xp: 50 }; assert(masteryLevel('rytir') === 1, 'xp=50 (přesně práh) -> level 1');
+    profile.mastery.rytir = { xp: 139 }; assert(masteryLevel('rytir') === 1, 'xp=139 (těsně pod prahem 140) -> level 1');
+    profile.mastery.rytir = { xp: 140 }; assert(masteryLevel('rytir') === 2, 'xp=140 -> level 2');
+    // třída bez záznamu v profile.mastery -> bezpečně level 0 (žádný pád)
+    assert(masteryLevel('lovec') === 0, 'třída bez záznamu v profile.mastery -> level 0 (bezpečné)');
+    profile.mastery = {};
+    log('masteryXpToLevel/masteryLevel křivka ok (monotónní, prahy 0/50/140/270 přesné)'); }
+
+  // ---- 64) FÁZE 4.3 MISTROVSTVÍ: masteryBonus — level 0 neutrální {0,0}, roste lineárně, strop na MASTERY_LEVEL_CAP ----
+  { profile.mastery = {};
+    const b0 = masteryBonus('rytir');
+    assert(b0.dmgPct === 0 && b0.hpPct === 0, 'masteryBonus level 0 = {0,0} (neutralita, žádná regrese)');
+    profile.mastery.rytir = { xp: masteryXpToLevel(5) };
+    const b5 = masteryBonus('rytir');
+    assert(Math.abs(b5.dmgPct - 5 * MASTERY_BONUS_PER_LEVEL) < 1e-9, 'masteryBonus level 5: dmgPct = 5×per přesně (' + b5.dmgPct + ')');
+    assert(Math.abs(b5.hpPct - 5 * MASTERY_BONUS_PER_LEVEL) < 1e-9, 'masteryBonus level 5: hpPct = 5×per přesně (' + b5.hpPct + ')');
+    // strop: úroveň hluboko nad MASTERY_LEVEL_CAP nesmí dát víc bonusu než na stropu
+    profile.mastery.rytir = { xp: masteryXpToLevel(MASTERY_LEVEL_CAP + 15) };
+    assert(masteryLevel('rytir') === MASTERY_LEVEL_CAP + 15, 'level sám o sobě roste i nad strop (prestiž) (' + masteryLevel('rytir') + ')');
+    const bCap = masteryBonus('rytir');
+    const expectedCap = MASTERY_LEVEL_CAP * MASTERY_BONUS_PER_LEVEL;
+    assert(Math.abs(bCap.dmgPct - expectedCap) < 1e-9, 'masteryBonus stropován na MASTERY_LEVEL_CAP úrovni, i když level je vyšší (' + bCap.dmgPct + ' == ' + expectedCap + ')');
+    assert(Math.abs(bCap.hpPct - expectedCap) < 1e-9, 'masteryBonus hpPct stejně stropován (' + bCap.hpPct + ')');
+    profile.mastery = {};
+    log('masteryBonus ok (level0={0,0}, lineární růst, strop na MASTERY_LEVEL_CAP=' + MASTERY_LEVEL_CAP + ')'); }
+
+  // ---- 65) FÁZE 4.3 MISTROVSTVÍ: zisk XP na konci běhu (doGameOver/doVictory) přičte SPRÁVNÉ třídě ----
+  { profile.mastery = {};
+    newRun('lovec'); run.wave = 12; run.score = 3400; run.lives = 0;
+    const expectedGain = masteryXpForRun(run);
+    doGameOver();
+    assert((profile.mastery.lovec && profile.mastery.lovec.xp) === expectedGain, 'doGameOver() přičetl mistrovské XP přesně hrané třídě lovec (' + (profile.mastery.lovec && profile.mastery.lovec.xp) + ' == ' + expectedGain + ')');
+    assert(!profile.mastery.rytir, 'jiná (nehraná) třída zůstává nedotčená po doGameOver()');
+    // druhý běh JINOU třídou musí přičíst JÍ, ne lovci
+    newRun('mag'); run.wave = 5; run.score = 100; run.lives = 0;
+    const gain2 = masteryXpForRun(run);
+    const lovecBefore = profile.mastery.lovec.xp;
+    doGameOver();
+    assert(profile.mastery.mag.xp === gain2, 'doGameOver() druhého běhu přičetl mistrovské XP třídě mag (' + profile.mastery.mag.xp + ' == ' + gain2 + ')');
+    assert(profile.mastery.lovec.xp === lovecBefore, 'mistrovství lovce beze změny po běhu za mag (žádné křížení tříd)');
+    // victory cestou (doVictory) totéž — a kumuluje (nepřepisuje)
+    newRun('lovec'); run.wave = FINAL_WAVE; run.score = 500; run.ascension = 0;
+    const lovecBefore2 = profile.mastery.lovec.xp; const gain3 = masteryXpForRun(run);
+    doVictory();
+    assert(profile.mastery.lovec.xp === lovecBefore2 + gain3, 'doVictory() KUMULUJE mistrovské XP (nepřepisuje) (' + profile.mastery.lovec.xp + ' == ' + (lovecBefore2 + gain3) + ')');
+    profile.mastery = {};
+    log('zisk mistrovského XP na konci běhu ok (doGameOver/doVictory přičítá přesně hrané třídě, kumuluje, nekříží třídy)'); }
+
+  // ---- 65b) FÁZE 4.3 BUGFIX: grantMasteryXp() v co-opu se STEJNOU třídou přičte gain jen JEDNOU (ne 2×) ----
+  { profile.mastery = {};
+    newRun(['rytir', 'rytir']); run.wave = 10; run.score = 1000;
+    const gain = masteryXpForRun(run);
+    assert(gain === 11, 'kontrolní očekávaný gain pro wave 10 / score 1000 je 11 (' + gain + ')');
+    const got = grantMasteryXp();
+    assert(got === gain, 'grantMasteryXp() vrací gain přesně jednou (' + got + ' == ' + gain + ')');
+    assert(profile.mastery.rytir.xp === gain, 'co-op DVA hráči SE STEJNOU třídou rytir: xp přičteno přesně JEDNOU, ne 2× (' + profile.mastery.rytir.xp + ' == ' + gain + ', NE ' + (gain * 2) + ')');
+    profile.mastery = {};
+    // pro jistotu i druhé volání ve stejném běhu (např. přes doGameOver) se chová stejně - žádné zdvojení kvůli počtu hráčů
+    newRun(['rytir', 'rytir']); run.wave = 10; run.score = 1000; run.lives = 0;
+    doGameOver();
+    assert(profile.mastery.rytir.xp === gain, 'doGameOver() v co-opu se stejnou třídou (rytir+rytir) přičte XP jen jednou (' + profile.mastery.rytir.xp + ' == ' + gain + ')');
+    profile.mastery = {};
+    log('BUGFIX co-op stejná třída: grantMasteryXp()/doGameOver() nepřičítá XP dvakrát za jeden běh'); }
+
+  // ---- 65c) FÁZE 4.3 MISTROVSTVÍ: co-op se DVĚMA RŮZNÝMI třídami — každá dostane gain přesně jednou ----
+  { profile.mastery = {};
+    newRun(['rytir', 'lovec']); run.wave = 10; run.score = 1000;
+    const gain = masteryXpForRun(run);
+    grantMasteryXp();
+    assert(profile.mastery.rytir.xp === gain, 'co-op rytir+lovec: rytir dostal gain přesně jednou (' + profile.mastery.rytir.xp + ' == ' + gain + ')');
+    assert(profile.mastery.lovec.xp === gain, 'co-op rytir+lovec: lovec dostal gain přesně jednou (' + profile.mastery.lovec.xp + ' == ' + gain + ')');
+    profile.mastery = {};
+    log('co-op dvě různé třídy: obě dostanou mistrovské XP přesně jednou (žádná ztráta, žádné zdvojení)'); }
+
+  // ---- 66) FÁZE 4.3 MISTROVSTVÍ: aplikace v makePlayer/recalcPerks — vyšší mastery = vyšší baseHp/dmgMul ----
+  { profile.mastery = {};
+    newRun('berserk'); const hp0 = players[0].hpMax; const dmgMul0 = players[0].passive.dmgMul;
+    profile.mastery.berserk = { xp: masteryXpToLevel(10) };   // level 10 = +15 % dmg, +15 % hp
+    newRun('berserk'); const hp1 = players[0].hpMax; const dmgMul1 = players[0].passive.dmgMul;
+    assert(hp1 > hp0, 'vyšší mistrovství třídy -> vyšší baseHp/hpMax (' + hp0 + ' -> ' + hp1 + ')');
+    assert(dmgMul1 > dmgMul0, 'vyšší mistrovství třídy -> vyšší pas.dmgMul (' + dmgMul0.toFixed(4) + ' -> ' + dmgMul1.toFixed(4) + ')');
+    const expectedB = masteryBonus('berserk');
+    assert(Math.abs(dmgMul1 - (dmgMul0 + expectedB.dmgPct)) < 1e-9, 'dmgMul rozdíl přesně odpovídá masteryBonus(berserk).dmgPct (' + expectedB.dmgPct + ')');
+    // jiná (nehraná) třída zůstává level 0 -> žádný vliv
+    profile.mastery = {}; profile.mastery.berserk = { xp: masteryXpToLevel(10) };
+    newRun('mag'); const magP = players[0];
+    assert(magP.passive.dmgMul === 1, 'mag (level 0 mistrovství) má dmgMul přesně 1 (neovlivněn mistrovstvím berserka)');
+    profile.mastery = {};
+    log('aplikace mistrovství v makePlayer/recalcPerks ok (vyšší úroveň -> vyšší baseHp i dmgMul, izolace mezi třídami)'); }
+
+  // ---- 67) FÁZE 4.3 NEUTRALITA: level 0 (žádné mistrovství) hraje IDENTICKY jako dřív (žádná regrese) ----
+  { profile.mastery = {};
+    for (const cid of Object.keys(CLASSES)) assert(masteryLevel(cid) === 0, 'bez mistrovství: masteryLevel(' + cid + ')=0');
+    newRun('rytir'); const p = players[0];
+    const b = CLASSES.rytir.hpMod;
+    assert(p.hpMax === Math.round(120 * b * (1 + metaBonus('hp')) * (1 + 0)), 'bez mistrovství: baseHp přesně jako předtím (bez mastery členu), ' + p.hpMax);
+    assert(p.passive.dmgMul === 1, 'bez mistrovství: dmgMul=1 přesně (neutrální, žádná regrese)');
+    log('neutralita mistrovství level 0 ok (identické chování jako před FÁZÍ 4.3)'); }
+
+  // ---- 68) FÁZE 4.3 BEZPEČNOST: starý profil bez pole mastery nesmí spadnout (migrace přes defaultProfile) ----
+  { const oldProfile = { playerLevel: 3, xp: 50, unlocked: [], souls: 10, meta: {}, settings: { autofire: true, autoaim: true, muted: false, haptics: true } };
+    assert(!('mastery' in oldProfile), 'test předpokládá starý profil BEZ pole mastery');
+    // stejná cesta jako loadProfile() v engine.js (Object.assign(defaultProfile(), p)), přes reálný localStorage klíč
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(oldProfile));
+    const migrated = loadProfile();
+    assert(migrated.playerLevel === 3 && migrated.souls === 10, 'loadProfile() skutečně načetl starý profil ze storage (ne jen default)');
+    assert(migrated.mastery && typeof migrated.mastery === 'object', 'loadProfile() doplní chybějící mastery na {} (Object.assign(defaultProfile(),...))');
+    profile = migrated;
+    let threw = false;
+    try { newRun('rytir'); masteryLevel('rytir'); masteryBonus('rytir'); renderMastery(); renderClassSelect(); }
+    catch (e) { threw = true; log('CHYBA: ' + (e && e.stack)); }
+    assert(!threw, 'starý profil bez mastery: newRun/masteryLevel/masteryBonus/renderMastery/renderClassSelect neházejí výjimku');
+    assert(players[0].passive.dmgMul === 1 && masteryLevel('rytir') === 0, 'migrovaný starý profil: chování identické level 0 (bez pádu, bez regrese)');
+    profile.mastery = {};
+    log('bezpečnost starého profilu bez mastery ok (migrace + žádný pád)'); }
+
+  // ---- 69) FÁZE 4.3 UI: renderMastery() zobrazuje kartu pro každou třídu a čísla PŘESNĚ odpovídají masteryBonus (empirický guard transparentnosti) ----
+  { profile.mastery = {};
+    profile.mastery.knez = { xp: masteryXpToLevel(7) };
+    renderMastery();
+    const html = ovContent.innerHTML;
+    assert(html.includes('Mistrovství tříd'), 'renderMastery() vykreslí nadpis');
+    for (const cid of Object.keys(CLASSES)) assert(html.includes(CLASSES[cid].name), 'renderMastery() obsahuje kartu třídy ' + CLASSES[cid].name);
+    const bKnez = masteryBonus('knez');
+    const dmgStr = (bKnez.dmgPct * 100).toFixed(1);
+    const hpStr = (bKnez.hpPct * 100).toFixed(1);
+    assert(html.includes('+' + dmgStr + ' % poškození'), 'renderMastery(): zobrazené % poškození pro kněze PŘESNĚ odpovídá masteryBonus (' + dmgStr + ')');
+    assert(html.includes('+' + hpStr + ' % max HP'), 'renderMastery(): zobrazené % HP pro kněze PŘESNĚ odpovídá masteryBonus (' + hpStr + ')');
+    assert(html.includes('úroveň <b>7</b>'), 'renderMastery(): zobrazená úroveň kněze = 7 (odpovídá vloženému xp)');
+    // renderClassSelect ukazuje indikátor "Mistr. {lvl}" ze stejné funkce masteryLevel()
+    renderClassSelect();
+    const clsHtml = ovContent.innerHTML;
+    assert(clsHtml.includes('Mistr. 7'), 'renderClassSelect(): karta kněze ukazuje "Mistr. 7" (masteryLevel)');
+    assert(clsHtml.includes('Mistr. 0'), 'renderClassSelect(): třída bez mistrovství ukazuje "Mistr. 0"');
+    profile.mastery = {};
+    log('renderMastery()/renderClassSelect() ok (karta pro každou třídu, čísla přesně == masteryBonus/masteryLevel)'); }
+
+  // ---- 70) FÁZE 4.3 EMPIRICKÝ GUARD: pokud se konstanta MASTERY_BONUS_PER_LEVEL rozejde s tím, co masteryBonus vrací, test SPADNE ----
+  { profile.mastery = {}; profile.mastery.rytir = { xp: masteryXpToLevel(4) };
+    const saved = MASTERY_BONUS_PER_LEVEL;
+    let threw = false;
+    try {
+      const b = masteryBonus('rytir');
+      // simulace driftu: „UI" by očekávalo hodnotu spočtenou z ROZHOZENÉ konstanty, realita (b) je z PŮVODNÍ
+      const fakeExpected = 4 * 0.09;   // úmyslně jiné číslo než skutečný MASTERY_BONUS_PER_LEVEL (0.015)
+      assert(Math.abs(b.dmgPct - fakeExpected) < 1e-9, 'guard: rozhozené očekávané číslo vs. realita musí neshodovat');
+    } catch (e) { threw = true; }
+    assert(threw, 'empirický guard: rozhozené číslo vs. realita MUSÍ shodit assert (jinak by drift čísel prošel nepovšimnut)');
+    assert(MASTERY_BONUS_PER_LEVEL === saved, 'konstanta MASTERY_BONUS_PER_LEVEL nezůstala pozměněná (guard nic natrvalo nemění)');
+    profile.mastery = {};
+    log('empirický guard mistrovství ok (rozhozené číslo vs. realita test skutečně shodí)'); }
+
   console.log('\\n==== TEST RESULTS ====');
   for (const r of results) console.log('  ✓ ' + r);
   console.log('==== ALL PASSED ====');

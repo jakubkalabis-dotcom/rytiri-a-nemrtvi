@@ -494,7 +494,9 @@ function loadProfile() {
   return defaultProfile();
 }
 function defaultProfile() {
-  return { playerLevel: 1, xp: 0, unlocked: [], souls: 0, meta: {}, bestAscension: 0, settings: { autofire: true, autoaim: true, muted: false, haptics: true } };
+  // mastery: { classId: { xp } } — mistrovství tříd (FÁZE 4.3). Úroveň se ODVOZUJE z xp (viz
+  // masteryXpToLevel/masteryLevel v data.js/game.js), nikde se neukládá zvlášť, aby nemohla driftnout.
+  return { playerLevel: 1, xp: 0, unlocked: [], souls: 0, meta: {}, mastery: {}, bestAscension: 0, settings: { autofire: true, autoaim: true, muted: false, haptics: true } };
 }
 function saveProfile(p) { try { localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); } catch {} }
 function loadScores() { try { return JSON.parse(localStorage.getItem(SCORES_KEY)) || []; } catch { return []; } }
